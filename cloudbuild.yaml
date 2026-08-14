@@ -1,0 +1,91 @@
+# ════════════════════════════════════════════════════════════════════
+# IMSE EASY EMS — Google Cloud Build pipeline
+# ────────────────────────────────────────────────────────────────────
+# Triggered by GitHub push to `main`. Steps:
+#   1. Build the backend container
+#   2. Push to Artifact Registry
+#   3. Run Prisma migrations against Cloud SQL
+#   4. Deploy to Cloud Run in asia-south1 (Mumbai)
+#
+# Prereqs (one-time in the Google Cloud console):
+#   - Cloud SQL instance created:   ems-prod   (Postgres 16, db-f1-micro)
+#   - Artifact Registry repo:       ems-images (Docker, asia-south1)
+#   - Service account:              ems-runner@PROJECT.iam.gserviceaccount.com
+#     with roles: Cloud Run Invoker, Cloud SQL Client, Secret Accessor
+#   - Secret:                       DATABASE_URL   (Secret Manager)
+#   - Cloud Build trigger connected to the GitHub repo
+# ════════════════════════════════════════════════════════════════════
+
+substitutions:
+  _REGION:       asia-south1
+  _REPO:         ems-images
+  _SERVICE:      ems-api
+  _SQL_INSTANCE: PROJECT_ID:asia-south1:ems-prod   # override in trigger UI
+
+steps:
+  # 1. Build image
+  - name: gcr.io/cloud-builders/docker
+    id: build
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:${SHORT_SHA}
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:latest
+      - -f
+      - backend/Dockerfile
+      - .
+
+  # 2. Push image
+  - name: gcr.io/cloud-builders/docker
+    id: push
+    args:
+      - push
+      - --all-tags
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}
+
+  # 3. Run Prisma migrations (uses the same image, one-off command)
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: migrate
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        gcloud run jobs deploy ems-migrate \
+          --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:${SHORT_SHA} \
+          --region=${_REGION} \
+          --add-cloudsql-instances=${_SQL_INSTANCE} \
+          --set-secrets=DATABASE_URL=DATABASE_URL:latest \
+          --command="npx" --args="prisma,migrate,deploy" \
+          --max-retries=0 \
+          --task-timeout=300 \
+          || true
+        gcloud run jobs execute ems-migrate --region=${_REGION} --wait
+
+  # 4. Deploy service
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: deploy
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:${SHORT_SHA}
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --add-cloudsql-instances=${_SQL_INSTANCE}
+      - --set-secrets=DATABASE_URL=DATABASE_URL:latest
+      - --set-env-vars=NODE_ENV=production,GOOGLE_OAUTH_CLIENT_ID=807569986194-feca4li2k0t96tbbutlpu2ko64obe95k.apps.googleusercontent.com,GOOGLE_WORKSPACE_DOMAIN=imse.org.in,CORS_ORIGIN=https://easwaranps.github.io
+      - --min-instances=0
+      - --max-instances=5
+      - --memory=512Mi
+      - --cpu=1
+      - --timeout=60
+
+images:
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:${SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:latest
+
+options:
+  logging: CLOUD_LOGGING_ONLY
