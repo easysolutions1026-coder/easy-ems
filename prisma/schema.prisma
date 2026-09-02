@@ -1,32 +1,14 @@
-// ════════════════════════════════════════════════════════════════════
-// IMSE EASY EMS — Prisma Schema (Phase 0)
-// ════════════════════════════════════════════════════════════════════
-//
-// STRATEGY: "hybrid JSONB + indexed columns"
-//
-//   For each of the 24 EASY EMS collections we have a Postgres table:
-//     - Small set of INDEXED columns for common queries
-//       (dates, statuses, foreign keys, IDs)
-//     - A `data` JSONB column holding the full record verbatim
-//
-//   Why this shape:
-//     1. Phase-0 migration is a 1:1 JSON→row port — no field mapping needed
-//     2. All existing code paths in index.html keep working via api-shim.js,
-//        which returns full record objects (same shape as the old JSON)
-//     3. Postgres GIN indexes on `data` allow fast querying of any nested
-//        field once we identify hot paths (Phase 2 optimizations)
-//     4. Adding proper column-mapped fields later is non-breaking
-//
-//   Every table also carries the audit/concurrency stamps that the current
-//   app relies on:
-//     - createdAt, createdBy, updatedAt, lastModifiedBy
-//     - version (integer, incremented on every save — used for optimistic
-//       locking to replace the current _locks.json file)
-//
-// ════════════════════════════════════════════════════════════════════
+// ====================================================================
+// IMSE EASY EMS - Prisma Schema (Phase 0)
+// ====================================================================
+// Strategy: hybrid JSONB + indexed columns.
+// Each table has a data JSONB column plus a few indexed scalar columns
+// for common queries. Version column enables optimistic locking.
+// ====================================================================
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
@@ -34,27 +16,22 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ════════════════════════════════════════════════════════════════════
-// AUTH & AUDIT
-// ════════════════════════════════════════════════════════════════════
+// --- AUTH & AUDIT ---------------------------------------------------
 
-// Mirrors the current appUsers.json — Google email + hashed PIN + role.
-// The existing PIN-based login logic in index.html continues to work
-// unchanged; the shim just routes verification through the backend.
 model AppUser {
-  id             String   @id @default(cuid())
-  userID         String   @unique              // legacy ID from JSON (e.g. "U001")
-  email          String   @unique
+  id             String    @id @default(cuid())
+  userID         String    @unique
+  email          String    @unique
   name           String
-  role           String                        // Admin | Manager | ViewOnly | FieldTech
-  pinHash        String?                       // SHA-256, 64 hex chars
+  role           String
+  pinHash        String?
   pinExpiry      DateTime?
-  pinPeriodDays  Int      @default(30)
-  active         Boolean  @default(true)
-  permissions    Json?                         // { canApprovePR: true, ... }
-  data           Json                          // full legacy record
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  pinPeriodDays  Int       @default(30)
+  active         Boolean   @default(true)
+  permissions    Json?
+  data           Json
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   @@index([email])
   @@index([role])
@@ -65,9 +42,9 @@ model AuditLog {
   ts            DateTime @default(now())
   userEmail     String?
   userName      String?
-  action        String                          // "SAVE" | "DELETE" | "LOGIN" | ...
-  collection    String?                         // e.g. "transactions"
-  recordId      String?                         // legacy record ID (txnID, exID, etc.)
+  action        String
+  collection    String?
+  recordId      String?
   before        Json?
   after         Json?
   ip            String?
@@ -77,55 +54,49 @@ model AuditLog {
   @@index([collection, recordId])
 }
 
-// ════════════════════════════════════════════════════════════════════
-// SETTINGS — key/value, single-tenant for now
-// ════════════════════════════════════════════════════════════════════
+// --- SETTINGS -------------------------------------------------------
 
 model Setting {
-  key       String   @id                       // e.g. "companyProfile", "statutoryRates"
+  key       String   @id
   data      Json
   updatedAt DateTime @updatedAt
   updatedBy String?
 }
 
-// ════════════════════════════════════════════════════════════════════
-// PARTIES (customers / vendors / suppliers)
-// ════════════════════════════════════════════════════════════════════
+// --- PARTIES --------------------------------------------------------
 
 model Party {
-  id         String   @id @default(cuid())
-  partyID    String   @unique                  // legacy ID
-  name       String
-  gstin      String?
-  partyType  String?                           // Customer | Vendor | Both
-  active     Boolean  @default(true)
-  data       Json                              // full legacy record
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  createdBy  String?
+  id             String   @id @default(cuid())
+  partyID        String   @unique
+  name           String
+  gstin          String?
+  partyType      String?
+  active         Boolean  @default(true)
+  data           Json
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  createdBy      String?
   lastModifiedBy String?
-  version    Int      @default(1)
+  version        Int      @default(1)
 
   @@index([name])
   @@index([gstin])
   @@index([partyType])
 }
 
-// ════════════════════════════════════════════════════════════════════
-// CHART OF ACCOUNTS / BANK / RECONCILIATION
-// ════════════════════════════════════════════════════════════════════
+// --- CHART OF ACCOUNTS / BANK ---------------------------------------
 
 model ChartOfAccount {
-  id            String   @id @default(cuid())
-  accountCode   String   @unique
-  accountName   String
-  accountType   String?                        // Asset | Liability | Income | Expense | Equity
-  parentCode    String?
-  active        Boolean  @default(true)
-  data          Json
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  version       Int      @default(1)
+  id           String   @id @default(cuid())
+  accountCode  String   @unique
+  accountName  String
+  accountType  String?
+  parentCode   String?
+  active       Boolean  @default(true)
+  data         Json
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  version      Int      @default(1)
 
   @@index([accountType])
   @@index([parentCode])
@@ -147,73 +118,66 @@ model BankAccount {
 }
 
 model BankReconciliation {
-  id            String   @id @default(cuid())
-  reconID       String   @unique
-  accountID     String
-  periodMonth   Int
-  periodYear    Int
-  openingBal    Decimal? @db.Decimal(15, 2)
-  closingBal    Decimal? @db.Decimal(15, 2)
-  status        String?                        // Draft | Finalized
-  data          Json
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  version       Int      @default(1)
+  id           String   @id @default(cuid())
+  reconID      String   @unique
+  accountID    String
+  periodMonth  Int
+  periodYear   Int
+  openingBal   Decimal? @db.Decimal(15, 2)
+  closingBal   Decimal? @db.Decimal(15, 2)
+  status       String?
+  data         Json
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  version      Int      @default(1)
 
   @@index([accountID, periodYear, periodMonth])
   @@index([status])
 }
 
-// ════════════════════════════════════════════════════════════════════
-// STAFF (with attendance embedded as JSONB)
-// ════════════════════════════════════════════════════════════════════
+// --- STAFF ----------------------------------------------------------
 
-// Attendance is stored inside `data.attendance[]` since the current app
-// treats each staff record as one atomic JSON blob. A future phase can
-// promote attendance to its own table for month/date range queries.
 model Staff {
-  id            String   @id @default(cuid())
-  staffID       String   @unique
-  name          String
-  designation   String?
-  staffType     String?                        // Office | Technician | Admin
-  status        String   @default("Active")   // Active | Inactive
-  email         String?
-  phone         String?
-  joinDate      DateTime?
-  data          Json                          // includes attendance[], docs[], salary etc.
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  createdBy     String?
+  id             String    @id @default(cuid())
+  staffID        String    @unique
+  name           String
+  designation    String?
+  staffType      String?
+  status         String    @default("Active")
+  email          String?
+  phone          String?
+  joinDate       DateTime?
+  data           Json
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
   lastModifiedBy String?
-  version       Int      @default(1)
+  version        Int       @default(1)
 
   @@index([status])
   @@index([staffType])
   @@index([name])
 }
 
-// ════════════════════════════════════════════════════════════════════
-// TRANSACTIONS (Quotations, Invoices, Credit Notes)
-// ════════════════════════════════════════════════════════════════════
+// --- TRANSACTIONS ---------------------------------------------------
 
 model Transaction {
-  id            String   @id @default(cuid())
-  txnID         String   @unique               // legacy ID (e.g. "INV-2627-001")
-  txnCategory   String                         // Quotation | Invoice | CreditNote | ...
-  txnDate       DateTime?
-  partyID       String?
-  partyName     String?
-  totalAmount   Decimal? @db.Decimal(15, 2)
-  status        String?                        // Draft | Sent | Paid | Partial | Cancelled
-  revisionNo    Int      @default(0)
-  fiscalYear    String?                        // "2627" etc.
-  data          Json                           // items[], gstBreakup, revisionHistory, etc.
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  createdBy     String?
+  id             String    @id @default(cuid())
+  txnID          String    @unique
+  txnCategory    String
+  txnDate        DateTime?
+  partyID        String?
+  partyName      String?
+  totalAmount    Decimal?  @db.Decimal(15, 2)
+  status         String?
+  revisionNo     Int       @default(0)
+  fiscalYear     String?
+  data           Json
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
   lastModifiedBy String?
-  version       Int      @default(1)
+  version        Int       @default(1)
 
   @@index([txnCategory, txnDate])
   @@index([partyID])
@@ -221,29 +185,27 @@ model Transaction {
   @@index([fiscalYear])
 }
 
-// ════════════════════════════════════════════════════════════════════
-// EXPENSES / BILLS
-// ════════════════════════════════════════════════════════════════════
+// --- EXPENSES -------------------------------------------------------
 
 model Expense {
-  id            String   @id @default(cuid())
-  exID          String   @unique               // legacy ID (e.g. "EX-2627-042")
-  billType      String?                        // Supplier/Subcontractor | Statutory | Salary | InterBankTransfer
-  billDate      DateTime?
-  partyID       String?
-  partyName     String?
-  totalAmount   Decimal? @db.Decimal(15, 2)
-  balanceAmount Decimal? @db.Decimal(15, 2)   // outstanding after partial payments
-  status        String?                        // Unpaid | Partial | Paid
-  gstClaimable  Boolean  @default(false)
-  tdsApplicable Boolean  @default(false)
-  fiscalYear    String?
-  data          Json                           // items, GST breakup, attachments[], etc.
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  createdBy     String?
+  id             String    @id @default(cuid())
+  exID           String    @unique
+  billType       String?
+  billDate       DateTime?
+  partyID        String?
+  partyName      String?
+  totalAmount    Decimal?  @db.Decimal(15, 2)
+  balanceAmount  Decimal?  @db.Decimal(15, 2)
+  status         String?
+  gstClaimable   Boolean   @default(false)
+  tdsApplicable  Boolean   @default(false)
+  fiscalYear     String?
+  data           Json
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
   lastModifiedBy String?
-  version       Int      @default(1)
+  version        Int       @default(1)
 
   @@index([billType, billDate])
   @@index([partyID])
@@ -252,60 +214,58 @@ model Expense {
 }
 
 model DirectorExpense {
-  id            String   @id @default(cuid())
-  deID          String   @unique
+  id            String    @id @default(cuid())
+  deID          String    @unique
   directorName  String?
   expenseDate   DateTime?
-  amount        Decimal? @db.Decimal(15, 2)
-  reimbursed    Boolean  @default(false)
+  amount        Decimal?  @db.Decimal(15, 2)
+  reimbursed    Boolean   @default(false)
   reimburseDate DateTime?
   data          Json
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  version       Int      @default(1)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  version       Int       @default(1)
 
   @@index([directorName, expenseDate])
   @@index([reimbursed])
 }
 
-// ════════════════════════════════════════════════════════════════════
-// PAYMENT REQUESTS + FUND POOLS + FUND REQUESTS
-// ════════════════════════════════════════════════════════════════════
+// --- PAYMENT REQUESTS + FUND POOLS ----------------------------------
 
 model PaymentRequest {
-  id            String   @id @default(cuid())
-  prID          String   @unique               // PR001, PR001-R1, etc.
-  prDate        DateTime?
-  billIDs       Json?                          // array of exID references
-  requestedAmt  Decimal? @db.Decimal(15, 2)
-  approvedAmt   Decimal? @db.Decimal(15, 2)
-  disbursedAmt  Decimal? @db.Decimal(15, 2)
-  status        String?                        // Pending | Approved | Disbursed | Rejected | Revised
-  revisionNo    Int      @default(0)
-  fiscalYear    String?
-  data          Json
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  createdBy     String?
+  id             String    @id @default(cuid())
+  prID           String    @unique
+  prDate         DateTime?
+  billIDs        Json?
+  requestedAmt   Decimal?  @db.Decimal(15, 2)
+  approvedAmt    Decimal?  @db.Decimal(15, 2)
+  disbursedAmt   Decimal?  @db.Decimal(15, 2)
+  status         String?
+  revisionNo     Int       @default(0)
+  fiscalYear     String?
+  data           Json
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
   lastModifiedBy String?
-  version       Int      @default(1)
+  version        Int       @default(1)
 
   @@index([status, prDate])
   @@index([fiscalYear])
 }
 
 model FundRequest {
-  id            String   @id @default(cuid())
-  frID          String   @unique
+  id            String    @id @default(cuid())
+  frID          String    @unique
   frDate        DateTime?
   technicianID  String?
-  amount        Decimal? @db.Decimal(15, 2)
-  status        String?                        // Pending | Approved | Disbursed | Rejected
-  poolID        String?                        // linked fund pool
+  amount        Decimal?  @db.Decimal(15, 2)
+  status        String?
+  poolID        String?
   data          Json
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  version       Int      @default(1)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  version       Int       @default(1)
 
   @@index([technicianID, frDate])
   @@index([status])
@@ -313,246 +273,225 @@ model FundRequest {
 }
 
 model FundPool {
-  id            String   @id @default(cuid())
-  poolID        String   @unique
+  id            String    @id @default(cuid())
+  poolID        String    @unique
   technicianID  String?
   openedDate    DateTime?
   closedDate    DateTime?
-  openingAmt    Decimal? @db.Decimal(15, 2)
-  spentAmt      Decimal? @db.Decimal(15, 2)
-  balanceAmt    Decimal? @db.Decimal(15, 2)
-  status        String?                        // Active | Closed
-  data          Json                           // FIFO allocations, linked expenses
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  version       Int      @default(1)
+  openingAmt    Decimal?  @db.Decimal(15, 2)
+  spentAmt      Decimal?  @db.Decimal(15, 2)
+  balanceAmt    Decimal?  @db.Decimal(15, 2)
+  status        String?
+  data          Json
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  version       Int       @default(1)
 
   @@index([technicianID, status])
   @@index([status])
 }
 
-// ════════════════════════════════════════════════════════════════════
-// AR (Accounts Receivable)
-// ════════════════════════════════════════════════════════════════════
+// --- AR INVOICES ----------------------------------------------------
 
 model ArInvoice {
-  id            String   @id @default(cuid())
-  arID          String   @unique
+  id            String    @id @default(cuid())
+  arID          String    @unique
   invoiceNo     String?
   invoiceDate   DateTime?
   partyID       String?
   partyName     String?
-  invoiceAmt    Decimal? @db.Decimal(15, 2)
-  receivedAmt   Decimal? @db.Decimal(15, 2)
-  balanceAmt    Decimal? @db.Decimal(15, 2)
-  ageDays       Int?                           // computed on read; kept for indexing
-  status        String?                        // Open | Partial | Closed | Written-Off
-  data          Json                           // follow-up log[], notes, etc.
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  version       Int      @default(1)
+  invoiceAmt    Decimal?  @db.Decimal(15, 2)
+  receivedAmt   Decimal?  @db.Decimal(15, 2)
+  balanceAmt    Decimal?  @db.Decimal(15, 2)
+  ageDays       Int?
+  status        String?
+  data          Json
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  version       Int       @default(1)
 
   @@index([partyID])
   @@index([status, invoiceDate])
 }
 
-// ════════════════════════════════════════════════════════════════════
-// PROJECT EXPENSES + WORK LOGS (field app)
-// ════════════════════════════════════════════════════════════════════
+// --- PROJECT EXPENSES + WORK LOGS -----------------------------------
 
 model ProjectExpense {
-  id            String   @id @default(cuid())
-  peID          String   @unique
-  peDate        DateTime?
-  technicianID  String?
-  projectRef    String?
-  category      String?                        // Food | Travel | Lodging | Misc
-  amount        Decimal? @db.Decimal(15, 2)
-  poolID        String?                        // linked fund pool for FIFO
-  data          Json                           // attachments (Drive file IDs), notes
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  createdBy     String?
+  id             String    @id @default(cuid())
+  peID           String    @unique
+  peDate         DateTime?
+  technicianID   String?
+  projectRef     String?
+  category       String?
+  amount         Decimal?  @db.Decimal(15, 2)
+  poolID         String?
+  data           Json
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
   lastModifiedBy String?
-  version       Int      @default(1)
+  version        Int       @default(1)
 
   @@index([technicianID, peDate])
   @@index([projectRef])
   @@index([poolID])
 }
 
-// Work logs contain nested dailyEntries[]. Kept as JSONB for Phase 0.
-// The field app treats each dailyEntry as its own lock unit — that logic
-// stays in the client and is preserved by the `version` column plus a
-// finer-grained sub-version array inside `data.dailyEntries`.
 model WorkLog {
-  id            String   @id @default(cuid())
-  wlID          String   @unique
-  technicianID  String?
-  projectRef    String?
-  weekStartDate DateTime?
-  status        String?                        // Draft | Submitted | Approved
-  data          Json                           // dailyEntries[], each with photos[]
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  createdBy     String?
+  id             String    @id @default(cuid())
+  wlID           String    @unique
+  technicianID   String?
+  projectRef     String?
+  weekStartDate  DateTime?
+  status         String?
+  data           Json
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
   lastModifiedBy String?
-  version       Int      @default(1)
+  version        Int       @default(1)
 
   @@index([technicianID, weekStartDate])
   @@index([projectRef])
   @@index([status])
 }
 
-// ════════════════════════════════════════════════════════════════════
-// PAYROLL
-// ════════════════════════════════════════════════════════════════════
+// --- PAYROLL --------------------------------------------------------
 
 model Payslip {
-  id            String   @id @default(cuid())
-  payslipID     String   @unique
-  staffID       String
-  periodMonth   Int
-  periodYear    Int
-  gross         Decimal? @db.Decimal(15, 2)
-  net           Decimal? @db.Decimal(15, 2)
-  pfAmt         Decimal? @db.Decimal(15, 2)
-  esicAmt       Decimal? @db.Decimal(15, 2)
-  ptAmt         Decimal? @db.Decimal(15, 2)
-  tdsAmt        Decimal? @db.Decimal(15, 2)
-  status        String?                        // Draft | Approved | Paid
-  approvedAt    DateTime?
-  approvedBy    String?
-  data          Json                           // full computation breakdown
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  version       Int      @default(1)
+  id           String    @id @default(cuid())
+  payslipID    String    @unique
+  staffID      String
+  periodMonth  Int
+  periodYear   Int
+  gross        Decimal?  @db.Decimal(15, 2)
+  net          Decimal?  @db.Decimal(15, 2)
+  pfAmt        Decimal?  @db.Decimal(15, 2)
+  esicAmt      Decimal?  @db.Decimal(15, 2)
+  ptAmt        Decimal?  @db.Decimal(15, 2)
+  tdsAmt       Decimal?  @db.Decimal(15, 2)
+  status       String?
+  approvedAt   DateTime?
+  approvedBy   String?
+  data         Json
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  version      Int       @default(1)
 
   @@unique([staffID, periodYear, periodMonth])
   @@index([periodYear, periodMonth])
   @@index([status])
 }
 
-// ════════════════════════════════════════════════════════════════════
-// PETTY CASH
-// ════════════════════════════════════════════════════════════════════
+// --- PETTY CASH -----------------------------------------------------
 
 model PettyCashOffice {
-  id              String   @id @default(cuid())
-  officeID        String   @unique
-  officeName      String
+  id               String   @id @default(cuid())
+  officeID         String   @unique
+  officeName       String
   custodianStaffID String?
-  imprestLimit    Decimal? @db.Decimal(15, 2)
-  currentBalance  Decimal? @db.Decimal(15, 2)
-  active          Boolean  @default(true)
-  data            Json
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  version         Int      @default(1)
+  imprestLimit     Decimal? @db.Decimal(15, 2)
+  currentBalance   Decimal? @db.Decimal(15, 2)
+  active           Boolean  @default(true)
+  data             Json
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  version          Int      @default(1)
 
   @@index([active])
 }
 
 model PettyCashTransaction {
-  id            String   @id @default(cuid())
-  txnID         String   @unique
-  officeID      String
-  txnType       String                          // Reimbursement | Expense | Recoupment | ...
-  txnDate       DateTime?
-  amount        Decimal? @db.Decimal(15, 2)
-  category      String?
-  data          Json                            // attachments[], notes
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  version       Int      @default(1)
+  id        String    @id @default(cuid())
+  txnID     String    @unique
+  officeID  String
+  txnType   String
+  txnDate   DateTime?
+  amount    Decimal?  @db.Decimal(15, 2)
+  category  String?
+  data      Json
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  version   Int       @default(1)
 
   @@index([officeID, txnDate])
   @@index([txnType])
 }
 
 model PettyCashStatement {
-  id            String   @id @default(cuid())
-  stmtID        String   @unique
+  id            String    @id @default(cuid())
+  stmtID        String    @unique
   officeID      String
   periodMonth   Int
   periodYear    Int
   verifiedBy    String?
   verifiedAt    DateTime?
-  postedToTally Boolean  @default(false)
+  postedToTally Boolean   @default(false)
   data          Json
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  version       Int      @default(1)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  version       Int       @default(1)
 
   @@unique([officeID, periodYear, periodMonth])
 }
 
-// ════════════════════════════════════════════════════════════════════
-// GST / COMPLIANCE
-// ════════════════════════════════════════════════════════════════════
+// --- GST / COMPLIANCE -----------------------------------------------
 
 model GstCashLedgerSnapshot {
-  id            String   @id @default(cuid())
-  snapshotID    String   @unique
+  id            String    @id @default(cuid())
+  snapshotID    String    @unique
   snapshotDate  DateTime?
   periodMonth   Int?
   periodYear    Int?
-  data          Json                            // full ledger breakdown per head
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  version       Int      @default(1)
+  data          Json
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  version       Int       @default(1)
 
   @@index([periodYear, periodMonth])
 }
 
-// ════════════════════════════════════════════════════════════════════
-// COMPANY DOCUMENTS (registrations, licences, insurance, certificates)
-// The Daily Activity script flags these for renewal reminders.
-// ════════════════════════════════════════════════════════════════════
-
 model CompanyDocument {
-  id                        String    @id @default(cuid())
-  docID                     String    @unique
-  docName                   String
-  docCategory               String?                 // Registration | Licence | Insurance | Certificate
-  certNo                    String?
-  issuer                    String?
-  holderType                String?                 // Company | Staff
-  holderName                String?
-  issueDate                 DateTime?
-  expiryDate                DateTime?
-  isLifetime                Boolean   @default(false)
-  renewalReminderAcknowledged Boolean @default(false)
-  data                      Json                    // attachments[] (Drive fileIds), notes
-  createdAt                 DateTime  @default(now())
-  updatedAt                 DateTime  @updatedAt
-  version                   Int       @default(1)
+  id                          String    @id @default(cuid())
+  docID                       String    @unique
+  docName                     String
+  docCategory                 String?
+  certNo                      String?
+  issuer                      String?
+  holderType                  String?
+  holderName                  String?
+  issueDate                   DateTime?
+  expiryDate                  DateTime?
+  isLifetime                  Boolean   @default(false)
+  renewalReminderAcknowledged Boolean   @default(false)
+  data                        Json
+  createdAt                   DateTime  @default(now())
+  updatedAt                   DateTime  @updatedAt
+  version                     Int       @default(1)
 
   @@index([expiryDate])
   @@index([docCategory])
   @@index([holderType, holderName])
 }
 
-// ════════════════════════════════════════════════════════════════════
-// SYSTEM — sync state + change events (used in Phase 2 for SSE + Sheets)
-// ════════════════════════════════════════════════════════════════════
+// --- SYSTEM ---------------------------------------------------------
 
 model SyncState {
-  key           String   @id                    // e.g. "sheets:transactions"
-  lastSyncedAt  DateTime?
-  lastSyncedId  String?
-  status        String?                         // idle | syncing | error
-  errorMsg      String?
-  updatedAt     DateTime @updatedAt
+  key          String    @id
+  lastSyncedAt DateTime?
+  lastSyncedId String?
+  status       String?
+  errorMsg     String?
+  updatedAt    DateTime  @updatedAt
 }
 
 model ChangeEvent {
-  id            BigInt   @id @default(autoincrement())
-  ts            DateTime @default(now())
-  collection    String                          // e.g. "transactions"
-  recordId      String
-  operation     String                          // INSERT | UPDATE | DELETE
-  userEmail     String?
+  id         BigInt   @id @default(autoincrement())
+  ts         DateTime @default(now())
+  collection String
+  recordId   String
+  operation  String
+  userEmail  String?
 
   @@index([collection, ts])
   @@index([ts])
