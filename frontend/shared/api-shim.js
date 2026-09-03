@@ -1,13 +1,13 @@
-/* ════════════════════════════════════════════════════════════════════
- * IMSE EASY EMS — API Shim (Phase 0)
- * ────────────────────────────────────────────────────────────────────
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+ * IMSE EASY EMS â€” API Shim (Phase 0)
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *
  * This shim lets the EXISTING index.html and field_app.html talk to
  * the new Postgres-backed REST API without changing any of the app's
  * 40,000+ lines of business logic.
  *
  * How it works
- * ────────────
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *   The current app calls four Drive functions:
  *     - loadFileFromDrive(fileName)   [index.html]
  *     - saveFileToDrive(fileName, d)  [index.html]
@@ -18,12 +18,12 @@
  *   invocation the shim intercepts the call and routes it to
  *   /api/data/:collection instead of Drive.
  *
- *   For field_app.html, we map file IDs → collection names using a
+ *   For field_app.html, we map file IDs â†’ collection names using a
  *   lookup table (populated on first sign-in from the app's file-ID
  *   cache) so `readFile('abc123')` still works.
  *
  * How to enable
- * ─────────────
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *   Include this ONE line in the <head> of both HTML files, after the
  *   Google API scripts and after your existing app code has defined
  *   its four Drive functions. In practice, add this at the very end
@@ -37,22 +37,22 @@
  *     <script src="/shim/api-shim.js"></script>
  *
  * How to disable (fallback to Drive)
- * ───────────────────────────────────
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *   Simply remove the <script> tag. The existing Drive code path is
  *   untouched. No data migration required to revert.
  *
  * Rollout strategy (Phase 1)
- * ──────────────────────────
+ * â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
  *   Toggle via a query string:
- *     - https://your-app/?backend=drive    → old behavior (default while testing)
- *     - https://your-app/?backend=api      → new backend
+ *     - https://your-app/?backend=drive    â†’ old behavior (default while testing)
+ *     - https://your-app/?backend=api      â†’ new backend
  *   This lets you flip individual users over gradually.
- * ════════════════════════════════════════════════════════════════════ */
+ * â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 (function () {
   'use strict';
 
-  // ── Configuration ──────────────────────────────────────────────
+  // â”€â”€ Configuration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const DEFAULTS = {
     // Backend URL. In Cloud Run production this is your ems-api.imse.in.
@@ -69,11 +69,11 @@
   const mode = qs.get('backend') || cfg.defaultMode;
 
   if (mode !== 'api') {
-    console.info('[EMS-shim] backend=drive — shim inactive');
+    console.info('[EMS-shim] backend=drive â€” shim inactive');
     return;
   }
 
-  // ── File name → collection mapping ─────────────────────────────
+  // â”€â”€ File name â†’ collection mapping â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   //
   // Maps the legacy Drive filenames used throughout the app to the
   // REST collection names on the backend.
@@ -102,10 +102,10 @@
     'gstCashLedgerSnapshots.json':'gstCashLedgerSnapshots',
     'companyDocuments.json':      'companyDocuments',
     'directorExpenses.json':      'directorExpenses',
-    '_locks.json':                null, // handled specially — no-op on the backend
+    '_locks.json':                null, // handled specially â€” no-op on the backend
   };
 
-  // File-ID → collection mapping for field_app.html.
+  // File-ID â†’ collection mapping for field_app.html.
   // Populated on first successful call. Persists to localStorage.
   const FILEID_MAP_KEY = 'ems_shim_fileid_map_v1';
   let fileIdToCollection = {};
@@ -118,15 +118,22 @@
     catch (_) {}
   }
 
-  // ── HTTP helpers ───────────────────────────────────────────────
+  // â”€â”€ HTTP helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   function getAccessToken() {
-    // Both apps store the Google OAuth access token in a module-level
-    // `accessToken` variable. Grab it via the app's own function if we
-    // can, otherwise fall back to window scan.
-    if (typeof window.accessToken === 'string' && window.accessToken) return window.accessToken;
-    // As a last resort, look for it on the app's gapi.client
-    if (window.gapi?.client?.getToken?.()?.access_token) return window.gapi.client.getToken().access_token;
+    // Try multiple locations - the token might be:
+    //  1. On window.accessToken (rare)
+    //  2. On gapi.client.getToken().access_token (Google Identity Services)
+    //  3. Inside the app's closure - accessible via window.google.accounts.oauth2 token
+    if (window.gapi?.client?.getToken?.()?.access_token) {
+      return window.gapi.client.getToken().access_token;
+    }
+    if (typeof window.accessToken === 'string' && window.accessToken) {
+      return window.accessToken;
+    }
+    // Sometimes stored under different names in the app
+    if (window._accessToken) return window._accessToken;
+    if (window.authToken) return window.authToken;
     return null;
   }
 
@@ -145,7 +152,7 @@
     const res = await fetch(url, { method, headers, body: bodyStr });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      throw new Error(`EMS-shim ${method} ${path} → ${res.status}: ${text.slice(0, 300)}`);
+      throw new Error(`EMS-shim ${method} ${path} â†’ ${res.status}: ${text.slice(0, 300)}`);
     }
     // Some endpoints return no body
     const ct = res.headers.get('content-type') || '';
@@ -155,7 +162,7 @@
 
   function log(...args) { if (cfg.debug) console.log('[EMS-shim]', ...args); }
 
-  // ── Interception: index.html ───────────────────────────────────
+  // â”€â”€ Interception: index.html â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   function patchIndexApp() {
     if (typeof window.loadFileFromDrive !== 'function' ||
@@ -170,16 +177,16 @@
     window.loadFileFromDrive = async function(fileName) {
       const collection = FILE_TO_COLLECTION[fileName];
       if (collection === null) {
-        // _locks.json — no-op, return empty object (concurrency handled server-side)
+        // _locks.json â€” no-op, return empty object (concurrency handled server-side)
         log('load(no-op)', fileName);
         return {};
       }
       if (!collection) {
-        log('load(passthrough → Drive)', fileName);
+        log('load(passthrough â†’ Drive)', fileName);
         return _origLoad(fileName);
       }
       try {
-        log('load →', collection);
+        log('load â†’', collection);
         const data = await apiCall('GET', `/api/data/${collection}`);
         return data;
       } catch (err) {
@@ -195,11 +202,11 @@
         return { id: 'noop', modifiedTime: new Date().toISOString() };
       }
       if (!collection) {
-        log('save(passthrough → Drive)', fileName);
+        log('save(passthrough â†’ Drive)', fileName);
         return _origSave(fileName, fileData);
       }
       try {
-        log('save →', collection, `(${Array.isArray(fileData) ? fileData.length : '1'} rec)`);
+        log('save â†’', collection, `(${Array.isArray(fileData) ? fileData.length : '1'} rec)`);
         await apiCall('POST', `/api/data/${collection}`, fileData);
         return { id: collection, modifiedTime: new Date().toISOString(), size: 0 };
       } catch (err) {
@@ -208,11 +215,11 @@
       }
     };
 
-    console.info('[EMS-shim] index.html patched — Drive calls now route to /api/data/*');
+    console.info('[EMS-shim] index.html patched â€” Drive calls now route to /api/data/*');
     return true;
   }
 
-  // ── Interception: field_app.html ───────────────────────────────
+  // â”€â”€ Interception: field_app.html â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   function patchFieldApp() {
     if (typeof window.readFile  !== 'function' ||
@@ -242,11 +249,11 @@
       seedFromFileIDs();
       const collection = fileIdToCollection[fileId];
       if (!collection) {
-        log('readFile(passthrough → Drive)', fileId);
+        log('readFile(passthrough â†’ Drive)', fileId);
         return _origRead(fileId);
       }
       try {
-        log('readFile →', collection);
+        log('readFile â†’', collection);
         return await apiCall('GET', `/api/data/${collection}`);
       } catch (err) {
         console.error(`[EMS-shim] readFile ${collection} failed, falling back:`, err);
@@ -258,11 +265,11 @@
       seedFromFileIDs();
       const collection = fileIdToCollection[fileId];
       if (!collection) {
-        log('writeFile(passthrough → Drive)', fileId);
+        log('writeFile(passthrough â†’ Drive)', fileId);
         return _origWrite(fileId, data);
       }
       try {
-        log('writeFile →', collection, `(${Array.isArray(data) ? data.length : '1'} rec)`);
+        log('writeFile â†’', collection, `(${Array.isArray(data) ? data.length : '1'} rec)`);
         await apiCall('POST', `/api/data/${collection}`, data);
       } catch (err) {
         console.error(`[EMS-shim] writeFile ${collection} failed:`, err);
@@ -270,11 +277,11 @@
       }
     };
 
-    console.info('[EMS-shim] field_app.html patched — readFile/writeFile now route to /api/data/*');
+    console.info('[EMS-shim] field_app.html patched â€” readFile/writeFile now route to /api/data/*');
     return true;
   }
 
-  // ── Boot: try to patch now, and retry until the app has defined
+  // â”€â”€ Boot: try to patch now, and retry until the app has defined
   //         its Drive functions (they're inside async init).
 
   let attempts = 0;
@@ -284,7 +291,7 @@
     const indexOK = patchIndexApp();
     const fieldOK = patchFieldApp();
 
-    // We might be in either page — one of the two will patch.
+    // We might be in either page â€” one of the two will patch.
     if (indexOK || fieldOK) return;
 
     if (++attempts >= MAX_ATTEMPTS) {

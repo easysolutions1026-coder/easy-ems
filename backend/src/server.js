@@ -1,6 +1,4 @@
-// ════════════════════════════════════════════════════════════════════
-// IMSE EASY EMS — Express entry point (Phase 0)
-// ════════════════════════════════════════════════════════════════════
+// IMSE EASY EMS - Express entry point (Phase 0)
 
 import express from 'express';
 import cors from 'cors';
@@ -19,14 +17,13 @@ const __dirname  = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// ── Middleware ───────────────────────────────────────────────────
+// --- Middleware -----------------------------------------------------
 
-// Helmet with a relaxed CSP because the current index.html uses inline
-// scripts + Tailwind CDN. Phase 4 can tighten this once we ship the
-// consolidated bundle.
 app.use(helmet({
   contentSecurityPolicy: false,
   crossOriginEmbedderPolicy: false,
+  crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
+  crossOriginResourcePolicy: { policy: "cross-origin" },
 }));
 
 app.use(cors({
@@ -34,10 +31,10 @@ app.use(cors({
   credentials: true,
 }));
 
-app.use(express.json({ limit: '25mb' })); // some JSON files (staff w/ attendance) are large
+app.use(express.json({ limit: '25mb' }));
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
-// ── Health checks (Cloud Run readiness / liveness) ───────────────
+// --- Health checks --------------------------------------------------
 
 app.get('/healthz', (req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
 
@@ -51,9 +48,7 @@ app.get('/readyz', async (req, res) => {
   }
 });
 
-// ── Auth middleware ──────────────────────────────────────────────
-// Every /api/* request must carry a valid Google OAuth access token.
-// The PIN-based `appUsers` layer is enforced inside the routes.
+// --- Auth middleware ------------------------------------------------
 
 async function requireGoogleAuth(req, res, next) {
   const authHeader = req.headers.authorization || '';
@@ -62,12 +57,12 @@ async function requireGoogleAuth(req, res, next) {
 
   try {
     const claims = await verifyGoogleToken(m[1]);
-    // If Workspace domain is configured, enforce it.
     const requiredDomain = process.env.GOOGLE_WORKSPACE_DOMAIN;
     if (requiredDomain && claims.hd !== requiredDomain) {
       return res.status(403).json({ error: 'DOMAIN_NOT_ALLOWED' });
     }
-    req.user = { email: claims.email, name: claims.name, hd: claims.hd };
+    // Accept the token even if email is not present (may need extra scope)
+    req.user = { email: claims.email || claims.sub, name: claims.name, hd: claims.hd, sub: claims.sub };
     next();
   } catch (err) {
     console.warn('Token verify failed:', err.message);
@@ -75,23 +70,20 @@ async function requireGoogleAuth(req, res, next) {
   }
 }
 
-// ── Routes ───────────────────────────────────────────────────────
-
+// --- API routes (auth-required) - MUST come before static middleware ---
 app.use('/api', requireGoogleAuth);
 app.use('/api/data', dataRoutes);
 
-// Serve the frontend during local dev. In production, static files are
-// served from a CDN or GitHub Pages, so this block is inert unless the
-// frontend dir is mounted (see docker-compose.yml).
-if (process.env.NODE_ENV !== 'production') {
-  const frontendDir = path.resolve(__dirname, '../../frontend');
-  app.use('/shim', express.static(path.join(frontendDir, 'shared')));
-  app.use('/', express.static(frontendDir));
-}
+// --- Static frontend files ------------------------------------------
+// Frontend is mounted at /app/frontend by docker-compose.yml.
+// Use absolute path so it works regardless of __dirname resolution.
+const frontendDir = '/app/frontend';
+console.log(`[EMS] Serving static frontend from: ${frontendDir}`);
+app.use('/shim', express.static(path.join(frontendDir, 'shared')));
+app.use('/', express.static(frontendDir));
 
-// ── Global error handler ─────────────────────────────────────────
+// --- Global error handler ------------------------------------------
 
-// eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
   res.status(500).json({
@@ -100,19 +92,18 @@ app.use((err, req, res, next) => {
   });
 });
 
-// ── Start ────────────────────────────────────────────────────────
+// --- Start ---------------------------------------------------------
 
 const server = app.listen(PORT, () => {
   console.log(`[EMS] Listening on :${PORT} (env=${process.env.NODE_ENV || 'dev'})`);
 });
 
-// Graceful shutdown for Cloud Run
 function shutdown(signal) {
-  console.log(`[EMS] ${signal} received, closing…`);
+  console.log(`[EMS] ${signal} received, closing...`);
   server.close(() => {
     prisma.$disconnect().then(() => process.exit(0));
   });
-  setTimeout(() => process.exit(1), 10_000).unref();
+  setTimeout(() => process.exit(1), 10000).unref();
 }
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT',  () => shutdown('SIGINT'));
