@@ -30,16 +30,23 @@ function defaultMapOut(row) {
 const COLLECTIONS = {
   appUsers: {
     model: prisma.appUser, idField: 'userID',
-    mapIn: (r) => ({
-      userID: r.userID, email: r.email || '', name: r.name || '',
-      role: r.role || 'ViewOnly',
-      pinHash: r.pinHash ?? null,
-      pinExpiry: r.pinExpiry ? new Date(r.pinExpiry) : null,
-      pinPeriodDays: r.pinPeriodDays ?? 30,
-      active: r.active ?? true,
-      permissions: r.permissions ?? null,
-      data: r,
-    }),
+    mapIn: (r) => {
+      const userID = r.userID || r.email;
+      // Email must be unique - fall back to synthetic email if empty
+      const email = (r.email && r.email.trim()) ? r.email.trim() : `${userID}@local.imse`;
+      return {
+        userID: userID,
+        email: email,
+        name: r.name || email,
+        role: r.role || 'ViewOnly',
+        pinHash: r.pinHash ?? null,
+        pinExpiry: r.pinExpiry ? new Date(r.pinExpiry) : null,
+        pinPeriodDays: r.pinPeriodDays ?? 30,
+        active: r.active ?? true,
+        permissions: r.permissions ?? null,
+        data: r,
+      };
+    },
     mapOut: defaultMapOut,
   },
   auditLog: { model: prisma.auditLog, idField: 'id', isAppendOnly: true },

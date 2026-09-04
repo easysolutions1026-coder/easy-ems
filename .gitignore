@@ -1,18 +1,32 @@
-node_modules/
+# Environment
 .env
 .env.local
 .env.*.local
-*.log
+
+# Node
+node_modules/
+npm-debug.log*
+
+# OS
 .DS_Store
-dist/
-build/
-coverage/
+Thumbs.db
+
+# IDE
 .vscode/
 .idea/
 
-# Prisma
-backend/prisma/migrations/dev.db*
+# Data source (business data, never commit)
+data-source/
 
-# Local backup dumps
-DBBackups/
-*.sql.gz
+# Backup files (local only)
+*.backup
+*.mojibake-backup
+*.pre-fix-backup
+frontend/index.html.*-backup
+
+# Docker
+*.log
+# Temp log files
+*.log
+backend-error.log
+

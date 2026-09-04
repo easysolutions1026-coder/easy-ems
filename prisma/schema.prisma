@@ -32,6 +32,9 @@ model AppUser {
   data           Json
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  lastModifiedBy String?
+  version        Int       @default(1)
 
   @@index([email])
   @@index([role])
