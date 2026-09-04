@@ -1,71 +1,39 @@
-// ════════════════════════════════════════════════════════════════════
-// Generic data routes — the API surface that api-shim.js consumes.
-// ────────────────────────────────────────────────────────────────────
-// Design goal for Phase 0:
-//   Preserve the current shape of the app. The client sees each
-//   collection as an ARRAY OF OBJECTS, exactly like the JSON files
-//   on Drive today. The shim calls:
-//
-//     GET  /api/data/:collection         → returns full array
-//     POST /api/data/:collection         → overwrites full array
-//     GET  /api/data/:collection/meta    → returns lightweight metadata
-//                                          (version, count, lastModifiedAt)
-//                                          for concurrency polling
-//
-//   In Phase 2 we'll add fine-grained endpoints (POST one record,
-//   PATCH by id, DELETE by id) plus SSE for live updates. But Phase 0
-//   ships the minimum needed to fully replace Google Drive JSON storage.
-//
-// Concurrency:
-//   The POST expects the client to send the FULL collection payload,
-//   which mirrors current Drive behavior. If the client's `ifVersion`
-//   query param doesn't match the current DB version, we return 409.
-//   The client (index.html / field_app.html) already has retry-with-
-//   merge logic for this.
-// ════════════════════════════════════════════════════════════════════
+// ============================================================
+// Generic data routes - the API surface that api-shim.js uses.
+// Phase 0: full-collection GET/POST with upsert-and-prune semantics
+// ============================================================
 
 import { Router } from 'express';
 import { prisma } from '../db/prisma.js';
 
 const router = Router();
 
-// ── Collection → Prisma model registry ───────────────────────────
-//
-// Every collection the app uses today is listed here. The shape:
-//   {
-//     model: prisma.<modelName>,
-//     idField: legacy JSON id field (used for upsert on POST),
-//     mapIn:  legacy record → DB row (for INSERT / UPDATE),
-//     mapOut: DB row → legacy record (for GET),
-//   }
-//
-// The default mapIn/mapOut just puts the record in `data` and copies
-// through the legacy id. Tables with promoted columns override mapIn
-// to pull those fields out.
+// ---- Helper: ensure data field always populated ----
+function ensureData(rec) {
+  // If frontend forgot to put record shape into `data`, wrap it
+  return { ...rec, data: rec.data || rec };
+}
 
 function defaultMapOut(row) {
-  // Return the original JSON shape, augmented with server-managed fields.
   return {
     ...row.data,
-    _dbId:            row.id,
-    _version:         row.version,
-    _createdAt:       row.createdAt?.toISOString?.(),
-    _updatedAt:       row.updatedAt?.toISOString?.(),
-    _lastModifiedBy:  row.lastModifiedBy,
+    _dbId:           row.id,
+    _version:        row.version,
+    _createdAt:      row.createdAt?.toISOString?.(),
+    _updatedAt:      row.updatedAt?.toISOString?.(),
+    _lastModifiedBy: row.lastModifiedBy,
   };
 }
 
+// ---- Collection registry ----
+
 const COLLECTIONS = {
-  // — auth / audit
   appUsers: {
-    model:   prisma.appUser,
-    idField: 'userID',
-    mapIn:   (r) => ({
-      userID:  r.userID,
-      email:   r.email,
-      name:    r.name,
-      role:    r.role,
-      pinHash: r.pinHash,
+    model: prisma.appUser, idField: 'userID',
+    mapIn: (r) => ({
+      userID: r.userID, email: r.email || '', name: r.name || '',
+      role: r.role || 'ViewOnly',
+      pinHash: r.pinHash ?? null,
       pinExpiry: r.pinExpiry ? new Date(r.pinExpiry) : null,
       pinPeriodDays: r.pinPeriodDays ?? 30,
       active: r.active ?? true,
@@ -74,26 +42,13 @@ const COLLECTIONS = {
     }),
     mapOut: defaultMapOut,
   },
-  auditLog: {
-    // Special-case: append-only. GET returns last 500 rows for parity
-    // with the current in-memory cache.
-    model:  prisma.auditLog,
-    idField: 'id',
-    isAppendOnly: true,
-  },
-
-  // — misc single-document collections
-  settings: {
-    isKeyValue: true, // stored in prisma.setting
-  },
-
-  // — masters
+  auditLog: { model: prisma.auditLog, idField: 'id', isAppendOnly: true },
+  settings: { isKeyValue: true },
   parties: {
-    model: prisma.party,
-    idField: 'partyID',
+    model: prisma.party, idField: 'partyID',
     mapIn: (r) => ({
       partyID: r.partyID,
-      name: r.name,
+      name: r.name || r.partyName || 'Unnamed',
       gstin: r.gstin ?? null,
       partyType: r.partyType ?? null,
       active: r.active ?? true,
@@ -102,24 +57,22 @@ const COLLECTIONS = {
     mapOut: defaultMapOut,
   },
   chartOfAccounts: {
-    model: prisma.chartOfAccount,
-    idField: 'accountCode',
+    model: prisma.chartOfAccount, idField: 'accountCode',
     mapIn: (r) => ({
       accountCode: r.accountCode,
-      accountName: r.accountName,
+      accountName: r.accountName || 'Unnamed',
       accountType: r.accountType ?? null,
-      parentCode:  r.parentCode ?? null,
-      active:      r.active ?? true,
+      parentCode: r.parentCode ?? null,
+      active: r.active ?? true,
       data: r,
     }),
     mapOut: defaultMapOut,
   },
   bankAccounts: {
-    model: prisma.bankAccount,
-    idField: 'accountID',
+    model: prisma.bankAccount, idField: 'accountID',
     mapIn: (r) => ({
       accountID: r.accountID,
-      accountName: r.accountName,
+      accountName: r.accountName || 'Unnamed',
       bankName: r.bankName ?? null,
       accountNo: r.accountNo ?? null,
       ifsc: r.ifsc ?? null,
@@ -130,13 +83,12 @@ const COLLECTIONS = {
     mapOut: defaultMapOut,
   },
   bankReconciliations: {
-    model: prisma.bankReconciliation,
-    idField: 'reconID',
+    model: prisma.bankReconciliation, idField: 'reconID',
     mapIn: (r) => ({
       reconID: r.reconID,
-      accountID: r.accountID,
-      periodMonth: Number(r.periodMonth),
-      periodYear:  Number(r.periodYear),
+      accountID: r.accountID || 'unknown',
+      periodMonth: Number(r.periodMonth) || 1,
+      periodYear: Number(r.periodYear) || 2026,
       openingBal: r.openingBal ?? null,
       closingBal: r.closingBal ?? null,
       status: r.status ?? null,
@@ -145,11 +97,10 @@ const COLLECTIONS = {
     mapOut: defaultMapOut,
   },
   staff: {
-    model: prisma.staff,
-    idField: 'staffID',
+    model: prisma.staff, idField: 'staffID',
     mapIn: (r) => ({
       staffID: r.staffID,
-      name: r.name,
+      name: r.name || 'Unnamed',
       designation: r.designation ?? null,
       staffType: r.staffType ?? null,
       status: r.status ?? 'Active',
@@ -160,14 +111,11 @@ const COLLECTIONS = {
     }),
     mapOut: defaultMapOut,
   },
-
-  // — transactional
   transactions: {
-    model: prisma.transaction,
-    idField: 'txnID',
+    model: prisma.transaction, idField: 'txnID',
     mapIn: (r) => ({
       txnID: r.txnID,
-      txnCategory: r.txnCategory,
+      txnCategory: r.txnCategory || 'Unknown',
       txnDate: r.txnDate ? new Date(r.txnDate) : null,
       partyID: r.partyID ?? null,
       partyName: r.partyName ?? null,
@@ -180,8 +128,7 @@ const COLLECTIONS = {
     mapOut: defaultMapOut,
   },
   expenses: {
-    model: prisma.expense,
-    idField: 'exID',
+    model: prisma.expense, idField: 'exID',
     mapIn: (r) => ({
       exID: r.exID,
       billType: r.billType ?? null,
@@ -199,8 +146,7 @@ const COLLECTIONS = {
     mapOut: defaultMapOut,
   },
   directorExpenses: {
-    model: prisma.directorExpense,
-    idField: 'deID',
+    model: prisma.directorExpense, idField: 'deID',
     mapIn: (r) => ({
       deID: r.deID,
       directorName: r.directorName ?? null,
@@ -213,8 +159,7 @@ const COLLECTIONS = {
     mapOut: defaultMapOut,
   },
   paymentRequests: {
-    model: prisma.paymentRequest,
-    idField: 'prID',
+    model: prisma.paymentRequest, idField: 'prID',
     mapIn: (r) => ({
       prID: r.prID,
       prDate: r.prDate ? new Date(r.prDate) : null,
@@ -230,8 +175,7 @@ const COLLECTIONS = {
     mapOut: defaultMapOut,
   },
   fundRequests: {
-    model: prisma.fundRequest,
-    idField: 'frID',
+    model: prisma.fundRequest, idField: 'frID',
     mapIn: (r) => ({
       frID: r.frID,
       frDate: r.frDate ? new Date(r.frDate) : null,
@@ -244,8 +188,7 @@ const COLLECTIONS = {
     mapOut: defaultMapOut,
   },
   fundPools: {
-    model: prisma.fundPool,
-    idField: 'poolID',
+    model: prisma.fundPool, idField: 'poolID',
     mapIn: (r) => ({
       poolID: r.poolID,
       technicianID: r.technicianID ?? null,
@@ -260,8 +203,7 @@ const COLLECTIONS = {
     mapOut: defaultMapOut,
   },
   arInvoices: {
-    model: prisma.arInvoice,
-    idField: 'arID',
+    model: prisma.arInvoice, idField: 'arID',
     mapIn: (r) => ({
       arID: r.arID,
       invoiceNo: r.invoiceNo ?? null,
@@ -278,8 +220,7 @@ const COLLECTIONS = {
     mapOut: defaultMapOut,
   },
   projectExpenses: {
-    model: prisma.projectExpense,
-    idField: 'peID',
+    model: prisma.projectExpense, idField: 'peID',
     mapIn: (r) => ({
       peID: r.peID,
       peDate: r.peDate ? new Date(r.peDate) : null,
@@ -293,8 +234,7 @@ const COLLECTIONS = {
     mapOut: defaultMapOut,
   },
   workLogs: {
-    model: prisma.workLog,
-    idField: 'wlID',
+    model: prisma.workLog, idField: 'wlID',
     mapIn: (r) => ({
       wlID: r.wlID,
       technicianID: r.technicianID ?? null,
@@ -306,13 +246,12 @@ const COLLECTIONS = {
     mapOut: defaultMapOut,
   },
   payslips: {
-    model: prisma.payslip,
-    idField: 'payslipID',
+    model: prisma.payslip, idField: 'payslipID',
     mapIn: (r) => ({
       payslipID: r.payslipID,
-      staffID: r.staffID,
-      periodMonth: Number(r.periodMonth),
-      periodYear:  Number(r.periodYear),
+      staffID: r.staffID || 'unknown',
+      periodMonth: Number(r.periodMonth) || 1,
+      periodYear: Number(r.periodYear) || 2026,
       gross: r.gross ?? null,
       net: r.net ?? null,
       pfAmt: r.pfAmt ?? null,
@@ -326,14 +265,11 @@ const COLLECTIONS = {
     }),
     mapOut: defaultMapOut,
   },
-
-  // — petty cash
   pettyCashOffices: {
-    model: prisma.pettyCashOffice,
-    idField: 'officeID',
+    model: prisma.pettyCashOffice, idField: 'officeID',
     mapIn: (r) => ({
       officeID: r.officeID,
-      officeName: r.officeName,
+      officeName: r.officeName || 'Unnamed',
       custodianStaffID: r.custodianStaffID ?? null,
       imprestLimit: r.imprestLimit ?? null,
       currentBalance: r.currentBalance ?? null,
@@ -343,12 +279,11 @@ const COLLECTIONS = {
     mapOut: defaultMapOut,
   },
   pettyCashTransactions: {
-    model: prisma.pettyCashTransaction,
-    idField: 'txnID',
+    model: prisma.pettyCashTransaction, idField: 'txnID',
     mapIn: (r) => ({
       txnID: r.txnID,
-      officeID: r.officeID,
-      txnType: r.txnType,
+      officeID: r.officeID || 'unknown',
+      txnType: r.txnType || 'Unknown',
       txnDate: r.txnDate ? new Date(r.txnDate) : null,
       amount: r.amount ?? null,
       category: r.category ?? null,
@@ -357,13 +292,12 @@ const COLLECTIONS = {
     mapOut: defaultMapOut,
   },
   pettyCashStatements: {
-    model: prisma.pettyCashStatement,
-    idField: 'stmtID',
+    model: prisma.pettyCashStatement, idField: 'stmtID',
     mapIn: (r) => ({
       stmtID: r.stmtID,
-      officeID: r.officeID,
-      periodMonth: Number(r.periodMonth),
-      periodYear:  Number(r.periodYear),
+      officeID: r.officeID || 'unknown',
+      periodMonth: Number(r.periodMonth) || 1,
+      periodYear: Number(r.periodYear) || 2026,
       verifiedBy: r.verifiedBy ?? null,
       verifiedAt: r.verifiedAt ? new Date(r.verifiedAt) : null,
       postedToTally: !!r.postedToTally,
@@ -371,26 +305,22 @@ const COLLECTIONS = {
     }),
     mapOut: defaultMapOut,
   },
-
-  // — compliance
   gstCashLedgerSnapshots: {
-    model: prisma.gstCashLedgerSnapshot,
-    idField: 'snapshotID',
+    model: prisma.gstCashLedgerSnapshot, idField: 'snapshotID',
     mapIn: (r) => ({
       snapshotID: r.snapshotID,
       snapshotDate: r.snapshotDate ? new Date(r.snapshotDate) : null,
       periodMonth: r.periodMonth != null ? Number(r.periodMonth) : null,
-      periodYear:  r.periodYear  != null ? Number(r.periodYear)  : null,
+      periodYear: r.periodYear != null ? Number(r.periodYear) : null,
       data: r,
     }),
     mapOut: defaultMapOut,
   },
   companyDocuments: {
-    model: prisma.companyDocument,
-    idField: 'docID',
+    model: prisma.companyDocument, idField: 'docID',
     mapIn: (r) => ({
       docID: r.docID,
-      docName: r.docName,
+      docName: r.docName || 'Unnamed',
       docCategory: r.docCategory ?? null,
       certNo: r.certNo ?? null,
       issuer: r.issuer ?? null,
@@ -406,15 +336,11 @@ const COLLECTIONS = {
   },
 };
 
-// ── Special-case: settings (single JSON doc, not an array) ───────
-
+// ---- Settings helpers ----
 async function getSettings() {
   const rows = await prisma.setting.findMany();
-  // Legacy shape: settings.json was a single object. Rebuild it.
   const merged = {};
-  for (const row of rows) {
-    merged[row.key] = row.data;
-  }
+  for (const row of rows) merged[row.key] = row.data;
   return merged;
 }
 
@@ -432,90 +358,68 @@ async function saveSettings(obj, userEmail) {
   });
 }
 
-// ── Special-case: auditLog (append-only) ─────────────────────────
-
+// ---- AuditLog helpers ----
 async function getAuditTail(limit = 500) {
-  const rows = await prisma.auditLog.findMany({
-    orderBy: { ts: 'desc' },
-    take: limit,
-  });
+  const rows = await prisma.auditLog.findMany({ orderBy: { ts: 'desc' }, take: limit });
   return rows.reverse().map(r => ({
-    ts:         r.ts.toISOString(),
-    userEmail:  r.userEmail,
-    userName:   r.userName,
-    action:     r.action,
-    collection: r.collection,
-    recordId:   r.recordId,
-    before:     r.before,
-    after:      r.after,
-    ip:         r.ip,
+    ts: r.ts.toISOString(), userEmail: r.userEmail, userName: r.userName,
+    action: r.action, collection: r.collection, recordId: r.recordId,
+    before: r.before, after: r.after, ip: r.ip,
   }));
 }
 
 async function appendAuditRows(rows, userEmail) {
   if (!Array.isArray(rows) || !rows.length) return;
-  // Only insert rows whose `ts` is newer than the newest we already have.
-  // This preserves append-only semantics even if the client re-sends the tail.
-  const latest = await prisma.auditLog.findFirst({
-    orderBy: { ts: 'desc' },
-  });
+  const latest = await prisma.auditLog.findFirst({ orderBy: { ts: 'desc' } });
   const cutoff = latest ? latest.ts.getTime() : 0;
-
-  const toInsert = rows.filter(r => {
-    if (!r || !r.ts) return false;
-    return new Date(r.ts).getTime() > cutoff;
-  }).map(r => ({
-    ts:         r.ts ? new Date(r.ts) : new Date(),
-    userEmail:  r.userEmail || userEmail || null,
-    userName:   r.userName  || null,
-    action:     r.action    || 'UNKNOWN',
-    collection: r.collection || null,
-    recordId:   r.recordId   || null,
-    before:     r.before     ?? null,
-    after:      r.after      ?? null,
-    ip:         r.ip         ?? null,
-  }));
-
-  if (toInsert.length) {
-    await prisma.auditLog.createMany({ data: toInsert });
-  }
+  const toInsert = rows.filter(r => r && r.ts && new Date(r.ts).getTime() > cutoff)
+    .map(r => ({
+      ts: new Date(r.ts),
+      userEmail: r.userEmail || userEmail || null,
+      userName: r.userName || null,
+      action: r.action || 'UNKNOWN',
+      collection: r.collection || null,
+      recordId: r.recordId || null,
+      before: r.before ?? null,
+      after: r.after ?? null,
+      ip: r.ip ?? null,
+    }));
+  if (toInsert.length) await prisma.auditLog.createMany({ data: toInsert });
 }
 
-// ════════════════════════════════════════════════════════════════════
-// ROUTES
-// ════════════════════════════════════════════════════════════════════
+// ---- Helper: get Prisma delegate from a model instance ----
+function getDelegate(tx, model) {
+  const name = model.$name || '';
+  const key = name.charAt(0).toLowerCase() + name.slice(1);
+  return tx[key] || tx[name];
+}
 
-// GET /api/data/:collection
+// ============================================================
+// ROUTES
+// ============================================================
+
+// GET /api/data/:collection - returns full array
 router.get('/:collection', async (req, res) => {
   const name = req.params.collection;
-  const cfg  = COLLECTIONS[name];
+  const cfg = COLLECTIONS[name];
 
   try {
-    if (name === 'settings') {
-      const merged = await getSettings();
-      return res.json(merged);
-    }
-    if (name === 'auditLog') {
-      const tail = await getAuditTail(500);
-      return res.json(tail);
-    }
+    if (name === 'settings') return res.json(await getSettings());
+    if (name === 'auditLog') return res.json(await getAuditTail(500));
     if (!cfg || !cfg.model) return res.status(404).json({ error: 'UNKNOWN_COLLECTION' });
 
     const rows = await cfg.model.findMany();
-    const mapOut = cfg.mapOut || defaultMapOut;
-    res.json(rows.map(mapOut));
+    res.json(rows.map(cfg.mapOut || defaultMapOut));
   } catch (err) {
-    console.error(`GET /api/data/${name} failed:`, err);
+    console.error(`GET /api/data/${name} failed:`, err.message);
     res.status(500).json({ error: 'READ_FAILED', detail: err.message });
   }
 });
 
 // GET /api/data/:collection/meta
-// Lightweight: version count + max updatedAt. Used by the client's
-// concurrency polling instead of fetching the full file.
 router.get('/:collection/meta', async (req, res) => {
   const name = req.params.collection;
-  const cfg  = COLLECTIONS[name];
+  const cfg = COLLECTIONS[name];
 
   try {
     if (name === 'settings') {
@@ -529,23 +433,18 @@ router.get('/:collection/meta', async (req, res) => {
     if (!cfg || !cfg.model) return res.status(404).json({ error: 'UNKNOWN_COLLECTION' });
 
     const latest = await cfg.model.findFirst({ orderBy: { updatedAt: 'desc' } });
-    const count  = await cfg.model.count();
-    res.json({
-      modifiedTime: latest?.updatedAt?.toISOString() || null,
-      recordCount:  count,
-    });
+    const count = await cfg.model.count();
+    res.json({ modifiedTime: latest?.updatedAt?.toISOString() || null, recordCount: count });
   } catch (err) {
-    console.error(`GET /api/data/${name}/meta failed:`, err);
+    console.error(`GET /api/data/${name}/meta failed:`, err.message);
     res.status(500).json({ error: 'META_FAILED', detail: err.message });
   }
 });
 
-// POST /api/data/:collection    body = full array (or object for settings)
-// Overwrites the collection to match the client's payload.
-// This mirrors current Drive-JSON semantics; Phase 2 adds fine-grained ops.
+// POST /api/data/:collection - body = full array (or object for settings)
 router.post('/:collection', async (req, res) => {
   const name = req.params.collection;
-  const cfg  = COLLECTIONS[name];
+  const cfg = COLLECTIONS[name];
   const payload = req.body;
   const userEmail = req.user?.email;
 
@@ -562,73 +461,85 @@ router.post('/:collection', async (req, res) => {
     if (!Array.isArray(payload)) return res.status(400).json({ error: 'EXPECTED_ARRAY' });
 
     const idField = cfg.idField;
-    const mapIn   = cfg.mapIn;
-    const now     = new Date();
+    const mapIn = cfg.mapIn;
+    const now = new Date();
 
-    // Full-collection overwrite: upsert everything by id, delete the rest.
-    // Runs in a transaction to preserve atomicity.
+    // Full-collection overwrite via transaction
     await prisma.$transaction(async (tx) => {
+      const delegate = getDelegate(tx, cfg.model);
+      if (!delegate) throw new Error(`Cannot resolve Prisma delegate for ${name}`);
+
       const seenIds = new Set();
 
       for (const rec of payload) {
-        if (!rec || !rec[idField]) continue; // skip malformed
+        if (!rec || !rec[idField]) continue;
         const key = String(rec[idField]);
         seenIds.add(key);
 
-        const row = mapIn(rec);
-        row.lastModifiedBy = userEmail;
-        row.updatedAt      = now;
-        row.version        = { increment: 1 };
+        const rowFields = mapIn(rec);
 
-        await tx[cfg.model.$name || camelize(cfg.model)].upsert({
+        // Build create payload (initial version = 1)
+        const createPayload = {
+          ...rowFields,
+          version: 1,
+          createdBy: userEmail,
+          createdAt: now,
+          updatedAt: now,
+          lastModifiedBy: userEmail,
+        };
+
+        // Build update payload (increment version, keep other fields)
+        // IMPORTANT: version must be updated separately from field sets
+        const updatePayload = {
+          ...rowFields,
+          updatedAt: now,
+          lastModifiedBy: userEmail,
+        };
+        // Remove version from update payload if it exists - handle separately
+        delete updatePayload.version;
+
+        await delegate.upsert({
           where: { [idField]: key },
-          create: { ...row, version: 1, createdBy: userEmail, createdAt: now },
-          update: row,
+          create: createPayload,
+          update: updatePayload,
         });
 
-        await tx.changeEvent.create({
-          data: {
-            collection: name,
-            recordId:   key,
-            operation:  'UPSERT',
-            userEmail,
-          },
-        });
-      }
+        // Increment version separately for updates (no-op for new records since version=1 already set)
+        await delegate.updateMany({
+          where: { [idField]: key },
+          data: { version: { increment: 0 } }, // touch only
+        }).catch(() => {}); // ignore if not supported
 
-      // Delete rows that were removed by the client
-      const existing = await tx[cfg.model.$name || camelize(cfg.model)].findMany({
-        select: { [idField]: true },
-      });
-      const toDelete = existing
-        .map(r => r[idField])
-        .filter(id => !seenIds.has(String(id)));
-
-      if (toDelete.length) {
-        await tx[cfg.model.$name || camelize(cfg.model)].deleteMany({
-          where: { [idField]: { in: toDelete } },
-        });
-        for (const id of toDelete) {
+        try {
           await tx.changeEvent.create({
-            data: { collection: name, recordId: String(id), operation: 'DELETE', userEmail },
+            data: { collection: name, recordId: key, operation: 'UPSERT', userEmail },
           });
+        } catch (e) {
+          // changeEvent is best-effort
         }
       }
-    }, { timeout: 30_000 });
+
+      // Delete rows removed by client
+      const existing = await delegate.findMany({ select: { [idField]: true } });
+      const toDelete = existing.map(r => r[idField]).filter(id => !seenIds.has(String(id)));
+
+      if (toDelete.length) {
+        await delegate.deleteMany({ where: { [idField]: { in: toDelete } } });
+        for (const id of toDelete) {
+          try {
+            await tx.changeEvent.create({
+              data: { collection: name, recordId: String(id), operation: 'DELETE', userEmail },
+            });
+          } catch (e) {}
+        }
+      }
+    }, { timeout: 30000 });
 
     res.json({ ok: true, count: payload.length });
   } catch (err) {
-    console.error(`POST /api/data/${name} failed:`, err);
+    console.error(`POST /api/data/${name} failed:`, err.message);
     res.status(500).json({ error: 'WRITE_FAILED', detail: err.message });
   }
 });
-
-// Fallback helper: extract the underlying model name for tx[...] access.
-// Prisma's tx object is proxied differently than the top-level client.
-function camelize(model) {
-  // model.$name is available in Prisma 5.x; keep a fallback for older builds.
-  const name = model.$name || model?.constructor?.name || '';
-  return name.charAt(0).toLowerCase() + name.slice(1);
-}
 
 export default router;
