@@ -10,17 +10,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-cert
 
 WORKDIR /app
 
-# Copy package files first for better caching
+# Copy package files
 COPY backend/package.json backend/package-lock.json* ./
 
-# Install dependencies
-RUN npm install --omit=dev && npm cache clean --force
-
-# Copy Prisma schema (production/SQLite version)
+# Copy Prisma schema BEFORE npm install (postinstall runs prisma generate)
 COPY prisma/schema.production.prisma ./prisma/schema.prisma
 
-# Generate Prisma Client
-RUN npx prisma generate
+# Install dependencies (this also runs postinstall -> prisma generate)
+RUN npm install --omit=dev && npm cache clean --force
 
 # --- Runtime stage: minimal image ---
 FROM node:20-slim AS runner
@@ -43,7 +40,7 @@ COPY --chown=ems:ems backend/src ./src
 # Copy frontend static files (index.html, api-shim.js)
 COPY --chown=ems:ems frontend ./frontend
 
-# Copy startup script that initializes DB
+# Copy startup script
 COPY --chown=ems:ems backend/scripts/cloud-run-start.sh ./cloud-run-start.sh
 RUN chmod +x ./cloud-run-start.sh
 
