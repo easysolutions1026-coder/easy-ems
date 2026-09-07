@@ -1,0 +1,14 @@
+# Preserve LF (Unix) line endings for shell scripts and Docker files
+# These files run inside Linux containers and need Unix line endings
+
+*.sh          text eol=lf
+Dockerfile    text eol=lf
+Dockerfile.*  text eol=lf
+*.yml         text eol=lf
+*.yaml        text eol=lf
+
+# Prisma schema files
+*.prisma      text eol=lf
+
+# Everything else uses OS default line endings
+* text=auto
