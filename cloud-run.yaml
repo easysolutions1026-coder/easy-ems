@@ -1,0 +1,52 @@
+# ============================================================
+# Cloud Run deployment configuration
+# Deploy with: gcloud run deploy --config=cloud-run.yaml
+# ============================================================
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: ems-backend
+  labels:
+    app: imse-easy-ems
+    env: testing
+  annotations:
+    # Traffic goes to latest revision automatically
+    run.googleapis.com/launch-stage: GA
+spec:
+  template:
+    metadata:
+      annotations:
+        # Auto-scaling configuration
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "3"
+        # Cold start: keep image warm for 15 min after last request
+        run.googleapis.com/cpu-throttling: "true"
+    spec:
+      # Timeout for a single request (max 60 min)
+      timeoutSeconds: 300
+      # How many requests one container instance can handle
+      containerConcurrency: 80
+      containers:
+        - name: ems-backend
+          image: gcr.io/easy-ems-507406/ems-backend:latest
+          ports:
+            - name: http1
+              containerPort: 8080
+          # Resource limits (staying in free tier)
+          resources:
+            limits:
+              cpu: "1000m"       # 1 vCPU
+              memory: "512Mi"     # 512 MB RAM
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: DATABASE_URL
+              value: "file:/tmp/data.db"
+            - name: GOOGLE_OAUTH_CLIENT_ID
+              value: "446056303892-lcuj4rf9hv047sujfklb2vacqtd93k45.apps.googleusercontent.com"
+            - name: GOOGLE_WORKSPACE_DOMAIN
+              value: ""
+            - name: CORS_ORIGIN
+              # This will be updated with actual Cloud Run URL after deployment
+              value: "https://easwaranps.github.io"

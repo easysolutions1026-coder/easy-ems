@@ -1,0 +1,59 @@
+# ============================================================
+# IMSE EASY EMS - Production Dockerfile for Cloud Run
+# Uses SQLite for ephemeral data (Option 1)
+# ============================================================
+
+# --- Build stage: install dependencies + generate Prisma client ---
+FROM node:20-slim AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy package files first for better caching
+COPY backend/package.json backend/package-lock.json* ./
+
+# Install dependencies
+RUN npm install --omit=dev && npm cache clean --force
+
+# Copy Prisma schema (production/SQLite version)
+COPY prisma/schema.production.prisma ./prisma/schema.prisma
+
+# Generate Prisma Client
+RUN npx prisma generate
+
+# --- Runtime stage: minimal image ---
+FROM node:20-slim AS runner
+
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Create non-root user
+RUN groupadd -r ems && useradd -r -g ems ems
+
+# Copy built dependencies and Prisma client from builder
+COPY --from=builder --chown=ems:ems /app/node_modules ./node_modules
+COPY --from=builder --chown=ems:ems /app/prisma ./prisma
+COPY --from=builder --chown=ems:ems /app/package.json ./package.json
+
+# Copy backend source
+COPY --chown=ems:ems backend/src ./src
+
+# Copy frontend static files (index.html, api-shim.js)
+COPY --chown=ems:ems frontend ./frontend
+
+# Copy startup script that initializes DB
+COPY --chown=ems:ems backend/scripts/cloud-run-start.sh ./cloud-run-start.sh
+RUN chmod +x ./cloud-run-start.sh
+
+USER ems
+
+# Cloud Run injects PORT env var; default to 8080
+ENV NODE_ENV=production
+ENV PORT=8080
+ENV DATABASE_URL=file:/tmp/data.db
+EXPOSE 8080
+
+# Startup script initializes SQLite then runs server
+CMD ["./cloud-run-start.sh"]

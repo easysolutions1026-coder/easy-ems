@@ -1,0 +1,46 @@
+# Development files
+.git
+.gitignore
+.env
+.env.local
+.env.*.local
+.dockerignore
+
+# Node
+node_modules
+npm-debug.log
+backend/node_modules
+backend/npm-debug.log
+
+# Docker (dev)
+docker-compose.yml
+docker-compose.override.yml
+
+# Local data
+data-source
+data-source/
+*.db
+
+# IDE
+.vscode
+.idea
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.backup
+*.mojibake-backup
+*.pre-fix-backup
+
+# Migration script (not needed at runtime)
+backend/scripts/migrate-from-drive.js
+
+# Logs
+*.log
+
+# Documentation
+README.md
+docs/

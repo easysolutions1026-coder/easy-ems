@@ -1,0 +1,501 @@
+// ====================================================================
+// IMSE EASY EMS - Prisma Schema (Production/Cloud Run - SQLite)
+// ====================================================================
+// SQLite version for ephemeral Cloud Run deployment.
+// Uses same table structure as Postgres schema but with SQLite types.
+// Data does NOT persist across container restarts (ephemeral).
+// ====================================================================
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// --- AUTH & AUDIT ---------------------------------------------------
+
+model AppUser {
+  id             String    @id @default(cuid())
+  userID         String    @unique
+  email          String    @unique
+  name           String
+  role           String
+  pinHash        String?
+  pinExpiry      DateTime?
+  pinPeriodDays  Int       @default(30)
+  active         Boolean   @default(true)
+  permissions    String?
+  data           String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  lastModifiedBy String?
+  version        Int       @default(1)
+
+  @@index([email])
+  @@index([role])
+}
+
+model AuditLog {
+  id            Int      @id @default(autoincrement())
+  ts            DateTime @default(now())
+  userEmail     String?
+  userName      String?
+  action        String
+  collection    String?
+  recordId      String?
+  before        String?
+  after         String?
+  ip            String?
+
+  @@index([ts])
+  @@index([userEmail, ts])
+  @@index([collection, recordId])
+}
+
+// --- SETTINGS -------------------------------------------------------
+
+model Setting {
+  key       String   @id
+  data      String
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+}
+
+// --- PARTIES --------------------------------------------------------
+
+model Party {
+  id             String   @id @default(cuid())
+  partyID        String   @unique
+  name           String
+  gstin          String?
+  partyType      String?
+  active         Boolean  @default(true)
+  data           String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  createdBy      String?
+  lastModifiedBy String?
+  version        Int      @default(1)
+
+  @@index([name])
+  @@index([gstin])
+  @@index([partyType])
+}
+
+// --- CHART OF ACCOUNTS / BANK ---------------------------------------
+
+model ChartOfAccount {
+  id           String   @id @default(cuid())
+  accountCode  String   @unique
+  accountName  String
+  accountType  String?
+  parentCode   String?
+  active       Boolean  @default(true)
+  data         String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  version      Int      @default(1)
+
+  @@index([accountType])
+  @@index([parentCode])
+}
+
+model BankAccount {
+  id           String   @id @default(cuid())
+  accountID    String   @unique
+  accountName  String
+  bankName     String?
+  accountNo    String?
+  ifsc         String?
+  balance      Float?
+  active       Boolean  @default(true)
+  data         String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  version      Int      @default(1)
+}
+
+model BankReconciliation {
+  id           String   @id @default(cuid())
+  reconID      String   @unique
+  accountID    String
+  periodMonth  Int
+  periodYear   Int
+  openingBal   Float?
+  closingBal   Float?
+  status       String?
+  data         String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  version      Int      @default(1)
+
+  @@index([accountID, periodYear, periodMonth])
+  @@index([status])
+}
+
+// --- STAFF ----------------------------------------------------------
+
+model Staff {
+  id             String    @id @default(cuid())
+  staffID        String    @unique
+  name           String
+  designation    String?
+  staffType      String?
+  status         String    @default("Active")
+  email          String?
+  phone          String?
+  joinDate       DateTime?
+  data           String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  lastModifiedBy String?
+  version        Int       @default(1)
+
+  @@index([status])
+  @@index([staffType])
+  @@index([name])
+}
+
+// --- TRANSACTIONS ---------------------------------------------------
+
+model Transaction {
+  id             String    @id @default(cuid())
+  txnID          String    @unique
+  txnCategory    String
+  txnDate        DateTime?
+  partyID        String?
+  partyName      String?
+  totalAmount    Float?
+  status         String?
+  revisionNo     Int       @default(0)
+  fiscalYear     String?
+  data           String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  lastModifiedBy String?
+  version        Int       @default(1)
+
+  @@index([txnCategory, txnDate])
+  @@index([partyID])
+  @@index([status])
+  @@index([fiscalYear])
+}
+
+// --- EXPENSES -------------------------------------------------------
+
+model Expense {
+  id             String    @id @default(cuid())
+  exID           String    @unique
+  billType       String?
+  billDate       DateTime?
+  partyID        String?
+  partyName      String?
+  totalAmount    Float?
+  balanceAmount  Float?
+  status         String?
+  gstClaimable   Boolean   @default(false)
+  tdsApplicable  Boolean   @default(false)
+  fiscalYear     String?
+  data           String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  lastModifiedBy String?
+  version        Int       @default(1)
+
+  @@index([billType, billDate])
+  @@index([partyID])
+  @@index([status])
+  @@index([fiscalYear])
+}
+
+model DirectorExpense {
+  id            String    @id @default(cuid())
+  deID          String    @unique
+  directorName  String?
+  expenseDate   DateTime?
+  amount        Float?
+  reimbursed    Boolean   @default(false)
+  reimburseDate DateTime?
+  data          String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  version       Int       @default(1)
+
+  @@index([directorName, expenseDate])
+  @@index([reimbursed])
+}
+
+// --- PAYMENT REQUESTS + FUND POOLS ----------------------------------
+
+model PaymentRequest {
+  id             String    @id @default(cuid())
+  prID           String    @unique
+  prDate         DateTime?
+  billIDs        String?
+  requestedAmt   Float?
+  approvedAmt    Float?
+  disbursedAmt   Float?
+  status         String?
+  revisionNo     Int       @default(0)
+  fiscalYear     String?
+  data           String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  lastModifiedBy String?
+  version        Int       @default(1)
+
+  @@index([status, prDate])
+  @@index([fiscalYear])
+}
+
+model FundRequest {
+  id            String    @id @default(cuid())
+  frID          String    @unique
+  frDate        DateTime?
+  technicianID  String?
+  amount        Float?
+  status        String?
+  poolID        String?
+  data          String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  version       Int       @default(1)
+
+  @@index([technicianID, frDate])
+  @@index([status])
+  @@index([poolID])
+}
+
+model FundPool {
+  id            String    @id @default(cuid())
+  poolID        String    @unique
+  technicianID  String?
+  openedDate    DateTime?
+  closedDate    DateTime?
+  openingAmt    Float?
+  spentAmt      Float?
+  balanceAmt    Float?
+  status        String?
+  data          String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  version       Int       @default(1)
+
+  @@index([technicianID, status])
+  @@index([status])
+}
+
+// --- AR INVOICES ----------------------------------------------------
+
+model ArInvoice {
+  id            String    @id @default(cuid())
+  arID          String    @unique
+  invoiceNo     String?
+  invoiceDate   DateTime?
+  partyID       String?
+  partyName     String?
+  invoiceAmt    Float?
+  receivedAmt   Float?
+  balanceAmt    Float?
+  ageDays       Int?
+  status        String?
+  data          String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  version       Int       @default(1)
+
+  @@index([partyID])
+  @@index([status, invoiceDate])
+}
+
+// --- PROJECT EXPENSES + WORK LOGS -----------------------------------
+
+model ProjectExpense {
+  id             String    @id @default(cuid())
+  peID           String    @unique
+  peDate         DateTime?
+  technicianID   String?
+  projectRef     String?
+  category       String?
+  amount         Float?
+  poolID         String?
+  data           String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  lastModifiedBy String?
+  version        Int       @default(1)
+
+  @@index([technicianID, peDate])
+  @@index([projectRef])
+  @@index([poolID])
+}
+
+model WorkLog {
+  id             String    @id @default(cuid())
+  wlID           String    @unique
+  technicianID   String?
+  projectRef     String?
+  weekStartDate  DateTime?
+  status         String?
+  data           String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  lastModifiedBy String?
+  version        Int       @default(1)
+
+  @@index([technicianID, weekStartDate])
+  @@index([projectRef])
+  @@index([status])
+}
+
+// --- PAYROLL --------------------------------------------------------
+
+model Payslip {
+  id           String    @id @default(cuid())
+  payslipID    String    @unique
+  staffID      String
+  periodMonth  Int
+  periodYear   Int
+  gross        Float?
+  net          Float?
+  pfAmt        Float?
+  esicAmt      Float?
+  ptAmt        Float?
+  tdsAmt       Float?
+  status       String?
+  approvedAt   DateTime?
+  approvedBy   String?
+  data         String
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  version      Int       @default(1)
+
+  @@unique([staffID, periodYear, periodMonth])
+  @@index([periodYear, periodMonth])
+  @@index([status])
+}
+
+// --- PETTY CASH -----------------------------------------------------
+
+model PettyCashOffice {
+  id               String   @id @default(cuid())
+  officeID         String   @unique
+  officeName       String
+  custodianStaffID String?
+  imprestLimit     Float?
+  currentBalance   Float?
+  active           Boolean  @default(true)
+  data             String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  version          Int      @default(1)
+
+  @@index([active])
+}
+
+model PettyCashTransaction {
+  id        String    @id @default(cuid())
+  txnID     String    @unique
+  officeID  String
+  txnType   String
+  txnDate   DateTime?
+  amount    Float?
+  category  String?
+  data      String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  version   Int       @default(1)
+
+  @@index([officeID, txnDate])
+  @@index([txnType])
+}
+
+model PettyCashStatement {
+  id            String    @id @default(cuid())
+  stmtID        String    @unique
+  officeID      String
+  periodMonth   Int
+  periodYear    Int
+  verifiedBy    String?
+  verifiedAt    DateTime?
+  postedToTally Boolean   @default(false)
+  data          String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  version       Int       @default(1)
+
+  @@unique([officeID, periodYear, periodMonth])
+}
+
+// --- GST / COMPLIANCE -----------------------------------------------
+
+model GstCashLedgerSnapshot {
+  id            String    @id @default(cuid())
+  snapshotID    String    @unique
+  snapshotDate  DateTime?
+  periodMonth   Int?
+  periodYear    Int?
+  data          String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  version       Int       @default(1)
+
+  @@index([periodYear, periodMonth])
+}
+
+model CompanyDocument {
+  id                          String    @id @default(cuid())
+  docID                       String    @unique
+  docName                     String
+  docCategory                 String?
+  certNo                      String?
+  issuer                      String?
+  holderType                  String?
+  holderName                  String?
+  issueDate                   DateTime?
+  expiryDate                  DateTime?
+  isLifetime                  Boolean   @default(false)
+  renewalReminderAcknowledged Boolean   @default(false)
+  data                        String
+  createdAt                   DateTime  @default(now())
+  updatedAt                   DateTime  @updatedAt
+  version                     Int       @default(1)
+
+  @@index([expiryDate])
+  @@index([docCategory])
+  @@index([holderType, holderName])
+}
+
+// --- SYSTEM ---------------------------------------------------------
+
+model SyncState {
+  key          String    @id
+  lastSyncedAt DateTime?
+  lastSyncedId String?
+  status       String?
+  errorMsg     String?
+  updatedAt    DateTime  @updatedAt
+}
+
+model ChangeEvent {
+  id         Int      @id @default(autoincrement())
+  ts         DateTime @default(now())
+  collection String
+  recordId   String
+  operation  String
+  userEmail  String?
+
+  @@index([collection, ts])
+  @@index([ts])
+}
