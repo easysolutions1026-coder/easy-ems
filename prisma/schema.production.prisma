@@ -99,7 +99,9 @@ model ChartOfAccount {
   data         String
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
-  version      Int      @default(1)
+  createdBy      String?
+  lastModifiedBy String?
+  version        Int      @default(1)
 
   @@index([accountType])
   @@index([parentCode])
@@ -117,7 +119,9 @@ model BankAccount {
   data         String
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
-  version      Int      @default(1)
+  createdBy      String?
+  lastModifiedBy String?
+  version        Int      @default(1)
 }
 
 model BankReconciliation {
@@ -132,7 +136,9 @@ model BankReconciliation {
   data         String
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
-  version      Int      @default(1)
+  createdBy      String?
+  lastModifiedBy String?
+  version        Int      @default(1)
 
   @@index([accountID, periodYear, periodMonth])
   @@index([status])
@@ -227,7 +233,9 @@ model DirectorExpense {
   data          String
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
-  version       Int       @default(1)
+  createdBy      String?
+  lastModifiedBy String?
+  version        Int      @default(1)
 
   @@index([directorName, expenseDate])
   @@index([reimbursed])
@@ -268,7 +276,9 @@ model FundRequest {
   data          String
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
-  version       Int       @default(1)
+  createdBy      String?
+  lastModifiedBy String?
+  version        Int      @default(1)
 
   @@index([technicianID, frDate])
   @@index([status])
@@ -288,7 +298,9 @@ model FundPool {
   data          String
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
-  version       Int       @default(1)
+  createdBy      String?
+  lastModifiedBy String?
+  version        Int      @default(1)
 
   @@index([technicianID, status])
   @@index([status])
@@ -311,7 +323,9 @@ model ArInvoice {
   data          String
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
-  version       Int       @default(1)
+  createdBy      String?
+  lastModifiedBy String?
+  version        Int      @default(1)
 
   @@index([partyID])
   @@index([status, invoiceDate])
@@ -379,7 +393,9 @@ model Payslip {
   data         String
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
-  version      Int       @default(1)
+  createdBy      String?
+  lastModifiedBy String?
+  version        Int      @default(1)
 
   @@unique([staffID, periodYear, periodMonth])
   @@index([periodYear, periodMonth])
@@ -399,7 +415,9 @@ model PettyCashOffice {
   data             String
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
-  version          Int      @default(1)
+  createdBy      String?
+  lastModifiedBy String?
+  version        Int      @default(1)
 
   @@index([active])
 }
@@ -415,7 +433,9 @@ model PettyCashTransaction {
   data      String
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
-  version   Int       @default(1)
+  createdBy      String?
+  lastModifiedBy String?
+  version        Int      @default(1)
 
   @@index([officeID, txnDate])
   @@index([txnType])
@@ -433,7 +453,9 @@ model PettyCashStatement {
   data          String
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
-  version       Int       @default(1)
+  createdBy      String?
+  lastModifiedBy String?
+  version        Int      @default(1)
 
   @@unique([officeID, periodYear, periodMonth])
 }
@@ -449,7 +471,9 @@ model GstCashLedgerSnapshot {
   data          String
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
-  version       Int       @default(1)
+  createdBy      String?
+  lastModifiedBy String?
+  version        Int      @default(1)
 
   @@index([periodYear, periodMonth])
 }
@@ -470,7 +494,9 @@ model CompanyDocument {
   data                        String
   createdAt                   DateTime  @default(now())
   updatedAt                   DateTime  @updatedAt
-  version                     Int       @default(1)
+  createdBy      String?
+  lastModifiedBy String?
+  version        Int      @default(1)
 
   @@index([expiryDate])
   @@index([docCategory])
