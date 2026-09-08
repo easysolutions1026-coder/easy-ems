@@ -30,3 +30,7 @@ frontend/index.html.*-backup
 *.log
 backend-error.log
 
+
+# Database backups - contain sensitive business data, NEVER commit
+backups/
+
