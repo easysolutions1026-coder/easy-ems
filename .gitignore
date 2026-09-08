@@ -34,3 +34,7 @@ backend-error.log
 # Database backups - contain sensitive business data, NEVER commit
 backups/
 
+
+# GitHub Actions workflow backups
+*.old-backup
+

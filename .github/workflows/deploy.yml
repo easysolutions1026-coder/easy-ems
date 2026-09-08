@@ -1,70 +1,92 @@
-name: Build & Deploy to Cloud Run
+name: Deploy to Cloud Run
 
+# Trigger on push to main OR manual trigger from GitHub UI
 on:
   push:
     branches: [main]
-  workflow_dispatch:
+  workflow_dispatch:  # Allows "Run workflow" button in GitHub Actions tab
 
 env:
-  REGION:  asia-south1
-  SERVICE: ems-api
-  REPO:    ems-images
+  PROJECT_ID: easy-ems-507406
+  REGION: asia-south1
+  SERVICE: ems-backend
+  CLOUD_SQL_INSTANCE: easy-ems-507406:asia-south1:ems-postgres
+  OAUTH_CLIENT_ID: 446056303892-lcuj4rf9hv047sujfklb2vacqtd93k45.apps.googleusercontent.com
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
 
     steps:
-      - uses: actions/checkout@v4
+      # Step 1: Get the code
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - id: auth
+      # Step 2: Authenticate to Google Cloud using service account key
+      - name: Authenticate to Google Cloud
+        id: auth
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
-          service_account:            ${{ secrets.GCP_SA_EMAIL }}
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      - uses: google-github-actions/setup-gcloud@v2
+      # Step 3: Install gcloud CLI
+      - name: Set up gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
 
-      - name: Configure Docker for Artifact Registry
-        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
-
-      - name: Build image
+      # Step 4: Verify authentication worked
+      - name: Verify gcloud auth
         run: |
-          docker build \
-            -t ${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPO }}/${{ env.SERVICE }}:${{ github.sha }} \
-            -t ${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPO }}/${{ env.SERVICE }}:latest \
-            -f backend/Dockerfile .
+          gcloud config set project ${{ env.PROJECT_ID }}
+          gcloud config set run/region ${{ env.REGION }}
+          echo "Authenticated as:"
+          gcloud config get-value account
 
-      - name: Push image
+      # Step 5: Build Docker image using Cloud Build
+      # This mirrors your manual scripts/deploy-to-cloud-run-with-sql.ps1
+      - name: Build Docker image via Cloud Build
         run: |
-          docker push --all-tags \
-            ${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPO }}/${{ env.SERVICE }}
+          echo "Building Docker image..."
+          gcloud builds submit --config cloudbuild.yaml --timeout=15m .
 
-      - name: Run Prisma migrations
-        run: |
-          gcloud run jobs deploy ems-migrate \
-            --image=${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPO }}/${{ env.SERVICE }}:${{ github.sha }} \
-            --region=${{ env.REGION }} \
-            --add-cloudsql-instances=${{ secrets.CLOUD_SQL_INSTANCE }} \
-            --set-secrets=DATABASE_URL=DATABASE_URL:latest \
-            --command=npx --args=prisma,migrate,deploy \
-            --max-retries=0 --task-timeout=300 || true
-          gcloud run jobs execute ems-migrate --region=${{ env.REGION }} --wait
-
+      # Step 6: Deploy to Cloud Run with Cloud SQL + Secret Manager
       - name: Deploy to Cloud Run
         run: |
+          echo "Deploying to Cloud Run..."
           gcloud run deploy ${{ env.SERVICE }} \
-            --image=${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPO }}/${{ env.SERVICE }}:${{ github.sha }} \
-            --region=${{ env.REGION }} \
-            --platform=managed \
+            --image gcr.io/${{ env.PROJECT_ID }}/${{ env.SERVICE }} \
+            --region ${{ env.REGION }} \
+            --platform managed \
             --allow-unauthenticated \
-            --add-cloudsql-instances=${{ secrets.CLOUD_SQL_INSTANCE }} \
-            --set-secrets=DATABASE_URL=DATABASE_URL:latest \
-            --set-env-vars=NODE_ENV=production,GOOGLE_OAUTH_CLIENT_ID=${{ secrets.GOOGLE_OAUTH_CLIENT_ID }},GOOGLE_WORKSPACE_DOMAIN=${{ secrets.GOOGLE_WORKSPACE_DOMAIN }},CORS_ORIGIN=${{ secrets.CORS_ORIGIN }} \
-            --min-instances=0 \
-            --max-instances=5 \
-            --memory=512Mi \
-            --cpu=1
+            --port 8080 \
+            --memory 512Mi \
+            --cpu 1 \
+            --min-instances 0 \
+            --max-instances 3 \
+            --timeout 300 \
+            --concurrency 80 \
+            --add-cloudsql-instances ${{ env.CLOUD_SQL_INSTANCE }} \
+            --set-env-vars "NODE_ENV=production,GOOGLE_OAUTH_CLIENT_ID=${{ env.OAUTH_CLIENT_ID }},GOOGLE_WORKSPACE_DOMAIN=" \
+            --update-secrets "DATABASE_URL=database-url:latest"
+
+      # Step 7: Verify deployment
+      - name: Verify deployment
+        run: |
+          URL=$(gcloud run services describe ${{ env.SERVICE }} --region ${{ env.REGION }} --format="value(status.url)")
+          echo "=========================================="
+          echo "Deployment complete!"
+          echo "URL: $URL"
+          echo "=========================================="
+
+      # Step 8: Health check
+      - name: Health check
+        run: |
+          URL=$(gcloud run services describe ${{ env.SERVICE }} --region ${{ env.REGION }} --format="value(status.url)")
+          echo "Waiting 30 seconds for cold start..."
+          sleep 30
+          echo "Testing $URL/readyz/"
+          if curl -f -s "$URL/readyz/" > /dev/null; then
+            echo "OK Health check passed"
+          else
+            echo "WARN Health check failed - check Cloud Run logs"
+            exit 1
+          fi
