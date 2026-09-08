@@ -49,7 +49,7 @@ USER ems
 # Cloud Run injects PORT env var; default to 8080
 ENV NODE_ENV=production
 ENV PORT=8080
-ENV DATABASE_URL=file:/tmp/data.db
+# DATABASE_URL now set via Cloud Run env vars / secrets
 EXPOSE 8080
 
 # Startup script initializes SQLite then runs server

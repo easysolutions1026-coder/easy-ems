@@ -1,18 +1,18 @@
 // ====================================================================
-// IMSE EASY EMS - Prisma Schema (Production/Cloud Run - SQLite)
+// IMSE EASY EMS - Prisma Schema (Phase 0)
 // ====================================================================
-// SQLite version for ephemeral Cloud Run deployment.
-// Uses same table structure as Postgres schema but with SQLite types.
-// Data does NOT persist across container restarts (ephemeral).
+// Strategy: hybrid JSONB + indexed columns.
+// Each table has a data JSONB column plus a few indexed scalar columns
+// for common queries. Version column enables optimistic locking.
 // ====================================================================
 
 generator client {
   provider      = "prisma-client-js"
-  binaryTargets = ["native", "debian-openssl-3.0.x", "linux-musl-openssl-3.0.x"]
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -28,8 +28,8 @@ model AppUser {
   pinExpiry      DateTime?
   pinPeriodDays  Int       @default(30)
   active         Boolean   @default(true)
-  permissions    String?
-  data           String
+  permissions    Json?
+  data           Json
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   createdBy      String?
@@ -41,15 +41,15 @@ model AppUser {
 }
 
 model AuditLog {
-  id            Int      @id @default(autoincrement())
+  id            BigInt   @id @default(autoincrement())
   ts            DateTime @default(now())
   userEmail     String?
   userName      String?
   action        String
   collection    String?
   recordId      String?
-  before        String?
-  after         String?
+  before        Json?
+  after         Json?
   ip            String?
 
   @@index([ts])
@@ -61,7 +61,7 @@ model AuditLog {
 
 model Setting {
   key       String   @id
-  data      String
+  data      Json
   updatedAt DateTime @updatedAt
   updatedBy String?
 }
@@ -75,7 +75,7 @@ model Party {
   gstin          String?
   partyType      String?
   active         Boolean  @default(true)
-  data           String
+  data           Json
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   createdBy      String?
@@ -96,7 +96,7 @@ model ChartOfAccount {
   accountType  String?
   parentCode   String?
   active       Boolean  @default(true)
-  data         String
+  data         Json
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   createdBy      String?
@@ -114,9 +114,9 @@ model BankAccount {
   bankName     String?
   accountNo    String?
   ifsc         String?
-  balance      Float?
+  balance      Decimal? @db.Decimal(15, 2)
   active       Boolean  @default(true)
-  data         String
+  data         Json
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   createdBy      String?
@@ -130,10 +130,10 @@ model BankReconciliation {
   accountID    String
   periodMonth  Int
   periodYear   Int
-  openingBal   Float?
-  closingBal   Float?
+  openingBal   Decimal? @db.Decimal(15, 2)
+  closingBal   Decimal? @db.Decimal(15, 2)
   status       String?
-  data         String
+  data         Json
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   createdBy      String?
@@ -156,7 +156,7 @@ model Staff {
   email          String?
   phone          String?
   joinDate       DateTime?
-  data           String
+  data           Json
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   createdBy      String?
@@ -177,11 +177,11 @@ model Transaction {
   txnDate        DateTime?
   partyID        String?
   partyName      String?
-  totalAmount    Float?
+  totalAmount    Decimal?  @db.Decimal(15, 2)
   status         String?
   revisionNo     Int       @default(0)
   fiscalYear     String?
-  data           String
+  data           Json
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   createdBy      String?
@@ -203,13 +203,13 @@ model Expense {
   billDate       DateTime?
   partyID        String?
   partyName      String?
-  totalAmount    Float?
-  balanceAmount  Float?
+  totalAmount    Decimal?  @db.Decimal(15, 2)
+  balanceAmount  Decimal?  @db.Decimal(15, 2)
   status         String?
   gstClaimable   Boolean   @default(false)
   tdsApplicable  Boolean   @default(false)
   fiscalYear     String?
-  data           String
+  data           Json
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   createdBy      String?
@@ -227,10 +227,10 @@ model DirectorExpense {
   deID          String    @unique
   directorName  String?
   expenseDate   DateTime?
-  amount        Float?
+  amount        Decimal?  @db.Decimal(15, 2)
   reimbursed    Boolean   @default(false)
   reimburseDate DateTime?
-  data          String
+  data          Json
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   createdBy      String?
@@ -247,14 +247,14 @@ model PaymentRequest {
   id             String    @id @default(cuid())
   prID           String    @unique
   prDate         DateTime?
-  billIDs        String?
-  requestedAmt   Float?
-  approvedAmt    Float?
-  disbursedAmt   Float?
+  billIDs        Json?
+  requestedAmt   Decimal?  @db.Decimal(15, 2)
+  approvedAmt    Decimal?  @db.Decimal(15, 2)
+  disbursedAmt   Decimal?  @db.Decimal(15, 2)
   status         String?
   revisionNo     Int       @default(0)
   fiscalYear     String?
-  data           String
+  data           Json
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   createdBy      String?
@@ -270,10 +270,10 @@ model FundRequest {
   frID          String    @unique
   frDate        DateTime?
   technicianID  String?
-  amount        Float?
+  amount        Decimal?  @db.Decimal(15, 2)
   status        String?
   poolID        String?
-  data          String
+  data          Json
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   createdBy      String?
@@ -291,11 +291,11 @@ model FundPool {
   technicianID  String?
   openedDate    DateTime?
   closedDate    DateTime?
-  openingAmt    Float?
-  spentAmt      Float?
-  balanceAmt    Float?
+  openingAmt    Decimal?  @db.Decimal(15, 2)
+  spentAmt      Decimal?  @db.Decimal(15, 2)
+  balanceAmt    Decimal?  @db.Decimal(15, 2)
   status        String?
-  data          String
+  data          Json
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   createdBy      String?
@@ -315,12 +315,12 @@ model ArInvoice {
   invoiceDate   DateTime?
   partyID       String?
   partyName     String?
-  invoiceAmt    Float?
-  receivedAmt   Float?
-  balanceAmt    Float?
+  invoiceAmt    Decimal?  @db.Decimal(15, 2)
+  receivedAmt   Decimal?  @db.Decimal(15, 2)
+  balanceAmt    Decimal?  @db.Decimal(15, 2)
   ageDays       Int?
   status        String?
-  data          String
+  data          Json
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   createdBy      String?
@@ -340,9 +340,9 @@ model ProjectExpense {
   technicianID   String?
   projectRef     String?
   category       String?
-  amount         Float?
+  amount         Decimal?  @db.Decimal(15, 2)
   poolID         String?
-  data           String
+  data           Json
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   createdBy      String?
@@ -361,7 +361,7 @@ model WorkLog {
   projectRef     String?
   weekStartDate  DateTime?
   status         String?
-  data           String
+  data           Json
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   createdBy      String?
@@ -381,16 +381,16 @@ model Payslip {
   staffID      String
   periodMonth  Int
   periodYear   Int
-  gross        Float?
-  net          Float?
-  pfAmt        Float?
-  esicAmt      Float?
-  ptAmt        Float?
-  tdsAmt       Float?
+  gross        Decimal?  @db.Decimal(15, 2)
+  net          Decimal?  @db.Decimal(15, 2)
+  pfAmt        Decimal?  @db.Decimal(15, 2)
+  esicAmt      Decimal?  @db.Decimal(15, 2)
+  ptAmt        Decimal?  @db.Decimal(15, 2)
+  tdsAmt       Decimal?  @db.Decimal(15, 2)
   status       String?
   approvedAt   DateTime?
   approvedBy   String?
-  data         String
+  data         Json
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   createdBy      String?
@@ -409,10 +409,10 @@ model PettyCashOffice {
   officeID         String   @unique
   officeName       String
   custodianStaffID String?
-  imprestLimit     Float?
-  currentBalance   Float?
+  imprestLimit     Decimal? @db.Decimal(15, 2)
+  currentBalance   Decimal? @db.Decimal(15, 2)
   active           Boolean  @default(true)
-  data             String
+  data             Json
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   createdBy      String?
@@ -428,9 +428,9 @@ model PettyCashTransaction {
   officeID  String
   txnType   String
   txnDate   DateTime?
-  amount    Float?
+  amount    Decimal?  @db.Decimal(15, 2)
   category  String?
-  data      String
+  data      Json
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   createdBy      String?
@@ -450,7 +450,7 @@ model PettyCashStatement {
   verifiedBy    String?
   verifiedAt    DateTime?
   postedToTally Boolean   @default(false)
-  data          String
+  data          Json
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   createdBy      String?
@@ -468,7 +468,7 @@ model GstCashLedgerSnapshot {
   snapshotDate  DateTime?
   periodMonth   Int?
   periodYear    Int?
-  data          String
+  data          Json
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   createdBy      String?
@@ -491,7 +491,7 @@ model CompanyDocument {
   expiryDate                  DateTime?
   isLifetime                  Boolean   @default(false)
   renewalReminderAcknowledged Boolean   @default(false)
-  data                        String
+  data                        Json
   createdAt                   DateTime  @default(now())
   updatedAt                   DateTime  @updatedAt
   createdBy      String?
@@ -515,7 +515,7 @@ model SyncState {
 }
 
 model ChangeEvent {
-  id         Int      @id @default(autoincrement())
+  id         BigInt   @id @default(autoincrement())
   ts         DateTime @default(now())
   collection String
   recordId   String

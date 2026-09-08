@@ -83,8 +83,7 @@ Write-Host "[3/6] Building Docker image via Cloud Build (this takes 3-5 min)..."
 Write-Host "  Building from: backend/Dockerfile.production"
 
 gcloud builds submit `
-    --tag $IMAGE_NAME `
-    --file backend/Dockerfile.production `
+    --config cloudbuild.yaml `
     --timeout=15m `
     .
 
