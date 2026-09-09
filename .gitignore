@@ -38,3 +38,9 @@ backups/
 # GitHub Actions workflow backups
 *.old-backup
 
+
+# Frontend merge temp files
+frontend/index.html.merged-preview
+frontend/index.html.production-new
+frontend/index.html.cloud-run-backup
+
