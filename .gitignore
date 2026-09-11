@@ -44,3 +44,8 @@ frontend/index.html.merged-preview
 frontend/index.html.production-new
 frontend/index.html.cloud-run-backup
 
+
+erspcimse-easy-ems
+*.pre-oauth-fix
+*.backup
+*.bak

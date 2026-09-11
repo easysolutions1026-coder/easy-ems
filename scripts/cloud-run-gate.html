@@ -1,0 +1,49 @@
+
+  <!-- CLOUD_RUN_GATE_START -->
+  <!-- Cloud Run: isolate this instance from Google Sheets during Phase A testing.
+       Auto-re-applied by scripts/apply-cloud-run-gate.ps1 on every prod HTML sync.
+       Remove this block ONLY when you're ready to turn Sheets sync back on. -->
+  <script>
+  (function() {
+    window.__CLOUD_RUN__ = true;
+
+    var origFetch = window.fetch;
+    window.fetch = function(input, init) {
+      var url = typeof input === 'string' ? input : (input && input.url) || '';
+      if (url.indexOf('https://sheets.googleapis.com') === 0) {
+        console.info('[Cloud Run] Sheets call blocked:', url);
+        return Promise.resolve(new Response(
+          JSON.stringify({ sheets: [], values: [], spreadsheetId: null, replies: [] }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        ));
+      }
+      return origFetch.apply(this, arguments);
+    };
+
+    var installStub = function() {
+      if (typeof window.syncToGoogleSheets === 'function' && !window.syncToGoogleSheets.__cloudRunStub) {
+        window.syncToGoogleSheets = function() {
+          console.info('[Cloud Run] Sheets sync button suppressed');
+          if (typeof _showToast === 'function') {
+            _showToast('Cloud Run mode - Sheets sync disabled during testing', '#0369a1', 4000);
+          } else {
+            alert('Cloud Run mode - Sheets sync is disabled during testing.');
+          }
+        };
+        window.syncToGoogleSheets.__cloudRunStub = true;
+        console.info('[Cloud Run] syncToGoogleSheets stub installed');
+        return true;
+      }
+      return false;
+    };
+    if (!installStub()) {
+      var tries = 0;
+      var t = setInterval(function() {
+        if (installStub() || ++tries > 50) clearInterval(t);
+      }, 200);
+    }
+
+    console.info('[Cloud Run] Sheets sync disabled - Cloud SQL only mode');
+  })();
+  </script>
+  <!-- CLOUD_RUN_GATE_END -->
