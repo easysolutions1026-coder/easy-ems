@@ -466,6 +466,17 @@ router.post('/:collection', async (req, res) => {
     }
     if (!cfg || !cfg.model) return res.status(404).json({ error: 'UNKNOWN_COLLECTION' });
     if (!Array.isArray(payload)) return res.status(400).json({ error: 'EXPECTED_ARRAY' });
+    if (!Array.isArray(payload)) return res.status(400).json({ error: 'EXPECTED_ARRAY' });
+
+// SAFETY GUARD 1: refuse empty-array writes unless explicitly confirmed.
+// A client sending [] is almost always a bug (empty in-memory state saved
+// back to server). Legitimate "delete all" needs ?confirmWipe=true.
+    if (payload.length === 0 && req.query.confirmWipe !== 'true') {
+      return res.status(400).json({
+        error: 'REFUSED_EMPTY_WRITE',
+        hint: 'Empty-array writes are refused to prevent accidental wipes. Add ?confirmWipe=true to force.'
+     });
+    }
 
     const idField = cfg.idField;
     const mapIn = cfg.mapIn;
@@ -529,8 +540,16 @@ router.post('/:collection', async (req, res) => {
       // Delete rows removed by client
       const existing = await delegate.findMany({ select: { [idField]: true } });
       const toDelete = existing.map(r => r[idField]).filter(id => !seenIds.has(String(id)));
-
-      if (toDelete.length) {
+            if (toDelete.length) {
+        // SAFETY GUARD 2: refuse bulk deletes above 50% threshold unless confirmed.
+        const existingCount = existing.length;
+        const deleteRatio = toDelete.length / existingCount;
+        if (deleteRatio > 0.5 && req.query.confirmBulkDelete !== 'true') {
+          throw new Error(
+            `REFUSED_BULK_DELETE: Would delete ${toDelete.length}/${existingCount} rows ` +
+            `(${(deleteRatio * 100).toFixed(0)}%). Add ?confirmBulkDelete=true to proceed.`
+          );
+        }
         await delegate.deleteMany({ where: { [idField]: { in: toDelete } } });
         for (const id of toDelete) {
           try {
