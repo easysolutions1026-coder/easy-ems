@@ -78,29 +78,37 @@ const COLLECTIONS = {
   bankAccounts: {
     model: prisma.bankAccount, idField: 'accountID',
     mapIn: (r) => ({
-      accountID: r.accountID,
+      accountID: r.accountID || r.id,
       accountName: r.accountName || 'Unnamed',
       bankName: r.bankName ?? null,
       accountNo: r.accountNo ?? null,
-      ifsc: r.ifsc ?? null,
+      ifsc: r.ifsc || r.ifscCode || null,
       balance: r.balance != null ? r.balance : null,
-      active: r.active ?? true,
+      active: r.active ?? r.isActive ?? true,
       data: r,
     }),
     mapOut: defaultMapOut,
   },
   bankReconciliations: {
     model: prisma.bankReconciliation, idField: 'reconID',
-    mapIn: (r) => ({
-      reconID: r.reconID,
-      accountID: r.accountID || 'unknown',
-      periodMonth: Number(r.periodMonth) || 1,
-      periodYear: Number(r.periodYear) || 2026,
-      openingBal: r.openingBal ?? null,
-      closingBal: r.closingBal ?? null,
-      status: r.status ?? null,
-      data: r,
-    }),
+    mapIn: (r) => {
+      const reconID = r.reconID || r.id;
+      // Derive month/year from periodTo (or periodFrom as fallback)
+      const periodDate = (r.periodTo || r.periodFrom) ? new Date(r.periodTo || r.periodFrom) : null;
+      const validDate = periodDate && !isNaN(periodDate.getTime()) ? periodDate : null;
+      const periodMonth = validDate ? validDate.getMonth() + 1 : (Number(r.periodMonth) || 1);
+      const periodYear = validDate ? validDate.getFullYear() : (Number(r.periodYear) || 2026);
+      return {
+        reconID: reconID,
+        accountID: r.accountID || r.bankAccountId || 'unknown',
+        periodMonth: periodMonth,
+        periodYear: periodYear,
+        openingBal: r.openingBal ?? r.openingBalance ?? null,
+        closingBal: r.closingBal ?? r.closingBalance ?? null,
+        status: r.status ?? (r.verifiedBy ? 'Verified' : null),
+        data: r,
+      };
+    },
     mapOut: defaultMapOut,
   },
   staff: {
@@ -137,15 +145,15 @@ const COLLECTIONS = {
   expenses: {
     model: prisma.expense, idField: 'exID',
     mapIn: (r) => ({
-      exID: r.exID,
+      exID: r.exID || r.expID,
       billType: r.billType ?? null,
       billDate: r.billDate ? new Date(r.billDate) : null,
-      partyID: r.partyID ?? null,
-      partyName: r.partyName ?? null,
-      totalAmount: r.totalAmount ?? null,
-      balanceAmount: r.balanceAmount ?? null,
-      status: r.status ?? null,
-      gstClaimable: !!r.gstClaimable,
+      partyID: r.partyID ?? r.companyName ?? null,
+      partyName: r.partyName ?? r.companyName ?? null,
+      totalAmount: r.totalAmount ?? r.totalBillAmt ?? r.billAmount ?? null,
+      balanceAmount: r.balanceAmount ?? r.balanceAmt ?? null,
+      status: r.status ?? r.payStatus ?? null,
+      gstClaimable: !!(r.gstClaimable || r.gstInputClaimable),
       tdsApplicable: !!r.tdsApplicable,
       fiscalYear: r.fiscalYear ?? null,
       data: r,
@@ -184,10 +192,10 @@ const COLLECTIONS = {
   fundRequests: {
     model: prisma.fundRequest, idField: 'frID',
     mapIn: (r) => ({
-      frID: r.frID,
-      frDate: r.frDate ? new Date(r.frDate) : null,
-      technicianID: r.technicianID ?? null,
-      amount: r.amount ?? null,
+      frID: r.frID || r.requestID,
+      frDate: (r.frDate || r.requestedDate) ? new Date(r.frDate || r.requestedDate) : null,
+      technicianID: r.technicianID || r.requestedBy || null,
+      amount: r.amount ?? r.requestedAmount ?? r.disbursedAmount ?? null,
       status: r.status ?? null,
       poolID: r.poolID ?? null,
       data: r,
@@ -229,12 +237,12 @@ const COLLECTIONS = {
   projectExpenses: {
     model: prisma.projectExpense, idField: 'peID',
     mapIn: (r) => ({
-      peID: r.peID,
-      peDate: r.peDate ? new Date(r.peDate) : null,
+      peID: r.peID || r.projExpID,
+      peDate: (r.peDate || r.startDate || r.createdAt) ? new Date(r.peDate || r.startDate || r.createdAt) : null,
       technicianID: r.technicianID ?? null,
-      projectRef: r.projectRef ?? null,
+      projectRef: r.projectRef || r.projectName || null,
       category: r.category ?? null,
-      amount: r.amount ?? null,
+      amount: r.amount ?? r.totalFunds ?? null,
       poolID: r.poolID ?? null,
       data: r,
     }),
@@ -255,17 +263,17 @@ const COLLECTIONS = {
   payslips: {
     model: prisma.payslip, idField: 'payslipID',
     mapIn: (r) => ({
-      payslipID: r.payslipID,
+      payslipID: r.payslipID || r.psID,
       staffID: r.staffID || 'unknown',
       periodMonth: Number(r.periodMonth) || 1,
       periodYear: Number(r.periodYear) || 2026,
       gross: r.gross ?? null,
-      net: r.net ?? null,
+      net: r.net ?? r.netPay ?? null,
       pfAmt: r.pfAmt ?? null,
       esicAmt: r.esicAmt ?? null,
       ptAmt: r.ptAmt ?? null,
       tdsAmt: r.tdsAmt ?? null,
-      status: r.status ?? null,
+      status: r.status ?? (r.approved ? 'Approved' : null),
       approvedAt: r.approvedAt ? new Date(r.approvedAt) : null,
       approvedBy: r.approvedBy ?? null,
       data: r,
@@ -301,13 +309,13 @@ const COLLECTIONS = {
   pettyCashStatements: {
     model: prisma.pettyCashStatement, idField: 'stmtID',
     mapIn: (r) => ({
-      stmtID: r.stmtID,
+      stmtID: r.stmtID || r.statementID,
       officeID: r.officeID || 'unknown',
-      periodMonth: Number(r.periodMonth) || 1,
-      periodYear: Number(r.periodYear) || 2026,
+      periodMonth: Number(r.periodMonth) || Number(r.month) || 1,
+      periodYear: Number(r.periodYear) || Number(r.year) || 2026,
       verifiedBy: r.verifiedBy ?? null,
       verifiedAt: r.verifiedAt ? new Date(r.verifiedAt) : null,
-      postedToTally: !!r.postedToTally,
+      postedToTally: !!(r.postedToTally || r.tallyPostedAt),
       data: r,
     }),
     mapOut: defaultMapOut,
@@ -466,16 +474,15 @@ router.post('/:collection', async (req, res) => {
     }
     if (!cfg || !cfg.model) return res.status(404).json({ error: 'UNKNOWN_COLLECTION' });
     if (!Array.isArray(payload)) return res.status(400).json({ error: 'EXPECTED_ARRAY' });
-    if (!Array.isArray(payload)) return res.status(400).json({ error: 'EXPECTED_ARRAY' });
 
-// SAFETY GUARD 1: refuse empty-array writes unless explicitly confirmed.
-// A client sending [] is almost always a bug (empty in-memory state saved
-// back to server). Legitimate "delete all" needs ?confirmWipe=true.
+    // SAFETY GUARD 1: refuse empty-array writes unless explicitly confirmed.
+    // A client sending [] is almost always a bug (empty in-memory state saved
+    // back to server). Legitimate "delete all" requires ?confirmWipe=true.
     if (payload.length === 0 && req.query.confirmWipe !== 'true') {
       return res.status(400).json({
         error: 'REFUSED_EMPTY_WRITE',
         hint: 'Empty-array writes are refused to prevent accidental wipes. Add ?confirmWipe=true to force.'
-     });
+      });
     }
 
     const idField = cfg.idField;
@@ -540,8 +547,10 @@ router.post('/:collection', async (req, res) => {
       // Delete rows removed by client
       const existing = await delegate.findMany({ select: { [idField]: true } });
       const toDelete = existing.map(r => r[idField]).filter(id => !seenIds.has(String(id)));
-            if (toDelete.length) {
+
+      if (toDelete.length) {
         // SAFETY GUARD 2: refuse bulk deletes above 50% threshold unless confirmed.
+        // Prevents accidental wipes when the client sends a partial dataset.
         const existingCount = existing.length;
         const deleteRatio = toDelete.length / existingCount;
         if (deleteRatio > 0.5 && req.query.confirmBulkDelete !== 'true') {
