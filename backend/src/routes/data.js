@@ -497,11 +497,13 @@ router.post('/:collection', async (req, res) => {
       const seenIds = new Set();
 
       for (const rec of payload) {
-        if (!rec || !rec[idField]) continue;
-        const key = String(rec[idField]);
+        if (!rec) continue;
+        const rowFields = mapIn(rec);
+        const resolvedId = rowFields[idField];
+        if (!resolvedId) continue;
+        const key = String(resolvedId);
         seenIds.add(key);
 
-        const rowFields = mapIn(rec);
 
         // Build create payload (initial version = 1)
         const createPayload = {
