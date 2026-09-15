@@ -11370,10 +11370,11 @@
         }
 
         function expSummaryCards(list) {
-            const total   = list.reduce((s,e) => s + (parseFloat(e.billAmtINR)||0), 0);
-            const paid    = list.filter(e => e.payStatus === 'Paid').reduce((s,e) => s + (parseFloat(e.billAmtINR)||0), 0);
-            const pending = list.filter(e => e.payStatus === 'Pending').reduce((s,e) => s + (parseFloat(e.balanceAmt ?? e.netPayable)||0), 0);
-            const tds     = list.reduce((s,e) => s + (parseFloat(e.tdsAmt)||0), 0);
+            const active  = list.filter(e => !e.voided);
+            const total   = active.reduce((s,e) => s + (parseFloat(e.billAmtINR)||0), 0);
+            const paid    = active.filter(e => e.payStatus === 'Paid').reduce((s,e) => s + (parseFloat(e.billAmtINR)||0), 0);
+            const pending = active.filter(e => e.payStatus === 'Pending').reduce((s,e) => s + (parseFloat(e.balanceAmt ?? e.netPayable)||0), 0);
+            const tds     = active.reduce((s,e) => s + (parseFloat(e.tdsAmt)||0), 0);
             const fmt = n => '₹' + n.toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2});
             return [
                 {label:'Total Bills (INR)', val:fmt(total), color:'bg-orange-600'},
@@ -11427,10 +11428,13 @@
             const tallyVoucherDate = e.tallyVoucherDate || '';
             const missingVoucher = tallyDone && !tallyVoucherNo;
             const attachCount = (e.billAttachments||[]).length || (e.billPhotoData ? 1 : 0);
+            const isVoided = !!e.voided;
+            const voidCls = isVoided ? ' opacity-60' : '';
+            const voidStyle = isVoided ? 'text-decoration:line-through;color:#64748b;' : '';
             const detailRowId = 'expDetail_' + e.expID.replace(/[^a-zA-Z0-9]/g,'_');
             // Primary row — 8 columns, always visible
             return `
-            <tr class="border-b hover:bg-orange-50 cursor-pointer${tallyDone?' bg-teal-50':''}" onclick="toggleExpDetail('${detailRowId}')">
+            <tr class="border-b hover:bg-orange-50 cursor-pointer${tallyDone?' bg-teal-50':''}${voidCls}" style="${voidStyle}" onclick="toggleExpDetail('${detailRowId}')" title="${isVoided ? 'VOIDED: ' + (e.voidRemark || '') : ''}">
                 <td class="px-2 py-2 text-center">
                     <span id="${detailRowId}_arrow" style="font-size:10px;color:#9ca3af;transition:transform .2s;display:inline-block">▶</span>
                 </td>
@@ -13603,10 +13607,30 @@
         function editExpense(exp) { openExpenseModal(exp); }
 
         async function deleteExpense(expID) {
-            if (!confirm('Delete this expense record?')) return;
-            // ── Level 2 concurrency: pre-delete staleness check ──
+            const exp = expenses.find(x => x.expID === expID);
+            if (!exp) return;
+            
+            const summary = 'Voucher: ' + (exp.voucherNo || expID) + '\n' +
+                            'Vendor: ' + (exp.companyName || exp.staffName || '—') + '\n' +
+                            'Amount: ₹' + (exp.netPayable || exp.balanceAmt || 0);
+            const remark = prompt(
+                'Void this expense record?\n\n' + summary + '\n\n' +
+                'Enter reason (minimum 3 characters):\n' +
+                'The record will remain in the list with a strikethrough.'
+            );
+            if (remark === null) return;
+            if (remark.trim().length < 3) {
+                alert('Void reason must be at least 3 characters.');
+                return;
+            }
+            // Level 2 concurrency: pre-void staleness check
             if (await _concurBlockIfStale('expenses', [{ id: expID, idKey: 'expID' }])) return;
-            expenses = expenses.filter(x => x.expID !== expID);
+            // Mark voided in place — do NOT filter out
+            exp.voided = true;
+            exp.voidedAt = new Date().toISOString();
+            exp.voidedBy = _signedInEmail || 'unknown';
+            exp.voidRemark = remark.trim();
+            exp.payStatus = 'Voided';
             await saveData('expenses', expenses);
             renderView();
         }
