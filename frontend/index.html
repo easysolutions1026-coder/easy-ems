@@ -3756,6 +3756,27 @@
                 await gapi.client.init({
                     discoveryDocs: DISCOVERY_DOCS,
                 });
+                // Only render the Sign In screen if we DON'T have a cached
+                // token to restore. When the cache is populated (same-tab
+                // refresh), gisLoaded()'s cached-restore path is running
+                // concurrently and will take the user straight into the app;
+                // rendering the Sign In screen here would just flash it
+                // uselessly before being replaced. Showing an interim
+                // loading indicator makes the transition look intentional.
+                let cachedToken = null;
+                try { cachedToken = sessionStorage.getItem('_bmsOAuth'); } catch(e) {}
+                if (cachedToken) {
+                    const appEl = document.getElementById('app');
+                    if (appEl) {
+                        appEl.innerHTML = `<div class="min-h-screen flex items-center justify-center">
+                            <div class="text-center">
+                                <div class="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                                <p class="text-gray-600 font-medium">Restoring session...</p>
+                            </div>
+                        </div>`;
+                    }
+                    return;
+                }
                 renderLoginScreen();
             });
         }
@@ -3818,6 +3839,15 @@
                     callback: async (response) => {
                         if (response.error) {
                             console.log('Silent OAuth restore not available (' + response.error + ') — sign in manually');
+                            // If gapiLoaded skipped renderLoginScreen because
+                            // a cached token existed but the token turned out
+                            // to be invalid/expired at read time, we'd be
+                            // stuck on the "Restoring session..." spinner.
+                            // Render the Sign-In screen so the user has a
+                            // way forward.
+                            if (!accessToken) {
+                                try { renderLoginScreen(); } catch(e) {}
+                            }
                             return;
                         }
                         if (response.access_token) {
@@ -3829,6 +3859,9 @@
             } catch (e) {
                 // Non-fatal: user will just click Sign In.
                 console.warn('Silent restore attempt threw:', e);
+                if (!accessToken) {
+                    try { renderLoginScreen(); } catch(err) {}
+                }
             }
         }
 
