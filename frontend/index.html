@@ -5057,7 +5057,7 @@
                 if (typeof showToast === 'function') showToast(`✓ Wiped — Cleared all fund data + removed pool linkage from ${strippedCount} expense${strippedCount===1?'':'s'}`, 5000);
                 renderView();
             } catch(err) {
-                alert('Wipe failed: ' + err.message + '\n\nIn-memory state may be partially changed. Refresh app to reload from Drive.');
+                alert('Wipe failed: ' + err.message + '\n\nIn-memory state may be partially changed. Refresh app to reload data.');
             }
         }
 
@@ -5117,7 +5117,7 @@
                 if (typeof showToast === 'function') showToast(`✅ Heavy Wipe done — All field expense data cleared. ${totalProjects} project shell${totalProjects===1?'':'s'} preserved.`, 6000);
                 renderView();
             } catch(err) {
-                alert('Heavy Wipe failed: ' + err.message + '\n\nIn-memory state may be partially changed. Refresh app to reload from Drive.');
+                alert('Heavy Wipe failed: ' + err.message + '\n\nIn-memory state may be partially changed. Refresh app to reload data.');
             }
         }
 
@@ -5378,7 +5378,7 @@
                 appEl.innerHTML = `<div class="min-h-screen flex items-center justify-center">
                     <div class="text-center">
                         <div class="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                        <p class="text-gray-600 font-medium">Loading your data from Drive...</p>
+                        <p class="text-gray-600 font-medium">Loading your data...</p>
                         <p class="text-gray-400 text-xs mt-1" id="loadStatus">Connecting to folder...</p>
                     </div>
                 </div>`;
@@ -5619,7 +5619,7 @@
                         <div class="bg-white rounded-2xl shadow-xl p-8 max-w-md text-center">
                             <div class="text-5xl mb-4">⚠️</div>
                             <h2 class="text-xl font-bold text-red-700 mb-2">Could not load your data</h2>
-                            <p class="text-gray-600 text-sm mb-1">${error.message || 'Drive connection failed.'}</p>
+                            <p class="text-gray-600 text-sm mb-1">${error.message || 'Connection failed.'}</p>
                             <p class="text-gray-400 text-xs mb-6">Check your internet connection and try signing in again.</p>
                             <button onclick="handleSignOut()" class="px-6 py-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-medium">↩ Sign Out &amp; Retry</button>
                         </div>
@@ -7842,12 +7842,12 @@
                             </div>
                             <div class="flex items-center gap-3">
                                 <div class="px-4 py-2 bg-green-100 rounded-lg text-sm">
-                                    <span class="text-green-700 font-medium">✓ Connected to Google Drive</span>
+                                    <span class="text-green-700 font-medium">✓ Connected</span>
                                 </div>
                                 <!-- Save indicator -->
                                 <div id="saveIndicator" style="display:none;font-size:12px;font-weight:600;padding:4px 12px;border-radius:8px;background:#f0fdf4;border:1px solid #bbf7d0"></div>
                                 <!-- Last-sync indicator (Level 2 concurrency) -->
-                                <div id="syncIndicator" title="Background sync from Drive (Level 2 concurrency)" style="font-size:11px;font-weight:600;padding:4px 12px;border-radius:8px;background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8">🔄 Last sync: just now</div>
+                                <div id="syncIndicator" title="Background sync (Level 2 concurrency)" style="font-size:11px;font-weight:600;padding:4px 12px;border-radius:8px;background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8">🔄 Last sync: just now</div>
                                 <!-- Lock banner -->
                                 <div id="lockBanner" style="display:none;font-size:11px;font-weight:600;padding:4px 12px;border-radius:8px;background:#fef9c3;border:1px solid #fde68a;color:#92400e;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
                                 <!-- User avatar + name -->
@@ -40528,7 +40528,7 @@ Automated WFH alert — ${company} Attendance System.`;
             } catch (e) {
                 gstCashLedgerSnapshots.pop();   // rollback
                 console.error('Cash Ledger save error:', e);
-                alert('⚠ Could not save snapshot.\n\nError: ' + (e.message || e) + '\n\nThe data has NOT been saved. Common causes:\n• Drive permission lost (re-login)\n• Network issue\n• Drive quota exceeded\n\nTry again, or share the error message for help.');
+                alert('⚠ Could not save snapshot.\n\nError: ' + (e.message || e) + '\n\nThe data has NOT been saved. Common causes:\n• Sign-in expired (re-login)\n• Network issue\n• Storage quota exceeded\n\nTry again, or share the error message for help.');
             }
         }
 
