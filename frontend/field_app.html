@@ -26,7 +26,15 @@
         '1x1NniCFB4hba29FxsO9b5rmKoMHE3J8s': 'fundPools'
       };
 
-      function getToken() { return window.accessToken || null; }
+      function getToken() {
+        try {
+          if (window.gapi && gapi.client && gapi.client.getToken) {
+            var t = gapi.client.getToken();
+            if (t && t.access_token) return t.access_token;
+          }
+        } catch (e) {}
+        return window.accessToken || window._accessToken || null;
+      }
 
       function jsonResponse(obj, status) {
         return new Response(JSON.stringify(obj), {
