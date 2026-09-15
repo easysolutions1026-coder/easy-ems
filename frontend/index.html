@@ -11387,6 +11387,12 @@
         }
 
         function renderExpenseTable(list) {
+             // Sort by Bill Log Ref No (numeric portion after the dash) ascending.
+                             list = (list || []).slice().sort((a, b) => {
+                             const aNum = parseInt(String(a && a.voucherNo || '').split('-').pop(), 10) || 0;
+                             const bNum = parseInt(String(b && b.voucherNo || '').split('-').pop(), 10) || 0;
+                             return aNum - bNum;
+                             });
             if (!list || list.length === 0)
                 return '<p class="text-gray-400 text-center py-12">No expenses yet. Add your first bill!</p>';
             return `<div class="overflow-x-auto">
