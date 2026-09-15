@@ -62,10 +62,47 @@ async function requireGoogleAuth(req, res, next) {
     res.status(401).json({ error: 'INVALID_TOKEN', detail: err.message });
   }
 }
+// Role-based access control for technician accounts.
+const TECHNICIAN_EMAILS = (process.env.TECHNICIAN_EMAILS || 'imsetechnician@gmail.com')
+  .split(',').map(function(e) { return e.trim().toLowerCase(); }).filter(Boolean);
 
+const TECHNICIAN_ALLOWED_COLLECTIONS = new Set([
+  'projectExpenses', 'workLogs', 'fundRequests',
+  'staff',      // read-only (see check below)
+  'fundPools'   // read-only (see check below)
+]);
+
+const TECHNICIAN_READ_ONLY_COLLECTIONS = new Set(['staff', 'fundPools']);
+
+function enforceRoleAccess(req, res, next) {
+  const email = (req.user && req.user.email || '').toLowerCase();
+  const isTechnician = TECHNICIAN_EMAILS.includes(email);
+  if (req.user) req.user.role = isTechnician ? 'technician' : 'office';
+
+  if (!isTechnician) return next();
+
+  const m = req.path.match(/^\/([^/]+)/);
+  const collection = m ? m[1] : '';
+
+  if (!TECHNICIAN_ALLOWED_COLLECTIONS.has(collection)) {
+    return res.status(403).json({
+      error: 'FORBIDDEN_FOR_ROLE',
+      detail: 'Technician role cannot access ' + collection
+    });
+  }
+
+  if (req.method !== 'GET' && TECHNICIAN_READ_ONLY_COLLECTIONS.has(collection)) {
+    return res.status(403).json({
+      error: 'READ_ONLY_FOR_ROLE',
+      detail: 'Technician role has read-only access to ' + collection
+    });
+  }
+
+  next();
+}
 // API routes (must come before static)
 app.use('/api', requireGoogleAuth);
-app.use('/api/data', dataRoutes);
+app.use('/api/data', enforceRoleAccess, dataRoutes);
 
 // Static frontend with proper UTF-8 headers
 const frontendDir = '/app/frontend';
@@ -86,6 +123,10 @@ const staticOptions = {
 };
 
 app.use('/shim', express.static(path.join(frontendDir, 'shared'), staticOptions));
+// Field app route - serves field_app.html at /field
+app.get('/field', function(req, res) {
+  res.sendFile(path.join(frontendDir, 'field_app.html'));
+});
 app.use('/', express.static(frontendDir, staticOptions));
 
 // Global error handler

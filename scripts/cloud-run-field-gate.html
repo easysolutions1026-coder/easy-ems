@@ -1,0 +1,130 @@
+
+    <!-- CLOUD_RUN_FIELD_GATE_START -->
+    <!-- Cloud Run: route field app's data reads/writes to Cloud SQL.
+         The 5 known data fileIds (projectExpenses, workLogs, staff, fundRequests,
+         fundPools) are intercepted at the fetch layer. Attachment operations
+         (photos in Drive) pass through untouched. -->
+    <script>
+    (function() {
+      window.__CLOUD_RUN_FIELD__ = true;
+
+      // Must match SHARED_FILE_IDS values in field app
+      var FILEID_TO_COLLECTION = {
+        '1OwJc4CdczowDWeHpCtSmfR0pYqhS49s0': 'projectExpenses',
+        '1P1sZh77q7w33eY2B9P20sYpT92Cb1FuK': 'workLogs',
+        '1JFS8ZZNkCXx8sIx6ssZzCbtbciRUrK3v': 'staff',
+        '1HMZBIrE59L6ZpXBa-94uWPaK2S2GG3N7': 'fundRequests',
+        '1x1NniCFB4hba29FxsO9b5rmKoMHE3J8s': 'fundPools'
+      };
+
+      function getToken() { return window.accessToken || null; }
+
+      function jsonResponse(obj, status) {
+        return new Response(JSON.stringify(obj), {
+          status: status || 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      // Match a Drive URL and identify if it targets one of our data files
+      function parseDriveOp(url) {
+        var m = url.match(/googleapis\.com\/(?:upload\/)?drive\/v3\/files\/([A-Za-z0-9_-]+)/);
+        if (!m) return null;
+        var fileId = m[1];
+        var collection = FILEID_TO_COLLECTION[fileId];
+        if (!collection) return null;
+        return { fileId: fileId, collection: collection };
+      }
+
+      var origFetch = window.fetch;
+      window.fetch = function(input, init) {
+        var url = typeof input === 'string' ? input : (input && input.url) || '';
+        var method = (init && init.method) ? init.method.toUpperCase() : 'GET';
+
+        var op = parseDriveOp(url);
+        if (!op) return origFetch.apply(this, arguments);  // Not our data file — pass through
+
+        var isUpload = /googleapis\.com\/upload\/drive/.test(url);
+        var isMedia = /[?&]alt=media/.test(url);
+        var isParents = /fields=parents/.test(url);
+        var isModTime = /fields=modifiedTime/.test(url);
+        var isSize = /fields=size,modifiedTime/.test(url);
+
+        // Parents lookup is used for attachment folder discovery — must reach real Drive.
+        if (isParents) {
+          console.info('[Cloud Run Field] Drive parents query passthrough:', op.collection);
+          return origFetch.apply(this, arguments);
+        }
+
+        var token = getToken();
+        var authHeaders = token ? { 'Authorization': 'Bearer ' + token } : {};
+
+        // Modtime/size checks -> /api/data/{col}/meta
+        if (isModTime || isSize) {
+          console.info('[Cloud Run Field] Meta check -> Cloud SQL:', op.collection);
+          return origFetch('/api/data/' + op.collection + '/meta', { headers: authHeaders })
+            .then(function(r) {
+              return r.json().then(function(d) {
+                // Shape the response like Drive would
+                return jsonResponse({
+                  modifiedTime: d.modifiedTime || null,
+                  size: String(d.recordCount || 0)
+                });
+              });
+            });
+        }
+
+        // Data read -> /api/data/{col}
+        if (isMedia && method === 'GET') {
+          console.info('[Cloud Run Field] Data read -> Cloud SQL:', op.collection);
+          return origFetch('/api/data/' + op.collection, { headers: authHeaders });
+        }
+
+        // Data write via multipart upload -> parse and POST as JSON
+        if (isUpload && (method === 'PATCH' || method === 'POST')) {
+          console.info('[Cloud Run Field] Data write -> Cloud SQL:', op.collection);
+          return extractJsonFromMultipart(init.body).then(function(payload) {
+            return origFetch('/api/data/' + op.collection, {
+              method: 'POST',
+              headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders),
+              body: JSON.stringify(payload)
+            }).then(function(r) {
+              if (r.ok) {
+                // Return a Drive-shaped success so writeFile() succeeds cleanly
+                return jsonResponse({ id: op.fileId, modifiedTime: new Date().toISOString() });
+              }
+              return r.text().then(function(t) {
+                return new Response(t, { status: r.status, headers: r.headers });
+              });
+            });
+          });
+        }
+
+        // Anything else on our data file (DELETE etc.) — pass through
+        console.warn('[Cloud Run Field] Unhandled op on data fileId - passing through:', method, url.slice(0, 120));
+        return origFetch.apply(this, arguments);
+      };
+
+      // Pull the JSON payload out of a multipart FormData body
+      function extractJsonFromMultipart(body) {
+        if (!body) return Promise.resolve([]);
+        return Promise.resolve(body).then(function(b) {
+          if (typeof b === 'string') return b;
+          if (typeof FormData !== 'undefined' && b instanceof FormData) {
+            var filePart = b.get('file');
+            if (filePart && typeof filePart.text === 'function') return filePart.text();
+            if (filePart && filePart instanceof Blob) return filePart.text();
+            return '';
+          }
+          if (b instanceof Blob) return b.text();
+          if (b && typeof b.text === 'function') return b.text();
+          return String(b);
+        }).then(function(text) {
+          try { return JSON.parse(text); } catch(e) { return []; }
+        });
+      }
+
+      console.info('[Cloud Run Field] Isolation active - Cloud SQL only mode');
+    })();
+    </script>
+    <!-- CLOUD_RUN_FIELD_GATE_END -->
