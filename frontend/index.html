@@ -13628,7 +13628,7 @@
             // Mark voided in place — do NOT filter out
             exp.voided = true;
             exp.voidedAt = new Date().toISOString();
-            exp.voidedBy = _signedInEmail || 'unknown';
+            exp.voidedBy = (typeof currentUser === 'object' && currentUser && (currentUser.email || currentUser.name)) || 'unknown';
             exp.voidRemark = remark.trim();
             exp.payStatus = 'Voided';
             await saveData('expenses', expenses);
