@@ -3751,11 +3751,21 @@
         }
 
         // Initialize Google API
+        // gapi.client is loaded asynchronously and isn't available until the
+        // `gapi.load('client', cb)` callback fires. Any code path that calls
+        // gapi.client.setToken() before that (in particular the cached-token
+        // restore that races with gapiLoaded on page load) must wait for
+        // this promise, or it throws "Cannot read properties of undefined
+        // (reading 'setToken')".
+        let _gapiClientReadyResolve;
+        const _gapiClientReady = new Promise(resolve => { _gapiClientReadyResolve = resolve; });
+
         function gapiLoaded() {
             gapi.load('client', async () => {
                 await gapi.client.init({
                     discoveryDocs: DISCOVERY_DOCS,
                 });
+                _gapiClientReadyResolve();
                 // Only render the Sign In screen if we DON'T have a cached
                 // token to restore. When the cache is populated (same-tab
                 // refresh), gisLoaded()'s cached-restore path is running
@@ -3914,6 +3924,12 @@
         // _bmsSession by _restoreSession() shortly after.
         async function _onNewAccessToken(token, opts) {
             opts = opts || {};
+            // gapi.client may not have finished loading yet, particularly on
+            // the cached-restore path that races with gapiLoaded. Await the
+            // ready signal so setToken() is safe. If gapi.client is already
+            // there (initial sign-in click, silent OAuth callback), this
+            // await resolves immediately.
+            await _gapiClientReady;
             accessToken = token;
             gapi.client.setToken({ access_token: accessToken });
             _saveCachedOAuthToken(token);
