@@ -3764,6 +3764,13 @@
             tokenClient = google.accounts.oauth2.initTokenClient({
                 client_id: CLIENT_ID,
                 scope: SCOPES,
+                // Chrome has largely deprecated 3P cookies, which breaks the
+                // classic silent OAuth path (prompt: 'none' can no longer
+                // reach accounts.google.com cookies from a cross-origin frame).
+                // FedCM is Chrome's replacement — a first-party API for the
+                // identity prompt — so opting in lets silent restore keep
+                // working for returning users even without 3P cookies.
+                use_fedcm_for_prompt: true,
                 callback: async (response) => {
                     if (response.error) {
                         console.error('Token error:', response);
@@ -3776,6 +3783,24 @@
                     }
                 },
             });
+
+            // Try the cached token in sessionStorage first — the fastest and
+            // most reliable path on refresh, because it doesn't depend on
+            // Google cookies at all (Chrome 3P cookie deprecation broke the
+            // classic silent OAuth for many users). Silent OAuth via FedCM
+            // is still attempted below as a fallback for the fresh-tab case
+            // where sessionStorage is empty but the user is signed in to
+            // Google.
+            try {
+                const cached = _readCachedOAuthToken();
+                if (cached) {
+                    console.log('✅ Restoring OAuth session from sessionStorage cache');
+                    _onNewAccessToken(cached, { fromCache: true });
+                    return;  // skip the silent-OAuth attempt below
+                }
+            } catch (e) {
+                console.warn('Cached token restore failed:', e);
+            }
 
             // Attempt silent OAuth restore on page load. If the user's Google
             // session is still active AND they've previously consented (both
@@ -3807,13 +3832,58 @@
             }
         }
 
+        // ─── sessionStorage cache for the OAuth access token ───
+        // Purpose: survive page refresh without a Google round-trip. Only used
+        // for the same tab (sessionStorage clears on tab close). Tokens are
+        // scoped to Drive/Sheets — leakage risk is bounded, and this is an
+        // internal admin tool. A backend-issued session cookie would be the
+        // stricter fix; deferred as a larger architectural change.
+        const _OAUTH_CACHE_KEY = '_bmsOAuth';
+        // Google access tokens last ~60 min; keep our cache well below that
+        // to avoid handing back a token that's about to expire mid-request.
+        const _OAUTH_CACHE_TTL_MS = 55 * 60 * 1000;
+
+        function _saveCachedOAuthToken(token) {
+            try {
+                sessionStorage.setItem(_OAUTH_CACHE_KEY, JSON.stringify({
+                    token,
+                    savedAt: Date.now()
+                }));
+            } catch (e) {
+                console.warn('OAuth token cache write failed:', e);
+            }
+        }
+
+        function _readCachedOAuthToken() {
+            const raw = sessionStorage.getItem(_OAUTH_CACHE_KEY);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw);
+            if (!parsed || !parsed.token || !parsed.savedAt) return null;
+            if (Date.now() - parsed.savedAt > _OAUTH_CACHE_TTL_MS) {
+                // Expired — clear it so we don't try again next refresh
+                sessionStorage.removeItem(_OAUTH_CACHE_KEY);
+                console.log('Cached OAuth token expired, will re-auth');
+                return null;
+            }
+            return parsed.token;
+        }
+
+        function _clearCachedOAuthToken() {
+            try { sessionStorage.removeItem(_OAUTH_CACHE_KEY); } catch(e) {}
+        }
+
         // Shared post-token flow — invoked by both the initial sign-in callback
         // and the on-load silent-restore callback so the two paths stay in sync.
         // Fetches Google user profile, kicks off data load, starts the auto-
         // refresh and lock-check timers.
-        async function _onNewAccessToken(token) {
+        // opts.fromCache=true skips the Google userinfo fetch when restoring
+        // from a cached token where currentUser will be re-populated from
+        // _bmsSession by _restoreSession() shortly after.
+        async function _onNewAccessToken(token, opts) {
+            opts = opts || {};
             accessToken = token;
             gapi.client.setToken({ access_token: accessToken });
+            _saveCachedOAuthToken(token);
             console.log('Access token received, fetching user profile...');
             try {
                 const profRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo',
@@ -3826,6 +3896,24 @@
                 currentUser = { email: '', name: 'User', picture: '' };
             }
             await loadDataFromDrive();
+            // Restore the PIN-based session from sessionStorage NOW that
+            // appUsers is populated. The old IIFE at load time (see below)
+            // fires before data loads and always no-ops — this is the
+            // effective restore point. Without this, refresh always drops
+            // the user back to the PIN entry screen even when the OAuth
+            // token was successfully cached and restored.
+            // loadDataFromDrive() calls renderApp() at its end, which will
+            // have already drawn the login screen because _bmsSession was
+            // null at render time — so after restore we re-render so the
+            // login gate re-evaluates with the now-populated session and
+            // bypasses straight to the dashboard.
+            if (ENABLE_LOGIN && appUsers.length > 0) {
+                const restored = _restoreSession();
+                if (restored) {
+                    console.log('✅ PIN session restored from sessionStorage — user stays signed in');
+                    try { renderView(); } catch(e) { console.warn('Post-restore renderView failed:', e); }
+                }
+            }
             _startAutoRefresh();
             if (_lockRefresh) clearInterval(_lockRefresh);
             _lockRefresh = setInterval(_checkActiveLocks, 120000);
@@ -3886,6 +3974,7 @@
 
         function handleSignOut() {
             stopTokenRefreshTimer();  // Stop token refresh
+            _clearCachedOAuthToken();  // Clear sessionStorage cache
             const token = accessToken;
             accessToken = null;
             gapi.client.setToken(null);
