@@ -4021,7 +4021,7 @@
                 const backupName = `${type}_backup_${slot}.json`;
                 const q = encodeURIComponent(`name='${backupName}' and '${folderId}' in parents and trashed=false`);
                 const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,size,modifiedTime)&spaces=drive`, { headers: authHdr });
-                if (!res.ok) throw new Error('Cannot search Drive');
+                if (!res.ok) throw new Error('Cannot search records');
                 const d = await res.json();
                 if (!d.files?.length) {
                     alert(`Backup slot ${slot} for "${type}" doesn't exist in Drive yet. (Slots fill up as the file gets saved over time — at most one new backup per 30 minutes.)`);
@@ -4626,7 +4626,7 @@
                     `The system could not automatically find a safe replacement number right now ` +
                     `(multiple saves may have happened simultaneously).\n\n` +
                     `Click OK to close this message and try saving again — ` +
-                    `the app will re-check Drive and assign the correct next number.\n\n` +
+                    `the app will re-check and assign the correct next number.\n\n` +
                     `Click Cancel to keep the form open and review before saving.`
                 );
                 // Return ok:false so the save is aborted and re-tried fresh.
@@ -5148,7 +5148,7 @@
                         { headers: authHdr }
                     );
                 }
-                if (!listRes.ok) throw new Error(`Drive list failed (${listRes.status}) for ${fileName}`);
+                if (!listRes.ok) throw new Error(`List failed (${listRes.status}) for ${fileName}`);
                 const listData = await listRes.json();
                 existingId = listData.files?.length ? listData.files[0].id : null;
                 if (existingId) _driveFileIdCache[fileName] = existingId;
@@ -5208,7 +5208,7 @@
                         }
                     } catch(_) { /* verify-step failure: fall through to original throw */ }
                 }
-                throw new Error(`Drive save failed for ${fileName}: ${err.error?.message || uploadRes.statusText}`);
+                throw new Error(`Save failed for ${fileName}: ${err.error?.message || uploadRes.statusText}`);
             }
             const saved = await uploadRes.json();
             // Cache the new file ID for future saves
@@ -5339,7 +5339,7 @@
                     } catch(e) { console.warn(`Refresh ${type} failed:`, e.message); }
                 }
                 renderView();
-                _showToast('✅ Data refreshed from Drive', '#16a34a', 2000);
+                _showToast('✅ Data refreshed', '#16a34a', 2000);
                 console.log('✅ Data refreshed from Drive');
             } catch(e) {
                 _showToast('❌ Refresh failed: ' + e.message, '#dc2626', 4000);
@@ -7208,7 +7208,7 @@
 
                 // Step 2: Search Drive for existing spreadsheet by name
                 if (!spreadsheetId) {
-                    btn.textContent = 'Searching Drive...';
+                    btn.textContent = 'Searching...';
                     try {
                         // Search inside the app folder first, then anywhere in Drive
                         const folderId = await getOrCreateAppFolder();
@@ -10764,7 +10764,7 @@
             try {
                 const res = await fetch(`https://www.googleapis.com/drive/v3/files/${driveId}?alt=media`,
                     { headers: { 'Authorization': `Bearer ${accessToken}` } });
-                if (!res.ok) throw new Error('Drive returned ' + res.status);
+                if (!res.ok) throw new Error('Backend returned ' + res.status);
                 const blob = await res.blob();
                 const isPdf = (blob.type === 'application/pdf') || mime === 'application/pdf';
                 const url = URL.createObjectURL(blob);
@@ -11519,7 +11519,21 @@
                         ${_renderVerifyBadge(e)}
                         ${_renderVerifyButton(e, `verifyRecord('expense','${safeId}')`)}
                         <button onclick="editExpenseById('${safeId}')" class="text-indigo-600 hover:text-indigo-800 text-xs font-medium">Edit</button>
-                        <button onclick="deleteExpense('${safeId}')" class="text-red-500 hover:text-red-700 text-xs">Del</button>
+                        ${(() => {
+                            // Void vs Delete: mutually exclusive by position.
+                            // Tail (highest voucher in its FY) → hard Delete
+                            // (frees the number). Mid-sequence → soft Void
+                            // (strikethrough, number preserved). Voided
+                            // non-tail entries show no button (terminal
+                            // state); voided tail still shows Delete so the
+                            // anomalous state can be corrected.
+                            const isTail = _isExpenseTail(e, expenses);
+                            if (isTail) {
+                                return `<button onclick="hardDeleteExpense('${safeId}')" class="text-red-600 hover:text-red-800 text-xs font-semibold" title="Hard delete — frees voucher ${e.voucherNo||''} for reuse">Delete</button>`;
+                            }
+                            if (isVoided) return '';
+                            return `<button onclick="deleteExpense('${safeId}')" class="text-amber-600 hover:text-amber-800 text-xs" title="Void — keeps voucher ${e.voucherNo||''} in sequence with strikethrough">Void</button>`;
+                        })()}
                     </div>
                 </td>
             </tr>
@@ -12379,6 +12393,27 @@
             const parsed = _parseVoucherNo(v);
             if (!parsed || parsed.format !== 'old') return v;
             return _formatVoucherNo(parsed.fyCode, parsed.seqNo);
+        }
+
+        // Is this expense the tail of its FY voucher sequence?
+        // Used to decide Void vs Delete on the row: only the tail can be hard-
+        // deleted (frees the number for reuse); mid-sequence entries can only
+        // be voided (keeps the number, adds strikethrough) so the sequence
+        // stays gapless. Custom/manual voucher numbers are treated as tail
+        // since they don't participate in the FY sequence and deleting one
+        // cannot open a gap.
+        function _isExpenseTail(exp, allExpenses) {
+            const parsed = _parseVoucherNo(exp.voucherNo);
+            if (!parsed) return true;  // custom-numbered — safe to hard-delete
+            let maxOthers = 0;
+            (allExpenses || []).forEach(e => {
+                if (e === exp || e.expID === exp.expID) return;
+                const p = _parseVoucherNo(e.voucherNo);
+                if (p && p.fyCode === parsed.fyCode && p.seqNo > maxOthers) {
+                    maxOthers = p.seqNo;
+                }
+            });
+            return parsed.seqNo > maxOthers;
         }
 
         function openExpenseModal(exp = null) {
@@ -13377,7 +13412,7 @@
                     billAttachments.push(att);
                 } catch(err) {
                     console.error('Upload failed:', err);
-                    alert(`Failed to upload "${file.name}" to Drive: ${err.message}`);
+                    alert(`Failed to upload "${file.name}": ${err.message}`);
                     return;
                 }
             }
@@ -13632,6 +13667,99 @@
             exp.voidRemark = remark.trim();
             exp.payStatus = 'Voided';
             await saveData('expenses', expenses);
+            renderView();
+        }
+
+        // Hard delete — only for the tail of the voucher sequence.
+        // Removes the record from the array (frees the voucher number for
+        // reuse by the next expense), cascades attachment cleanup, and
+        // snapshots the full record to AuditLog before removal.
+        // Distinct from voidExpense (soft, mid-sequence, keeps number).
+        async function hardDeleteExpense(expID) {
+            const exp = expenses.find(x => x.expID === expID);
+            if (!exp) return;
+            // Defensive: re-check tail status at click time. The button was
+            // rendered against a possibly stale array; another user or tab
+            // may have added a later voucher since.
+            if (!_isExpenseTail(exp, expenses)) {
+                alert('This is no longer the latest voucher — a newer entry exists. Refreshing view.');
+                renderView();
+                return;
+            }
+            
+            const paymentsCount = (exp.paymentsMade || []).length;
+            const attachCount   = (exp.billAttachments || []).length || (exp.billPhotoData ? 1 : 0);
+            const tallyPosted   = !!exp.tallyUpdated;
+            const voucherLabel  = exp.voucherNo || '(custom)';
+            
+            const summary = 'Voucher: ' + voucherLabel + '\n' +
+                            'Vendor:  ' + (exp.companyName || exp.staffName || '—') + '\n' +
+                            'Amount:  ₹' + (exp.netPayable || exp.balanceAmt || 0) +
+                            (paymentsCount ? '\nPayments recorded: ' + paymentsCount + ' (will be lost)' : '') +
+                            (attachCount   ? '\nAttachments:      ' + attachCount + ' (will be deleted)' : '') +
+                            (tallyPosted   ? '\nTally posted:     yes (voucher link will be lost)' : '');
+            
+            const confirmText = prompt(
+                '⚠️ HARD DELETE this expense?\n\n' + summary + '\n\n' +
+                'This frees voucher number ' + voucherLabel + ' for reuse by the next expense.\n' +
+                'The record CANNOT be recovered (only a truncated audit-log snapshot is kept).\n\n' +
+                'To confirm, type the voucher number exactly:'
+            );
+            if (confirmText === null) return;
+            if (confirmText.trim() !== String(exp.voucherNo || '').trim()) {
+                alert('Voucher number did not match. Delete cancelled.');
+                return;
+            }
+            
+            // Level 2 concurrency: pre-delete staleness check
+            if (await _concurBlockIfStale('expenses', [{ id: expID, idKey: 'expID' }])) return;
+            
+            // Re-verify existence and tail status after the concurrency sync,
+            // in case another user added a later voucher while the prompt was open.
+            const freshIdx = expenses.findIndex(x => x.expID === expID);
+            if (freshIdx === -1) {
+                alert('Expense no longer exists (deleted elsewhere). Refreshing view.');
+                renderView();
+                return;
+            }
+            if (!_isExpenseTail(expenses[freshIdx], expenses)) {
+                alert('Meanwhile another voucher was added after this one. Delete cancelled to preserve sequence integrity.');
+                renderView();
+                return;
+            }
+            
+            // Snapshot BEFORE mutation — full record goes to audit log.
+            const snapshot = JSON.parse(JSON.stringify(expenses[freshIdx]));
+            
+            // Cascade attachment cleanup. Best-effort — a failure here doesn't
+            // block the delete because attachments would otherwise be
+            // orphaned anyway once the parent record is gone.
+            try {
+                (snapshot.billAttachments || []).forEach(a => {
+                    if (a?.driveFileId) deleteDriveAttachment(a.driveFileId);
+                });
+                if (snapshot.tallyVoucherDriveId) deleteDriveAttachment(snapshot.tallyVoucherDriveId);
+            } catch (e) {
+                console.warn('Attachment cleanup during hard delete failed (non-blocking):', e);
+            }
+            
+            // Remove from array and persist.
+            expenses.splice(freshIdx, 1);
+            await saveData('expenses', expenses);
+            
+            // Audit log with full pre-delete snapshot.
+            await _writeAuditLog(
+                'DELETE',
+                'Expenses',
+                expID,
+                'Hard delete: voucher ' + voucherLabel + ' — ' +
+                    (snapshot.companyName || snapshot.staffName || '—') + ' ₹' +
+                    (snapshot.netPayable || snapshot.balanceAmt || 0),
+                snapshot,
+                null
+            );
+            
+            _showToast('✅ Voucher ' + voucherLabel + ' deleted — number freed for reuse', '#16a34a', 3000);
             renderView();
         }
 
@@ -18601,7 +18729,7 @@
             try {
                 docFolderId = await getOrCreateSubFolder(folderName);
             } catch (err) {
-                alert('Could not create Drive folder: ' + err.message);
+                alert('Could not create attachment folder: ' + err.message);
                 progress.classList.add('hidden');
                 return;
             }
@@ -18781,7 +18909,7 @@
         async function driveFileBlobUrl(fileId) {
             const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
                 { headers: {'Authorization':`Bearer ${accessToken}`} });
-            if (!res.ok) throw new Error('Drive fetch failed: '+res.status);
+            if (!res.ok) throw new Error('Fetch failed: '+res.status);
             const blob = await res.blob();
             return URL.createObjectURL(blob);
         }
@@ -27735,7 +27863,7 @@ Automated WFH alert — ${company} Attendance System.`;
                             w.location.href = `https://drive.google.com/file/d/${driveId}/view`;
                             return;
                         }
-                        throw new Error('Drive returned ' + res.status);
+                        throw new Error('Backend returned ' + res.status);
                     }
                     const blob = await res.blob();
                     const url  = URL.createObjectURL(blob);
