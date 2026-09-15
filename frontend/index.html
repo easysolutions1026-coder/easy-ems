@@ -3772,32 +3772,66 @@
                     }
                     
                     if (response.access_token) {
-                        accessToken = response.access_token;
-                        gapi.client.setToken({ access_token: accessToken });
-                        console.log('Access token received, fetching user profile...');
-                        // Fetch Google user profile before loading data
-                        try {
-                            const profRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo',
-                                { headers: { 'Authorization': `Bearer ${accessToken}` } });
-                            const prof = await profRes.json();
-                            currentUser = { email: prof.email||'', name: prof.name||prof.email||'User', picture: prof.picture||'' };
-                            console.log('Signed in as:', currentUser.email);
-                        } catch(e) {
-                            console.warn('Could not fetch user profile:', e);
-                            currentUser = { email: '', name: 'User', picture: '' };
-                        }
-                        await loadDataFromDrive();
-                        // Start auto-refresh every 5 minutes (multi-user data sync)
-                        _startAutoRefresh();
-                        // Start polling for active locks every 2 minutes
-                        if (_lockRefresh) clearInterval(_lockRefresh);
-                        _lockRefresh = setInterval(_checkActiveLocks, 120000);
-                        // Also check once immediately after 3s
-                        setTimeout(_checkActiveLocks, 3000);
+                        await _onNewAccessToken(response.access_token);
                     }
                 },
             });
+
+            // Attempt silent OAuth restore on page load. If the user's Google
+            // session is still active AND they've previously consented (both
+            // true after a browser refresh mid-work), this hands back a fresh
+            // token with no UI — jumping straight to loadDataFromDrive without
+            // a Sign-In click or consent screen. When silent fails (first-ever
+            // visit, signed out of Google, 3P cookies blocked, previous consent
+            // revoked), we quietly fall through to the manual Sign-In button.
+            // Per-request callback overrides the init-level one so the "Failed
+            // to authenticate" alert above doesn't fire on the normal case
+            // where a fresh visitor has no cached consent.
+            try {
+                tokenClient.requestAccessToken({
+                    prompt: 'none',
+                    callback: async (response) => {
+                        if (response.error) {
+                            console.log('Silent OAuth restore not available (' + response.error + ') — sign in manually');
+                            return;
+                        }
+                        if (response.access_token) {
+                            console.log('✅ Silent OAuth restore succeeded — no re-consent needed');
+                            await _onNewAccessToken(response.access_token);
+                        }
+                    }
+                });
+            } catch (e) {
+                // Non-fatal: user will just click Sign In.
+                console.warn('Silent restore attempt threw:', e);
+            }
         }
+
+        // Shared post-token flow — invoked by both the initial sign-in callback
+        // and the on-load silent-restore callback so the two paths stay in sync.
+        // Fetches Google user profile, kicks off data load, starts the auto-
+        // refresh and lock-check timers.
+        async function _onNewAccessToken(token) {
+            accessToken = token;
+            gapi.client.setToken({ access_token: accessToken });
+            console.log('Access token received, fetching user profile...');
+            try {
+                const profRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo',
+                    { headers: { 'Authorization': `Bearer ${accessToken}` } });
+                const prof = await profRes.json();
+                currentUser = { email: prof.email||'', name: prof.name||prof.email||'User', picture: prof.picture||'' };
+                console.log('Signed in as:', currentUser.email);
+            } catch(e) {
+                console.warn('Could not fetch user profile:', e);
+                currentUser = { email: '', name: 'User', picture: '' };
+            }
+            await loadDataFromDrive();
+            _startAutoRefresh();
+            if (_lockRefresh) clearInterval(_lockRefresh);
+            _lockRefresh = setInterval(_checkActiveLocks, 120000);
+            setTimeout(_checkActiveLocks, 3000);
+        }
+
 
         // ═══════════════════════════════════════════════════════════════════
         //  PROACTIVE TOKEN REFRESH (Auto-refresh every 50 minutes)
@@ -3841,7 +3875,13 @@
         }
 
         function handleSignIn() {
-            tokenClient.requestAccessToken({ prompt: 'consent', enable_granular_consent: false });
+            // No explicit prompt — Google decides:
+            //   • Skips consent screen if the user has previously consented
+            //   • Skips account picker if the user has only one signed-in Google account
+            // For returning users this often collapses "account picker + consent"
+            // into a single (or zero) UI step. First-time visitors still get
+            // the full consent flow as before.
+            tokenClient.requestAccessToken({ enable_granular_consent: false });
         }
 
         function handleSignOut() {
