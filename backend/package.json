@@ -16,15 +16,13 @@
     "prisma:studio": "prisma studio",
     "postinstall": "prisma generate"
   },
-  "dependencies": {
+    "dependencies": {
+    "@prisma/client": "^6.19.3",
     "cors": "^2.8.5",
     "express": "^4.21.0",
     "google-auth-library": "^9.14.0",
     "helmet": "^8.0.0",
-    "morgan": "^1.10.0"
-  },
-  "devDependencies": {
-    "@prisma/client": "^6.19.3",
+    "morgan": "^1.10.0",
     "prisma": "^6.19.3"
   }
 }
