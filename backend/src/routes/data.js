@@ -25,6 +25,18 @@ function defaultMapOut(row) {
   };
 }
 
+// Prod JSON often has empty-string dates ("") that break Prisma's date parser
+// and return 500 on writes. This helper returns null for any input that
+// isn't a valid Date-parseable value: null, undefined, "", "   ", or a
+// string that produces Invalid Date. Use in every mapIn instead of
+// `dateOrNull(r.foo)`.
+function dateOrNull(v) {
+  if (v == null) return null;
+  if (typeof v === 'string' && !v.trim()) return null;
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? null : d;
+}
+
 // ---- Collection registry ----
 
 const COLLECTIONS = {
@@ -40,7 +52,7 @@ const COLLECTIONS = {
         name: r.name || email,
         role: r.role || 'ViewOnly',
         pinHash: r.pinHash ?? null,
-        pinExpiry: r.pinExpiry ? new Date(r.pinExpiry) : null,
+        pinExpiry: dateOrNull(r.pinExpiry),
         pinPeriodDays: r.pinPeriodDays ?? 30,
         active: r.active ?? true,
         permissions: r.permissions ?? null,
@@ -94,7 +106,7 @@ const COLLECTIONS = {
     mapIn: (r) => {
       const reconID = r.reconID || r.id;
       // Derive month/year from periodTo (or periodFrom as fallback)
-      const periodDate = (r.periodTo || r.periodFrom) ? new Date(r.periodTo || r.periodFrom) : null;
+      const periodDate = dateOrNull(r.periodTo || r.periodFrom);
       const validDate = periodDate && !isNaN(periodDate.getTime()) ? periodDate : null;
       const periodMonth = validDate ? validDate.getMonth() + 1 : (Number(r.periodMonth) || 1);
       const periodYear = validDate ? validDate.getFullYear() : (Number(r.periodYear) || 2026);
@@ -121,7 +133,7 @@ const COLLECTIONS = {
       status: r.status ?? 'Active',
       email: r.email ?? null,
       phone: r.phone ?? null,
-      joinDate: r.joinDate ? new Date(r.joinDate) : null,
+      joinDate: dateOrNull(r.joinDate),
       data: r,
     }),
     mapOut: defaultMapOut,
@@ -131,7 +143,7 @@ const COLLECTIONS = {
     mapIn: (r) => ({
       txnID: r.txnID,
       txnCategory: r.txnCategory || 'Unknown',
-      txnDate: r.txnDate ? new Date(r.txnDate) : null,
+      txnDate: dateOrNull(r.txnDate),
       partyID: r.partyID ?? null,
       partyName: r.partyName ?? null,
       totalAmount: r.totalAmount ?? null,
@@ -147,7 +159,7 @@ const COLLECTIONS = {
     mapIn: (r) => ({
       exID: r.exID || r.expID,
       billType: r.billType ?? null,
-      billDate: r.billDate ? new Date(r.billDate) : null,
+      billDate: dateOrNull(r.billDate),
       partyID: r.partyID ?? r.companyName ?? null,
       partyName: r.partyName ?? r.companyName ?? null,
       totalAmount: r.totalAmount ?? r.totalBillAmt ?? r.billAmount ?? null,
@@ -165,10 +177,10 @@ const COLLECTIONS = {
     mapIn: (r) => ({
       deID: r.deID,
       directorName: r.directorName ?? null,
-      expenseDate: r.expenseDate ? new Date(r.expenseDate) : null,
+      expenseDate: dateOrNull(r.expenseDate),
       amount: r.amount ?? null,
       reimbursed: !!r.reimbursed,
-      reimburseDate: r.reimburseDate ? new Date(r.reimburseDate) : null,
+      reimburseDate: dateOrNull(r.reimburseDate),
       data: r,
     }),
     mapOut: defaultMapOut,
@@ -177,7 +189,7 @@ const COLLECTIONS = {
     model: prisma.paymentRequest, idField: 'prID',
     mapIn: (r) => ({
       prID: r.prID,
-      prDate: r.prDate ? new Date(r.prDate) : null,
+      prDate: dateOrNull(r.prDate),
       billIDs: r.billIDs ?? null,
       requestedAmt: r.requestedAmt ?? null,
       approvedAmt: r.approvedAmt ?? null,
@@ -193,7 +205,7 @@ const COLLECTIONS = {
     model: prisma.fundRequest, idField: 'frID',
     mapIn: (r) => ({
       frID: r.frID || r.requestID,
-      frDate: (r.frDate || r.requestedDate) ? new Date(r.frDate || r.requestedDate) : null,
+      frDate: dateOrNull(r.frDate || r.requestedDate),
       technicianID: r.technicianID || r.requestedBy || null,
       amount: r.amount ?? r.requestedAmount ?? r.disbursedAmount ?? null,
       status: r.status ?? null,
@@ -207,8 +219,8 @@ const COLLECTIONS = {
     mapIn: (r) => ({
       poolID: r.poolID,
       technicianID: r.technicianID ?? null,
-      openedDate: r.openedDate ? new Date(r.openedDate) : null,
-      closedDate: r.closedDate ? new Date(r.closedDate) : null,
+      openedDate: dateOrNull(r.openedDate),
+      closedDate: dateOrNull(r.closedDate),
       openingAmt: r.openingAmt ?? null,
       spentAmt: r.spentAmt ?? null,
       balanceAmt: r.balanceAmt ?? null,
@@ -222,7 +234,7 @@ const COLLECTIONS = {
     mapIn: (r) => ({
       arID: r.arID,
       invoiceNo: r.invoiceNo ?? null,
-      invoiceDate: r.invoiceDate ? new Date(r.invoiceDate) : null,
+      invoiceDate: dateOrNull(r.invoiceDate),
       partyID: r.partyID ?? null,
       partyName: r.partyName ?? null,
       invoiceAmt: r.invoiceAmt ?? null,
@@ -238,7 +250,7 @@ const COLLECTIONS = {
     model: prisma.projectExpense, idField: 'peID',
     mapIn: (r) => ({
       peID: r.peID || r.projExpID,
-      peDate: (r.peDate || r.startDate || r.createdAt) ? new Date(r.peDate || r.startDate || r.createdAt) : null,
+      peDate: dateOrNull(r.peDate || r.startDate || r.createdAt),
       technicianID: r.technicianID ?? null,
       projectRef: r.projectRef || r.projectName || null,
       category: r.category ?? null,
@@ -252,9 +264,13 @@ const COLLECTIONS = {
     model: prisma.workLog, idField: 'wlID',
     mapIn: (r) => ({
       wlID: r.wlID,
-      technicianID: r.technicianID ?? null,
-      projectRef: r.projectRef ?? null,
-      weekStartDate: r.weekStartDate ? new Date(r.weekStartDate) : null,
+      // Prod records don't have technicianID directly — they have a
+      // `technicians` array of staff IDs (first is usually the lead).
+      technicianID: r.technicianID ?? (Array.isArray(r.technicians) && r.technicians[0]) ?? null,
+      // Prod uses `project` (project name), backend expects projectRef.
+      projectRef: r.projectRef ?? r.project ?? null,
+      // Prod uses `workStartDate`, backend expects weekStartDate.
+      weekStartDate: dateOrNull(r.weekStartDate || r.workStartDate),
       status: r.status ?? null,
       data: r,
     }),
@@ -274,7 +290,7 @@ const COLLECTIONS = {
       ptAmt: r.ptAmt ?? null,
       tdsAmt: r.tdsAmt ?? null,
       status: r.status ?? (r.approved ? 'Approved' : null),
-      approvedAt: r.approvedAt ? new Date(r.approvedAt) : null,
+      approvedAt: dateOrNull(r.approvedAt),
       approvedBy: r.approvedBy ?? null,
       data: r,
     }),
@@ -299,7 +315,7 @@ const COLLECTIONS = {
       txnID: r.txnID,
       officeID: r.officeID || 'unknown',
       txnType: r.txnType || 'Unknown',
-      txnDate: r.txnDate ? new Date(r.txnDate) : null,
+      txnDate: dateOrNull(r.txnDate),
       amount: r.amount ?? null,
       category: r.category ?? null,
       data: r,
@@ -314,7 +330,7 @@ const COLLECTIONS = {
       periodMonth: Number(r.periodMonth) || Number(r.month) || 1,
       periodYear: Number(r.periodYear) || Number(r.year) || 2026,
       verifiedBy: r.verifiedBy ?? null,
-      verifiedAt: r.verifiedAt ? new Date(r.verifiedAt) : null,
+      verifiedAt: dateOrNull(r.verifiedAt),
       postedToTally: !!(r.postedToTally || r.tallyPostedAt),
       data: r,
     }),
@@ -324,7 +340,7 @@ const COLLECTIONS = {
     model: prisma.gstCashLedgerSnapshot, idField: 'snapshotID',
     mapIn: (r) => ({
       snapshotID: r.snapshotID,
-      snapshotDate: r.snapshotDate ? new Date(r.snapshotDate) : null,
+      snapshotDate: dateOrNull(r.snapshotDate),
       periodMonth: r.periodMonth != null ? Number(r.periodMonth) : null,
       periodYear: r.periodYear != null ? Number(r.periodYear) : null,
       data: r,
@@ -341,19 +357,19 @@ const COLLECTIONS = {
       issuer: r.issuer ?? null,
       holderType: r.holderType ?? null,
       holderName: r.holderName ?? null,
-      issueDate: r.issueDate ? new Date(r.issueDate) : null,
-      expiryDate: r.expiryDate ? new Date(r.expiryDate) : null,
+      issueDate: dateOrNull(r.issueDate),
+      expiryDate: dateOrNull(r.expiryDate),
       isLifetime: !!r.isLifetime,
       renewalReminderAcknowledged: !!r.renewalReminderAcknowledged,
       data: r,
     }),
     mapOut: defaultMapOut,
   },
-    otherIncome: {
+  otherIncome: {
     model: prisma.otherIncome, idField: 'incomeID',
     mapIn: (r) => ({
       incomeID: r.incomeID,
-      date: r.date ? new Date(r.date) : null,
+      date: dateOrNull(r.date),
       bankAccountId: r.bankAccountId ?? null,
       incomeType: r.incomeType ?? null,
       amount: r.amount != null ? Number(r.amount) : null,
@@ -365,7 +381,7 @@ const COLLECTIONS = {
     model: prisma.coverLetter, idField: 'letterID',
     mapIn: (r) => ({
       letterID: r.letterID,
-      letterDate: r.letterDate ? new Date(r.letterDate) : null,
+      letterDate: dateOrNull(r.letterDate),
       refNo: r.refNo ?? null,
       invoiceID: r.invoiceID ?? null,
       partyID: r.partyID ?? null,
@@ -377,12 +393,12 @@ const COLLECTIONS = {
     model: prisma.returnableToolsLetter, idField: 'letterID',
     mapIn: (r) => ({
       letterID: r.letterID,
-      letterDate: r.letterDate ? new Date(r.letterDate) : null,
+      letterDate: dateOrNull(r.letterDate),
       refNo: r.refNo ?? null,
       staffID: r.staffID ?? null,
       projectID: r.projectID ?? null,
       status: r.status ?? null,
-      returnedDate: r.returnedDate ? new Date(r.returnedDate) : null,
+      returnedDate: dateOrNull(r.returnedDate),
       data: r,
     }),
     mapOut: defaultMapOut,
