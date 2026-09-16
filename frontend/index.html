@@ -794,9 +794,36 @@
                     <div class="overflow-x-auto">
                         <table class="w-full text-xs" id="expPaymentsMadeTable">
                             <thead class="text-gray-500">
-                                <tr><th class="text-left px-1 py-1">Date</th><th class="text-right px-1 py-1">Amount</th><th class="text-left px-1 py-1">Mode</th><th class="text-left px-1 py-1">Ref No.</th><th class="text-left px-1 py-1">Remarks</th><th></th></tr>
+                                <tr><th class="text-left px-1 py-1">Date</th><th class="text-right px-1 py-1">Amount</th><th class="text-left px-1 py-1">Mode</th><th class="text-left px-1 py-1">Ref No.</th><th class="text-left px-1 py-1">Paid from Bank</th><th class="text-left px-1 py-1">Remarks</th><th></th></tr>
                             </thead>
                             <tbody id="expPaymentsMadeBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Refunds Received — for money that comes BACK from the
+                     vendor OR from a third party (e.g. a staff member
+                     reimbursing an expense that was billed via the company).
+                     Both are "contra to expense", NOT income. Refunds reduce
+                     the effective net cost of the bill but do NOT undo the
+                     payment to the vendor — Balance to Pay stays 0 once the
+                     vendor has been paid in full, regardless of who
+                     reimbursed the company later. The bank ledger picks up
+                     each row as a credit so bank reconciliation ties out.
+                     Capped at the amount paid — you can't receive more than
+                     was spent on the bill. -->
+                <div id="expRefundsReceivedSection" class="mb-4 border border-rose-200 bg-rose-50/40 rounded-xl p-3">
+                    <div class="flex items-center justify-between mb-2">
+                        <label class="block text-xs font-bold text-rose-800">↩️ Refunds Received <span class="font-normal text-gray-500">(from vendor OR third-party reimbursement — contra to expense, NOT income)</span></label>
+                        <button type="button" onclick="addExpRefundRow()" class="px-2 py-1 bg-rose-600 text-white rounded-lg text-xs font-semibold hover:bg-rose-700">+ Add Refund</button>
+                    </div>
+                    <p class="text-[11px] text-gray-500 mb-2">Use this whenever money comes BACK into your bank against this bill — vendor returning excess, staff reimbursing a personal expense, insurance claim payout, anything. Each row: (1) reduces the "Net Payable" tile below (effective cost = payments − refunds), (2) shows as a <strong>credit</strong> row in the Bank Ledger so bank statement reconciles, (3) does NOT change "Balance to Pay" above — vendor was paid in full. Nothing is added to income.</p>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-xs" id="expRefundsReceivedTable">
+                            <thead class="text-gray-500">
+                                <tr><th class="text-left px-1 py-1">Date</th><th class="text-right px-1 py-1">Amount</th><th class="text-left px-1 py-1">Mode</th><th class="text-left px-1 py-1">Ref No.</th><th class="text-left px-1 py-1">Deposit to Bank</th><th class="text-left px-1 py-1">Remarks</th><th></th></tr>
+                            </thead>
+                            <tbody id="expRefundsReceivedBody"></tbody>
                         </table>
                     </div>
                 </div>
@@ -865,14 +892,16 @@
                 </div>
 
                 <!-- Computed totals summary -->
-                <div class="bg-orange-50 border border-orange-200 rounded-xl p-4 mb-6 grid grid-cols-2 md:grid-cols-7 gap-3 text-sm">
+                <div class="bg-orange-50 border border-orange-200 rounded-xl p-4 mb-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-9 gap-3 text-sm">
                     <div><span class="text-gray-500 block text-xs">Taxable Amount (INR)</span><span id="sumBillINR" class="font-bold text-orange-700">—</span></div>
                     <div><span class="text-gray-500 block text-xs">Total Bill Amount</span><span id="sumTotalBill" class="font-bold text-blue-700">—</span></div>
                     <div><span class="text-gray-500 block text-xs">Total Tax (GST)</span><span id="sumTax" class="font-bold text-orange-700">—</span></div>
                     <div><span class="text-gray-500 block text-xs">Total Deduction</span><span id="sumTDS" class="font-bold text-orange-700">—</span></div>
                     <div><span class="text-gray-500 block text-xs">Credit Note / Discount</span><span id="sumCN" class="font-bold text-green-700">—</span></div>
                     <div><span class="text-gray-500 block text-xs">Advance Paid</span><span id="sumAdv" class="font-bold text-purple-700">—</span></div>
-                    <div><span class="text-gray-500 block text-xs">Net Payable</span><span id="sumNet" class="font-bold text-orange-800 text-base">—</span></div>
+                    <div title="Sum of all rows in the Payments Made table"><span class="text-gray-500 block text-xs">Payments Made</span><span id="sumPayments" class="font-bold text-teal-700">—</span></div>
+                    <div title="Sum of all rows in the Refunds Received table — subtracted from cost"><span class="text-gray-500 block text-xs">Refunds Received</span><span id="sumRefunds" class="font-bold text-rose-700">—</span></div>
+                    <div title="Amount still owed to the vendor — same as the Balance to Pay field at the top. Refunds are contra-expense (they reduce effective cost, tracked via the Payments Made and Refunds Received tiles), and do NOT reduce this figure — once the vendor has been paid in full, Balance to Pay stays 0 regardless of who reimbursed the company later."><span class="text-gray-500 block text-xs">Balance to Pay</span><span id="sumNet" class="font-bold text-orange-800 text-base">—</span></div>
                 </div>
 
                 <div class="flex gap-3 justify-end">
@@ -1855,6 +1884,15 @@
         // underlying Transactions/Expenses/Payment Requests data, which the
         // Bank Ledger still aggregates fresh and read-only every time.
         let bankReconciliations = [];
+        // ── Other Income module ──────────────────────────────────────────
+        // Non-invoice income: bank interest (current/savings), FD interest
+        // credits, one-off receipts. Each record: { incomeID, date,
+        // bankAccountId, incomeType, amount, fdRef, bankRef, remarks,
+        // createdBy, createdAt }. Shows up in Bank Ledger as a credit row
+        // (source: "Other Income") and feeds a P&L Interest Income tile.
+        // Distinct from customer invoice payments (transactions) and vendor
+        // refunds (expense.refundsReceived — those are contra-expense).
+        let otherIncome = [];
         // ── Chart of Accounts (additive, optional) ──────────────────────
         // A ledger-account master, separate from `parties` (who) and
         // `ACC_CATEGORIES` (expense-only heads). Every transaction module
@@ -4021,6 +4059,7 @@
             bankAccounts = [];
             chartOfAccounts = [];
             bankReconciliations = [];
+            otherIncome = [];
             appFolderId = null;   // Reset so next login re-searches Drive
             settingsUnlocked = false;  // Lock settings on signout
             payslips = [];
@@ -5749,6 +5788,14 @@
                     console.warn('Bank Reconciliations load failed, defaulting to empty:', e.message);
                     bankReconciliations = [];
                 }
+                // Other Income — loaded independently, same safe pattern.
+                try {
+                    const oiData = await loadFileFromDrive('otherIncome.json');
+                    otherIncome = Array.isArray(oiData) ? oiData : [];
+                } catch(e) {
+                    console.warn('Other Income load failed, defaulting to empty:', e.message);
+                    otherIncome = [];
+                }
                 staff           = Array.isArray(staffData)   ? staffData    : [];
                 // SAFETY: blank-name staff records are NEVER auto-deleted.
                 // This used to silently filter them out AND auto-save the
@@ -6140,6 +6187,8 @@
                 { id:'COA-3000', code:'3000', name:"Director's Current Account", type:'Equity', active:true },
                 { id:'COA-3100', code:'3100', name:'Capital',             type:'Equity',    active:true },
                 { id:'COA-4000', code:'4000', name:'Service Income',      type:'Income',    active:true },
+                { id:'COA-4100', code:'4100', name:'Interest Income',     type:'Income',    active:true },
+                { id:'COA-4900', code:'4900', name:'Other Income',        type:'Income',    active:true },
                 { id:'COA-5000', code:'5000', name:'Salaries & Wages',    type:'Expense',   active:true },
                 { id:'COA-5100', code:'5100', name:'Food Expenses',       type:'Expense',   active:true },
                 { id:'COA-5200', code:'5200', name:'Travelling Expenses', type:'Expense',   active:true },
@@ -11097,13 +11146,15 @@
         // ═══════════════════════════════════════════════════════════════
         function _correctExpBalance(e) {
             const paymentsSum = (e.paymentsMade||[]).reduce((s,p)=>s+(parseFloat(p.amount)||0),0);
+            // Refunds are contra-expense — they do NOT reduce Balance to Pay
+            // (vendor is still paid). Effective cost is a separate concept.
             return Math.max(0, (parseFloat(e.netPayable)||0) - (parseFloat(e.totalDeductions)||0) - paymentsSum);
         }
 
         async function recalculateExpenseBalances() {
             const changes = [];
             (expenses||[]).forEach(e => {
-                if (!(e.paymentsMade||[]).length) return;   // only relevant where multiple payments exist
+                if (!(e.paymentsMade||[]).length && !(e.refundsReceived||[]).length) return;   // only relevant where payments or refunds exist
                 const correct = +_correctExpBalance(e).toFixed(2);
                 const current = +(parseFloat(e.balanceAmt)||0).toFixed(2);
                 if (Math.abs(correct - current) > 0.01) {
@@ -11675,7 +11726,11 @@
 
         function expRow(e) {
             const statusCls = {Paid:'bg-green-100 text-green-700', Pending:'bg-red-100 text-red-700', Partial:'bg-yellow-100 text-yellow-700'}[e.payStatus] || 'bg-gray-100';
-            const fmt = n => n ? '₹'+parseFloat(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
+            // Uses `== null` instead of the truthy check so ₹0.00 renders as
+            // itself, not "—" (a fully-paid bill with balance 0 was showing
+            // "—" and looked broken). Only true null/undefined falls through
+            // to the dash.
+            const fmt = n => (n == null) ? '—' : '₹'+parseFloat(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
             const safeId = e.expID.replace(/'/g, "\\'");
             const tallyDone = !!e.tallyUpdated;
             const hasVoucher = !!(e.tallyVoucherNo || e.tallyVoucherData || e.tallyVoucherDriveId);
@@ -11715,7 +11770,7 @@
                     <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${e.description||''}">${e.description||'—'}</div>
                     ${_ledgerBadge(e.ledgerAccountId)}
                 </td>
-                <td class="px-3 py-2 text-right font-semibold">${fmt(e.balanceAmt ?? e.netPayable)}</td>
+                <td class="px-3 py-2 text-right font-semibold" title="Original amount payable on the bill (before payments). Payment status is shown separately in the Status column.">${fmt(e.netPayable ?? e.balanceAmt ?? e.billAmtINR)}</td>
                 <td class="px-3 py-2 text-center">
                     <span class="px-2 py-0.5 rounded-full text-xs ${statusCls}">${e.payStatus}</span>
                     ${(() => {
@@ -12685,6 +12740,8 @@
             document.getElementById('expAttachList').innerHTML = '';
             const _epmBodyReset = document.getElementById('expPaymentsMadeBody');
             if (_epmBodyReset) _epmBodyReset.innerHTML = '';
+            const _errBodyReset = document.getElementById('expRefundsReceivedBody');
+            if (_errBodyReset) _errBodyReset.innerHTML = '';
             // RCM defaults to off + hidden help text on form reset
             const rcmDefault = document.getElementById('expRCMApplicable');
             if (rcmDefault) rcmDefault.checked = false;
@@ -12809,6 +12866,15 @@
                         (exp.paymentsMade||[]).forEach(p => addExpPaymentMadeRow(p));
                     } catch (e) {
                         console.error('Error restoring Payments Made rows:', e);
+                    }
+                }
+                const _errBody = document.getElementById('expRefundsReceivedBody');
+                if (_errBody) {
+                    _errBody.innerHTML = '';
+                    try {
+                        (exp.refundsReceived||[]).forEach(r => addExpRefundRow(r));
+                    } catch (e) {
+                        console.error('Error restoring Refunds Received rows:', e);
                     }
                 }
                 document.getElementById('expBalanceAmt').value    = exp.balanceAmt||'';
@@ -12969,11 +13035,26 @@
             const tr = document.createElement('tr');
             const today = new Date().toISOString().split('T')[0];
             const modes = ['Cash','Cheque','NEFT','RTGS','IMPS','UPI'];
+            // Per-row bank picker: mirrors what Refunds Received already has.
+            // Defaults to the bill-level "Paid from Bank Account" field so
+            // one-vendor-one-account bills need zero extra clicks, but can be
+            // overridden for payments that came out of a different account.
+            // Crucially, this ALSO lets the payment show up in the Bank
+            // Ledger when the bill-level bank was left blank — the row's own
+            // bank association routes it correctly.
+            const banks = (bankAccounts||[]).filter(b => b.status !== 'Closed');
+            const defaultBank = p?.bankAccountId || document.getElementById('expBankAccount')?.value || '';
             tr.innerHTML = `
                 <td class="px-1 py-1"><input type="date" class="epm-date w-full px-1 py-1 border rounded text-xs" value="${p?.date||today}"/></td>
                 <td class="px-1 py-1"><input type="number" min="0" step="0.01" class="epm-amt w-24 px-1 py-1 border rounded text-xs text-right" value="${p?.amount??''}" placeholder="0.00" oninput="calcExpAmounts()"/></td>
                 <td class="px-1 py-1"><select class="epm-mode w-full px-1 py-1 border rounded text-xs">${modes.map(m=>`<option value="${m}" ${p?.mode===m?'selected':''}>${m}</option>`).join('')}</select></td>
                 <td class="px-1 py-1"><input type="text" class="epm-ref w-full px-1 py-1 border rounded text-xs" value="${(p?.ref||'').replace(/"/g,'&quot;')}"/></td>
+                <td class="px-1 py-1">
+                    <select class="epm-bank w-full px-1 py-1 border rounded text-xs" title="Which bank this payment came from. Defaults to the bill-level 'Paid from Bank Account' if you leave it as 'Same as bill'.">
+                        <option value="">— Same as bill —</option>
+                        ${banks.map(b => `<option value="${b.id}" ${defaultBank===b.id?'selected':''}>${b.accountName||b.bankName||b.name||''}${b.accountNo?' (····'+String(b.accountNo).slice(-4)+')':''}</option>`).join('')}
+                    </select>
+                </td>
                 <td class="px-1 py-1"><input type="text" class="epm-remarks w-full px-1 py-1 border rounded text-xs" value="${(p?.remarks||'').replace(/"/g,'&quot;')}"/></td>
                 <td class="px-1 py-1 text-center"><button type="button" onclick="this.closest('tr').remove();calcExpAmounts();" class="text-red-500 hover:text-red-700 text-xs font-bold">✕</button></td>`;
             body.appendChild(tr);
@@ -12981,6 +13062,41 @@
         }
         function _sumExpPaymentsMade() {
             return Array.from(document.querySelectorAll('#expPaymentsMadeBody .epm-amt'))
+                .reduce((s,el) => s + (parseFloat(el.value)||0), 0);
+        }
+
+        // Refund-received row builder — mirrors addExpPaymentMadeRow but with
+        // a bank-account picker per row. Refunds default to the expense's
+        // main Paid-From bank (so a one-vendor-one-account flow needs zero
+        // extra clicks), but the row can be overridden if the vendor sent
+        // the return to a different account. Live-sums into calcExpAmounts
+        // so Balance to Pay updates as you type.
+        function addExpRefundRow(r = null) {
+            const body = document.getElementById('expRefundsReceivedBody');
+            if (!body) return;
+            const today = new Date().toISOString().split('T')[0];
+            const modes = ['Cash','Cheque','NEFT','RTGS','IMPS','UPI'];
+            const banks = (bankAccounts||[]).filter(b => b.status !== 'Closed');
+            const defaultBank = r?.bankAccountId || document.getElementById('expBankAccount')?.value || '';
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td class="px-1 py-1"><input type="date" class="err-date w-full px-1 py-1 border rounded text-xs" value="${r?.date||today}"/></td>
+                <td class="px-1 py-1"><input type="number" min="0" step="0.01" class="err-amt w-24 px-1 py-1 border rounded text-xs text-right" value="${r?.amount??''}" placeholder="0.00" oninput="calcExpAmounts()"/></td>
+                <td class="px-1 py-1"><select class="err-mode w-full px-1 py-1 border rounded text-xs">${modes.map(m=>`<option value="${m}" ${r?.mode===m?'selected':''}>${m}</option>`).join('')}</select></td>
+                <td class="px-1 py-1"><input type="text" class="err-ref w-full px-1 py-1 border rounded text-xs" value="${(r?.ref||'').replace(/"/g,'&quot;')}" placeholder="UTR / Cheque no."/></td>
+                <td class="px-1 py-1">
+                    <select class="err-bank w-full px-1 py-1 border rounded text-xs">
+                        <option value="">— Same as bill —</option>
+                        ${banks.map(b => `<option value="${b.id}" ${defaultBank===b.id?'selected':''}>${b.accountName||b.bankName||b.name||''}${b.accountNo?' (····'+String(b.accountNo).slice(-4)+')':''}</option>`).join('')}
+                    </select>
+                </td>
+                <td class="px-1 py-1"><input type="text" class="err-remarks w-full px-1 py-1 border rounded text-xs" value="${(r?.remarks||'').replace(/"/g,'&quot;')}" placeholder="e.g. Excess return"/></td>
+                <td class="px-1 py-1 text-center"><button type="button" onclick="this.closest('tr').remove();calcExpAmounts();" class="text-red-500 hover:text-red-700 text-xs font-bold">✕</button></td>`;
+            body.appendChild(tr);
+            calcExpAmounts();
+        }
+        function _sumExpRefundsReceived() {
+            return Array.from(document.querySelectorAll('#expRefundsReceivedBody .err-amt'))
                 .reduce((s,el) => s + (parseFloat(el.value)||0), 0);
         }
 
@@ -13063,8 +13179,25 @@
             // Balance to Pay = Net Payable - Other Deductions - Payments Made
             // (the optional multi-installment log; sums to 0 when unused,
             // so existing single-advance bills compute exactly as before)
-            const paymentsMadeSum = _sumExpPaymentsMade();
+            //
+            // ── REFUND SEMANTICS (updated) ──────────────────────────────
+            // Refunds are a CONTRA ENTRY to the expense — they reduce the
+            // effective net cost of the bill (payments − refunds), but they
+            // do NOT reverse the payment made to the vendor. This handles
+            // BOTH cases uniformly:
+            //   • Vendor overpaid and returned excess → vendor got net less,
+            //     but you paid the bill in full so vendor balance = 0.
+            //   • Third party reimbursed the company (e.g. staff repaying a
+            //     personal expense billed via company) → vendor still got
+            //     paid in full so vendor balance = 0; effective P&L cost = 0.
+            // Both scenarios: vendor balance is unaffected, effective cost
+            // = payments − refunds.
+            const paymentsMadeSum   = _sumExpPaymentsMade();
+            const refundsReceivedSum = _sumExpRefundsReceived();
             const balance    = +Math.max(0, netPayable - totalDeductions - paymentsMadeSum).toFixed(2);
+            // Net effective cost = what actually cost the company after refunds.
+            // Shown in the footer's "Net Payable" tile and available for reports.
+            const netEffectiveCost = +Math.max(0, adv + paymentsMadeSum - refundsReceivedSum).toFixed(2);
 
             const balEl = document.getElementById('expBalanceAmt');
             if (balEl) balEl.value = balance.toFixed(2);
@@ -13078,15 +13211,27 @@
             const s4 = document.getElementById('sumNet');
             const s5 = document.getElementById('sumCN');
             const s6 = document.getElementById('sumAdv');
+            const sPM = document.getElementById('sumPayments');
+            const sRR = document.getElementById('sumRefunds');
             if (s1)  s1.textContent  = fmt(billINR);
             if (s1b) s1b.textContent = fmt(grossTotal);
             if (s2)  s2.textContent  = fmt(totalTax);
             if (s3)  s3.textContent  = fmt(tdsAmt + totalDeductions);
             if (s5)  s5.textContent  = cn > 0 ? fmt(cn) : '—';
             if (s6)  s6.textContent  = adv > 0 ? fmt(adv) : '—';
-            // Net Payable in summary = balance (after all deductions including PF/PT/ESIC/Other),
-            // not the pre-deduction netPayable. Previously this showed netPayable which didn't
-            // reflect the deductions, making the summary inconsistent with the "Balance to Pay" field.
+            // Two new tiles surface what's inside the multi-installment log
+            // and the refunds table so the balance math is visible at a glance
+            // (previously the user had to scroll up and mental-sum the tables).
+            if (sPM) sPM.textContent = paymentsMadeSum > 0 ? fmt(paymentsMadeSum) : '—';
+            if (sRR) sRR.textContent = refundsReceivedSum > 0 ? '−' + fmt(refundsReceivedSum) : '—';
+            // "Balance to Pay" tile shows the SAME value as the Balance to
+            // Pay field at the top of the form — one consistent figure for
+            // "amount still owed to vendor". For a partial payment, this is
+            // the amount left to pay. For a fully-paid bill (including those
+            // offset by refunds/reimbursements), this is 0. Refunds do not
+            // reduce this — they are contra-expense, not un-payments — but
+            // when both payments and refunds exist, effective cost = payments
+            // − refunds is visible from the two tiles alongside it.
             if (s4)  s4.textContent  = fmt(balance);
         }
 
@@ -13498,6 +13643,23 @@
             // ── Bill Type — read first so we can branch validation (EXP-003) ─
             const billType = document.getElementById('expBillType').value || '';
 
+            // ── Refunds Received cap: refunds can never exceed payments made
+            // Otherwise the bill would show a positive "amount owed" but the
+            // vendor has your money back — nonsensical. Blocks the save with
+            // a clear diagnostic. The Advance amount counts toward payments
+            // for this check (an advance is a payment).
+            const _refundsSum   = _sumExpRefundsReceived();
+            const _paymentsSum  = _sumExpPaymentsMade();
+            const _advPreview   = parseFloat(document.getElementById('expAdvanceAmt')?.value) || 0;
+            const _totalPaidPreview = _paymentsSum + _advPreview;
+            if (_refundsSum > _totalPaidPreview + 0.01) {
+                alert(`Refunds Received (₹${_refundsSum.toLocaleString('en-IN')}) exceed the total you've paid the vendor (₹${_totalPaidPreview.toLocaleString('en-IN')} — Advance ₹${_advPreview.toLocaleString('en-IN')} + Payments Made ₹${_paymentsSum.toLocaleString('en-IN')}).\n\nYou can't be refunded more than you paid. Please reduce the refund amount(s) or add the missing payment first.`);
+                window._expSaving = false;
+                if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save Expense'; }
+                _hideSaveToast();
+                return;
+            }
+
             // IGST vs CGST/SGST mutual-exclusion guardrail (SUPPLIER bills only)
             if (billType === 'SUPPLIER') {
                 const _cgst = parseFloat(document.getElementById('expCGST').value)||0;
@@ -13648,6 +13810,9 @@
                    (parseFloat(document.getElementById('expOtherDeduction').value)||0))
                 : 0;
 
+            // Balance to Pay = amount still owed to VENDOR. Refunds are
+            // contra-expense (not un-payments), so they do NOT reduce this.
+            // Effective cost is computed separately for display.
             const balance = Math.max(0, netPayable - totalDeductions - _sumExpPaymentsMade());
 
             // Handle multiple file attachments
@@ -13742,8 +13907,21 @@
                     amount:  parseFloat(tr.querySelector('.epm-amt')?.value) || 0,
                     mode:    tr.querySelector('.epm-mode')?.value || '',
                     ref:     (tr.querySelector('.epm-ref')?.value || '').trim(),
+                    bankAccountId: tr.querySelector('.epm-bank')?.value || document.getElementById('expBankAccount')?.value || '',
                     remarks: (tr.querySelector('.epm-remarks')?.value || '').trim()
                 })).filter(p => p.amount > 0),
+                // Vendor refunds — contra to expense, NOT income. Empty rows
+                // (amount 0) are dropped so an unused Refunds Received table
+                // saves as []. Bank account per row defaults to the bill's
+                // Paid-From bank if left blank on the row.
+                refundsReceived: Array.from(document.querySelectorAll('#expRefundsReceivedBody tr')).map(tr => ({
+                    date:          tr.querySelector('.err-date')?.value || '',
+                    amount:        parseFloat(tr.querySelector('.err-amt')?.value) || 0,
+                    mode:          tr.querySelector('.err-mode')?.value || '',
+                    ref:           (tr.querySelector('.err-ref')?.value || '').trim(),
+                    bankAccountId: tr.querySelector('.err-bank')?.value || document.getElementById('expBankAccount')?.value || '',
+                    remarks:       (tr.querySelector('.err-remarks')?.value || '').trim()
+                })).filter(r => r.amount > 0),
                 balanceAmt:        balance,
                 payStatus:         document.getElementById('expPayStatus').value,
                 payMode:           document.getElementById('expPayMode').value,
@@ -27413,11 +27591,17 @@ Automated WFH alert — ${company} Attendance System.`;
                             </div>
                             <button type="button" onclick="_arAddPaymentRow()" class="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-semibold">+ Add Payment</button>
                         </div>
-                        <!-- Summary tiles -->
-                        <div class="grid grid-cols-3 gap-2 mb-3">
+                        <!-- Summary tiles: Grand Total → Amount Receivable
+                             (net after TDS at source, what should actually
+                             hit the bank) → Received → Balance Due. -->
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
                             <div class="bg-gray-50 rounded-lg p-2">
                                 <div class="text-[10px] text-gray-500 uppercase font-semibold">Grand Total</div>
                                 <div id="arSumGrand" class="text-sm font-bold text-gray-800">${currSym}0.00</div>
+                            </div>
+                            <div class="bg-blue-50 rounded-lg p-2" title="Grand Total minus total TDS deducted at source. This is the net amount you should actually see credited to your bank account. Use it to cross-check against your bank statement.">
+                                <div class="text-[10px] text-blue-700 uppercase font-semibold">Amount Receivable</div>
+                                <div id="arSumReceivable" class="text-sm font-bold text-blue-700">${currSym}0.00</div>
                             </div>
                             <div class="bg-green-50 rounded-lg p-2">
                                 <div class="text-[10px] text-green-700 uppercase font-semibold">Received</div>
@@ -27496,9 +27680,57 @@ Automated WFH alert — ${company} Attendance System.`;
             if (field === 'tdsPct')    p.tdsAmt    = +(base * (+p.tdsPct    || 0) / 100).toFixed(2);
             if (field === 'itTdsPct')  p.itTdsAmt  = +(base * (+p.itTdsPct  || 0) / 100).toFixed(2);
             if (field === 'gstTdsPct') p.gstTdsAmt = +(base * (+p.gstTdsPct || 0) / 100).toFixed(2);
-            _arRenderPaymentRows();
+            // ── SURGICAL UPDATE (no innerHTML regen) ──────────────────
+            // The old code called _arRenderPaymentRows() here, which
+            // regenerated the entire tbody's innerHTML on every keystroke —
+            // that destroyed the input the user was typing into and created
+            // a new one, so focus was lost after each character (users
+            // reported "can't enter continuously"). Now we only mutate the
+            // specific cells that depend on the changed field, leaving
+            // every input node — and the caret — in place.
+            _arUpdateRowSurgical(idx);
             _arRecomputeSummary();
         }
+
+        // Surgical per-row updater: refreshes the auto-derived TDS Amt inputs
+        // (when % was edited) and the two read-only cells (Amt Receivable,
+        // Difference), without regenerating any inputs. Skips whichever
+        // input currently has focus so the user's typing is never disturbed.
+        function _arUpdateRowSurgical(idx) {
+            const p = (window._arWorkingPayments || [])[idx];
+            if (!p) return;
+            const tr = document.querySelector(`#arPaymentsRows tr[data-row-idx="${idx}"]`);
+            if (!tr) return;
+            const invAmt = +document.getElementById('arInvAmt')?.value || 0;
+            const { sym } = _arCurrentCurrency();
+            const fmt = n => sym + (+n || 0).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2});
+            const active = document.activeElement;
+            // Sync auto-derived TDS Amt inputs — only when NOT the focused
+            // element (so a user typing an amount directly isn't overwritten
+            // by an auto-derivation triggered elsewhere).
+            const tdsAmtIn   = tr.querySelector('.ar-tdsAmt');
+            const itTdsAmtIn = tr.querySelector('.ar-itTdsAmt');
+            const gstTdsAmtIn= tr.querySelector('.ar-gstTdsAmt');
+            if (tdsAmtIn   && active !== tdsAmtIn)   tdsAmtIn.value   = (+p.tdsAmt   || 0).toFixed(2);
+            if (itTdsAmtIn && active !== itTdsAmtIn) itTdsAmtIn.value = (+p.itTdsAmt || 0).toFixed(2);
+            if (gstTdsAmtIn&& active !== gstTdsAmtIn)gstTdsAmtIn.value= (+p.gstTdsAmt|| 0).toFixed(2);
+            // Recompute Amt Receivable + Difference — same math as the row
+            // renderer, kept in sync.
+            const combinedTDS   = +p.tdsAmt   || 0;
+            const brokendownTDS = (+p.itTdsAmt || 0) + (+p.gstTdsAmt || 0);
+            const effectiveTDS  = Math.max(combinedTDS, brokendownTDS);
+            const receivable    = +(invAmt - effectiveTDS).toFixed(2);
+            const diff          = +((+p.amount || 0) - receivable).toFixed(2);
+            const diffColor     = Math.abs(diff) < 1 ? 'text-green-700' : diff > 0 ? 'text-amber-700' : 'text-red-700';
+            const recvCell = tr.querySelector('.ar-receivable');
+            const diffCell = tr.querySelector('.ar-diff');
+            if (recvCell) recvCell.textContent = fmt(receivable);
+            if (diffCell) {
+                diffCell.textContent = sym + diff.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
+                diffCell.className = 'px-2 py-1 text-right font-semibold ' + diffColor;
+            }
+        }
+
         function _arRenderPaymentRows() {
             const tbody = document.getElementById('arPaymentsRows');
             if (!tbody) return;
@@ -27510,26 +27742,49 @@ Automated WFH alert — ${company} Attendance System.`;
             }
             const invAmt = +document.getElementById('arInvAmt')?.value || 0;
             tbody.innerHTML = rows.map((p, i) => {
-                const tdsTotal = (+p.tdsAmt||0) + (+p.itTdsAmt||0) + (+p.gstTdsAmt||0);
-                const receivable = (+p.amount || 0) + tdsTotal;
-                // Difference = per-row leftover of invoice amount NOT yet settled
-                // by this row (positive = still due after this row; negative =
-                // over-received — likely a data-entry mistake). Shown per-row
-                // for spotcheck; the summary tile at top gives the overall.
-                const diff = invAmt > 0 ? +(invAmt - receivable).toFixed(2) : 0;
-                const diffColor = diff > 0 ? 'text-amber-700' : diff < 0 ? 'text-red-700' : 'text-green-700';
-                return `<tr class="border-t border-gray-100">
+                // Effective TDS handles the common Indian-tax data-entry
+                // pattern where "TDS AMT" is the COMBINED total and
+                // "IT TDS AMT" + "GST TDS AMT" are its breakdowns. Taking
+                // max() avoids double/triple-counting when the user fills
+                // in both the combined total and the two breakdowns (which
+                // is the typical case — client deducts one lump-sum TDS
+                // with two components, e.g. 2% income-tax + 2% GST TDS).
+                //   • If only TDS AMT is set: use it (combined).
+                //   • If only IT + GST are set: use their sum.
+                //   • If all three set (breakdowns match total): max = total (correct).
+                //   • If breakdowns > combined (uncommon): max defers to breakdowns.
+                const combinedTDS   = +p.tdsAmt   || 0;
+                const brokendownTDS = (+p.itTdsAmt || 0) + (+p.gstTdsAmt || 0);
+                const effectiveTDS  = Math.max(combinedTDS, brokendownTDS);
+                // Amt Receivable = expected bank credit after TDS at source.
+                // Matches user's mental model: "Grand Total − TDS is the
+                // amount receivable". For a single-payment invoice this is
+                // the amount that should hit the bank; for multi-payment,
+                // it's the total-invoice benchmark (same across rows).
+                const receivable = +(invAmt - effectiveTDS).toFixed(2);
+                // Difference tells you whether the bank credit matched
+                // expectations. Near-zero (|diff| < 1) = clean rounding
+                // match (green). Positive = over-received (rare — amber).
+                // Negative = short-received (bank charges deducted, or
+                // data-entry error worth investigating — red).
+                const diff = +((+p.amount || 0) - receivable).toFixed(2);
+                const diffColor = Math.abs(diff) < 1 ? 'text-green-700' : diff > 0 ? 'text-amber-700' : 'text-red-700';
+                // Stable data-row-idx + class hooks so _arUpdateRowSurgical
+                // can find and update this row's derived cells without
+                // regenerating the input elements (which would kill focus
+                // on every keystroke).
+                return `<tr class="border-t border-gray-100" data-row-idx="${i}">
                     <td class="px-1 py-1"><input type="date" value="${p.date||''}" onchange="_arUpdatePaymentField(${i},'date',this.value)" class="w-full px-1.5 py-1 border border-gray-200 rounded text-[11px]"/></td>
                     <td class="px-1 py-1"><input type="number" step="0.01" value="${p.amount||0}" oninput="_arUpdatePaymentField(${i},'amount',this.value)" class="w-24 text-right px-1.5 py-1 border border-gray-200 rounded text-[11px]"/></td>
                     <td class="px-1 py-1"><input type="number" step="0.01" value="${p.taxableAmt||0}" oninput="_arUpdatePaymentField(${i},'taxableAmt',this.value)" class="w-24 text-right px-1.5 py-1 border border-gray-200 rounded text-[11px]"/></td>
                     <td class="px-1 py-1"><input type="number" step="0.01" value="${p.tdsPct||0}" oninput="_arUpdatePaymentField(${i},'tdsPct',this.value)" class="w-14 text-right px-1.5 py-1 border border-gray-200 rounded text-[11px]"/></td>
-                    <td class="px-1 py-1"><input type="number" step="0.01" value="${p.tdsAmt||0}" oninput="_arUpdatePaymentField(${i},'tdsAmt',this.value)" class="w-20 text-right px-1.5 py-1 border border-gray-200 rounded text-[11px]"/></td>
+                    <td class="px-1 py-1"><input type="number" step="0.01" value="${p.tdsAmt||0}" oninput="_arUpdatePaymentField(${i},'tdsAmt',this.value)" class="ar-tdsAmt w-20 text-right px-1.5 py-1 border border-gray-200 rounded text-[11px]"/></td>
                     <td class="px-1 py-1"><input type="number" step="0.01" value="${p.itTdsPct||0}" oninput="_arUpdatePaymentField(${i},'itTdsPct',this.value)" class="w-14 text-right px-1.5 py-1 border border-gray-200 rounded text-[11px]"/></td>
-                    <td class="px-1 py-1"><input type="number" step="0.01" value="${p.itTdsAmt||0}" oninput="_arUpdatePaymentField(${i},'itTdsAmt',this.value)" class="w-20 text-right px-1.5 py-1 border border-gray-200 rounded text-[11px]"/></td>
+                    <td class="px-1 py-1"><input type="number" step="0.01" value="${p.itTdsAmt||0}" oninput="_arUpdatePaymentField(${i},'itTdsAmt',this.value)" class="ar-itTdsAmt w-20 text-right px-1.5 py-1 border border-gray-200 rounded text-[11px]"/></td>
                     <td class="px-1 py-1"><input type="number" step="0.01" value="${p.gstTdsPct||0}" oninput="_arUpdatePaymentField(${i},'gstTdsPct',this.value)" class="w-14 text-right px-1.5 py-1 border border-gray-200 rounded text-[11px]"/></td>
-                    <td class="px-1 py-1"><input type="number" step="0.01" value="${p.gstTdsAmt||0}" oninput="_arUpdatePaymentField(${i},'gstTdsAmt',this.value)" class="w-20 text-right px-1.5 py-1 border border-gray-200 rounded text-[11px]"/></td>
-                    <td class="px-2 py-1 text-right font-semibold text-gray-700">${sym}${receivable.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-                    <td class="px-2 py-1 text-right font-semibold ${diffColor}">${sym}${diff.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                    <td class="px-1 py-1"><input type="number" step="0.01" value="${p.gstTdsAmt||0}" oninput="_arUpdatePaymentField(${i},'gstTdsAmt',this.value)" class="ar-gstTdsAmt w-20 text-right px-1.5 py-1 border border-gray-200 rounded text-[11px]"/></td>
+                    <td class="ar-receivable px-2 py-1 text-right font-semibold text-gray-700">${sym}${receivable.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                    <td class="ar-diff px-2 py-1 text-right font-semibold ${diffColor}">${sym}${diff.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
                     <td class="px-1 py-1 text-center"><button type="button" onclick="_arRemovePaymentRow(${i})" class="text-red-500 hover:text-red-700 text-sm font-bold" title="Remove this row">✕</button></td>
                 </tr>`;
             }).join('');
@@ -27538,13 +27793,39 @@ Automated WFH alert — ${company} Attendance System.`;
             const invAmt = +document.getElementById('arInvAmt')?.value || 0;
             const rows = window._arWorkingPayments || [];
             const received = rows.reduce((s, p) => s + (+p.amount || 0), 0);
-            const tdsTotal = rows.reduce((s, p) => s + (+p.tdsAmt||0) + (+p.itTdsAmt||0) + (+p.gstTdsAmt||0), 0);
+            // Per-row effective TDS matches the same max() rule used in the
+            // row renderer — one authoritative deduction per row, no triple
+            // counting when the user filled both the combined TDS AMT and
+            // its IT/GST breakdowns.
+            const tdsTotal = rows.reduce((s, p) => {
+                const combined   = +p.tdsAmt || 0;
+                const brokendown = (+p.itTdsAmt || 0) + (+p.gstTdsAmt || 0);
+                return s + Math.max(combined, brokendown);
+            }, 0);
             const balance = Math.max(0, +(invAmt - received - tdsTotal).toFixed(2));
             const { sym } = _arCurrentCurrency();
             const fmt = n => sym + (+n || 0).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2});
             const g = document.getElementById('arSumGrand');    if (g) g.textContent = fmt(invAmt);
+            // "Amount Receivable" tile — Grand Total minus total TDS. This
+            // is the NET amount that should hit the bank after the client
+            // deducts TDS at source. Useful for cross-checking against the
+            // bank statement: what actually credited should equal this
+            // figure (± any rounding). Never negative — clamp at 0 for the
+            // edge case of over-declared TDS.
+            const receivable = Math.max(0, +(invAmt - tdsTotal).toFixed(2));
+            const rcv = document.getElementById('arSumReceivable'); if (rcv) rcv.textContent = fmt(receivable);
+            // "Received" tile shows total INVOICE VALUE settled = actual
+            // bank credits + TDS deducted at source (both count toward
+            // settling the invoice, since TDS is claimable back at ITR
+            // filing). When received + tdsTotal ≈ grandTotal, the invoice
+            // is fully settled and Balance Due is ~zero.
             const r = document.getElementById('arSumReceived'); if (r) r.textContent = fmt(received + tdsTotal);
             const b = document.getElementById('arSumBalance');  if (b) b.textContent = fmt(balance);
+            // Every row's Amt Receivable + Difference cells depend on invAmt
+            // (they read it fresh each render). When the top-level invoice
+            // amount changes, refresh every row surgically — no focus loss,
+            // no innerHTML regen. Cheap: O(rows) DOM ops, no re-parsing.
+            for (let i = 0; i < rows.length; i++) _arUpdateRowSurgical(i);
         }
         function _arOnCurrencyChange() {
             const { code, sym } = _arCurrentCurrency();
@@ -35609,6 +35890,260 @@ Automated WFH alert — ${company} Attendance System.`;
         // Interbank Expense transfers) by which bank account each entry
         // already references.
         // ═══════════════════════════════════════════════════════════════
+        // ═══════════════════════════════════════════════════════════════
+        // OTHER INCOME MODULE
+        // ═══════════════════════════════════════════════════════════════
+        // Non-invoice income — bank interest, FD interest, one-off receipts.
+        // The scope is deliberately narrow: it records income events that
+        // appear on the bank statement but don't come from customer
+        // invoices. NOT contra-expense (which is refundsReceived on an
+        // expense), NOT an FD asset register (out of scope by design).
+        // Bank ledger picks these up as credit rows automatically; nothing
+        // else in the app changes.
+
+        const OTHER_INCOME_TYPES = [
+            { code: 'INT_CURRENT',  label: 'Bank Interest — Current A/c' },
+            { code: 'INT_SAVINGS',  label: 'Bank Interest — Savings A/c' },
+            { code: 'FD_INTEREST',  label: 'FD Interest Credit'          },
+            { code: 'OTHER',        label: 'Other Income (misc)'          }
+        ];
+        function _otherIncomeTypeLabel(code) {
+            return (OTHER_INCOME_TYPES.find(t => t.code === code) || {}).label || code || 'Other Income';
+        }
+
+        // Mint the next sequential Other Income ID for the current FY.
+        // Format: OI-<FYcode>-<3-digit-serial>. Scoped globally across all
+        // records so IDs never collide.
+        function generateOtherIncomeID(date = new Date()) {
+            const fyCode = (typeof getFinancialYearCode === 'function')
+                ? getFinancialYearCode(date) : '2627';
+            const prefix = 'OI-' + fyCode + '-';
+            const existing = (otherIncome||[])
+                .filter(r => (r.incomeID||'').startsWith(prefix))
+                .map(r => parseInt(r.incomeID.substring(prefix.length)) || 0);
+            const next = (existing.length ? Math.max(...existing) : 0) + 1;
+            return prefix + String(next).padStart(3, '0');
+        }
+
+        // Open the entry modal. Editing an existing record if incomeID
+        // is passed; blank/undefined means "create new".
+        function openOtherIncomeModal(incomeID) {
+            const existing = incomeID ? (otherIncome||[]).find(r => r.incomeID === incomeID) : null;
+            const today = new Date().toISOString().split('T')[0];
+            const banks = (bankAccounts||[]).filter(b => b.isActive !== false);
+            if (!banks.length) {
+                alert('No bank accounts configured. Please add at least one bank account in Settings before recording income against it.');
+                return;
+            }
+            // Default to the bank currently selected in the Bank Ledger view
+            // so a user viewing "HDFC Current" and clicking Record Income
+            // doesn't need to re-pick the bank.
+            const defaultBank = existing?.bankAccountId || window._bankLedgerSel || banks[0].id;
+            const modal = document.createElement('div');
+            modal.id = 'otherIncomeModal';
+            modal.className = 'modal show';
+            modal.innerHTML = `
+            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg m-4 max-h-[90vh] overflow-y-auto">
+                <div class="bg-gradient-to-r from-blue-600 to-indigo-600 p-4 text-white sticky top-0 z-10">
+                    <h3 class="text-base font-bold">${existing ? '✏️ Edit' : '💰 Record'} Interest / Other Income</h3>
+                    <p class="text-blue-100 text-xs mt-0.5">${existing ? existing.incomeID : 'New entry — will be assigned an ID on save'}</p>
+                </div>
+                <div class="p-4 space-y-3">
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-semibold mb-1">Date Credited *</label>
+                            <input type="date" id="oiDate" value="${existing?.date || today}" max="${today}" class="w-full px-3 py-2 border rounded-lg text-sm"/>
+                            <p class="text-[10px] text-gray-400 mt-0.5">Date the money hit the bank (per statement).</p>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold mb-1">Bank Account *</label>
+                            <select id="oiBank" class="w-full px-3 py-2 border rounded-lg text-sm">
+                                ${banks.map(b => `<option value="${b.id}" ${defaultBank===b.id?'selected':''}>${b.accountName || b.bankName || ''}${b.accountNo?' (····'+String(b.accountNo).slice(-4)+')':''}</option>`).join('')}
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold mb-1">Income Type *</label>
+                        <select id="oiType" class="w-full px-3 py-2 border rounded-lg text-sm">
+                            <option value="">— Pick —</option>
+                            ${OTHER_INCOME_TYPES.map(t => `<option value="${t.code}" ${existing?.incomeType===t.code?'selected':''}>${t.label}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-semibold mb-1">Amount Credited (₹) *</label>
+                            <input type="number" id="oiAmount" min="0.01" step="0.01" value="${existing?.amount ?? ''}" placeholder="e.g. 8000" class="w-full px-3 py-2 border rounded-lg text-sm"/>
+                            <p class="text-[10px] text-gray-400 mt-0.5">Full amount as per bank statement.</p>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold mb-1">Bank Ref / Advice No.</label>
+                            <input type="text" id="oiBankRef" value="${(existing?.bankRef||'').replace(/"/g,'&quot;')}" placeholder="From bank statement" class="w-full px-3 py-2 border rounded-lg text-sm"/>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold mb-1">FD Reference <span class="font-normal text-gray-400">(optional — cross-ref your FD receipt no.)</span></label>
+                        <input type="text" id="oiFDRef" value="${(existing?.fdRef||'').replace(/"/g,'&quot;')}" placeholder="e.g. FDR-2026-88104" class="w-full px-3 py-2 border rounded-lg text-sm"/>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold mb-1">Remarks</label>
+                        <input type="text" id="oiRemarks" value="${(existing?.remarks||'').replace(/"/g,'&quot;')}" placeholder="e.g. Quarterly interest Jul-Sep 2026" class="w-full px-3 py-2 border rounded-lg text-sm"/>
+                    </div>
+                    <div class="text-[11px] bg-blue-50 border border-blue-200 rounded-lg p-2 text-blue-900">
+                        <strong>Where this shows up:</strong> Bank Ledger as a credit row on the date above (source: "Other Income"). Counted toward Interest Income / Other Income in P&L totals. Not treated as invoice revenue.
+                    </div>
+                    <div class="flex justify-between gap-3 pt-2 border-t sticky bottom-0 bg-white">
+                        <div>${existing ? `<button onclick="_deleteOtherIncome('${existing.incomeID}')" class="px-4 py-2 bg-red-100 text-red-700 rounded-lg text-sm hover:bg-red-200">🗑 Delete</button>` : ''}</div>
+                        <div class="flex gap-3">
+                            <button onclick="document.getElementById('otherIncomeModal').remove()" class="px-4 py-2 border rounded-lg text-sm">Cancel</button>
+                            <button onclick="_saveOtherIncome('${existing?.incomeID || ''}')" class="px-5 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700">💾 Save</button>
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+            document.body.appendChild(modal);
+        }
+
+        async function _saveOtherIncome(existingID) {
+            const date         = document.getElementById('oiDate')?.value || '';
+            const bankAccountId= document.getElementById('oiBank')?.value || '';
+            const incomeType   = document.getElementById('oiType')?.value || '';
+            const amount       = parseFloat(document.getElementById('oiAmount')?.value) || 0;
+            const bankRef      = (document.getElementById('oiBankRef')?.value || '').trim();
+            const fdRef        = (document.getElementById('oiFDRef')?.value || '').trim();
+            const remarks      = (document.getElementById('oiRemarks')?.value || '').trim();
+
+            if (!date)         { alert('Please pick the Date Credited.'); return; }
+            if (!bankAccountId){ alert('Please pick a Bank Account.'); return; }
+            if (!incomeType)   { alert('Please pick an Income Type.'); return; }
+            if (amount <= 0)   { alert('Amount must be greater than zero.'); return; }
+
+            let record;
+            const now = new Date().toISOString();
+            const who = (typeof currentUser !== 'undefined' && currentUser?.name) || 'User';
+
+            if (existingID) {
+                // Update in place — preserve creation audit fields
+                const idx = otherIncome.findIndex(r => r.incomeID === existingID);
+                if (idx < 0) { alert('Record not found.'); return; }
+                const prev = otherIncome[idx];
+                record = { ...prev, date, bankAccountId, incomeType, amount: +amount.toFixed(2), bankRef, fdRef, remarks, updatedBy: who, updatedAt: now };
+                otherIncome[idx] = record;
+            } else {
+                record = {
+                    incomeID: generateOtherIncomeID(new Date(date)),
+                    date, bankAccountId, incomeType, amount: +amount.toFixed(2),
+                    bankRef, fdRef, remarks,
+                    createdBy: who, createdAt: now
+                };
+                otherIncome.push(record);
+            }
+
+            try {
+                await saveData('otherIncome', otherIncome);
+            } catch (e) {
+                // Roll back the in-memory change
+                if (existingID) {
+                    // Restore previous version — reload from Drive would be safer,
+                    // but simplest is to warn and let the user retry
+                    alert('Could not save the change: ' + (e.message || e) + '\n\nPlease refresh and try again.');
+                } else {
+                    otherIncome.pop();
+                    alert('Could not save the income record: ' + (e.message || e));
+                }
+                return;
+            }
+
+            document.getElementById('otherIncomeModal').remove();
+            renderView();
+            const ba = (bankAccounts||[]).find(b => b.id === bankAccountId);
+            _showToast(`✓ ${existingID ? 'Updated' : 'Recorded'} ${_otherIncomeTypeLabel(incomeType)} · ₹${amount.toLocaleString('en-IN')} · ${ba?.accountName || 'bank'}`, '#4338ca', 4000);
+        }
+
+        async function _deleteOtherIncome(incomeID) {
+            const idx = otherIncome.findIndex(r => r.incomeID === incomeID);
+            if (idx < 0) return;
+            const rec = otherIncome[idx];
+            if (!confirm(`Delete this income record?\n\n${_otherIncomeTypeLabel(rec.incomeType)} · ₹${(+rec.amount||0).toLocaleString('en-IN')} · ${rec.date}\n\nThis will remove the credit row from the Bank Ledger and drop it from P&L totals. This action cannot be undone.`)) return;
+            const removed = otherIncome.splice(idx, 1)[0];
+            try {
+                await saveData('otherIncome', otherIncome);
+            } catch (e) {
+                otherIncome.splice(idx, 0, removed);   // roll back
+                alert('Could not delete: ' + (e.message || e));
+                return;
+            }
+            document.getElementById('otherIncomeModal')?.remove();
+            renderView();
+            _showToast(`✓ Deleted income record ${incomeID}`, '#dc2626', 4000);
+        }
+
+        // Manage list — read-only overview of all Other Income entries with
+        // click-to-edit affordance. Filter by bank (defaults to the bank
+        // currently selected on the Bank Ledger view). Rows sorted by date
+        // descending so the most recent entries surface first.
+        function openOtherIncomeListModal() {
+            const filterBank = window._otherIncomeListFilter ?? (window._bankLedgerSel || '');
+            const banks = (bankAccounts||[]).filter(b => b.isActive !== false);
+            const rows = (otherIncome||[])
+                .filter(r => !filterBank || r.bankAccountId === filterBank)
+                .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+            const total = rows.reduce((s, r) => s + (+r.amount || 0), 0);
+            const fmt = n => '₹' + (+n || 0).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            const modal = document.createElement('div');
+            modal.id = 'otherIncomeListModal';
+            modal.className = 'modal show';
+            modal.innerHTML = `
+            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl m-4 max-h-[90vh] overflow-hidden flex flex-col">
+                <div class="bg-gradient-to-r from-indigo-600 to-blue-600 p-4 text-white flex items-center justify-between gap-3">
+                    <div>
+                        <h3 class="text-base font-bold">📋 Interest / Other Income — Entries</h3>
+                        <p class="text-blue-100 text-xs mt-0.5">${rows.length} entr${rows.length===1?'y':'ies'} · Total ${fmt(total)}</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <select onchange="window._otherIncomeListFilter=this.value;document.getElementById('otherIncomeListModal').remove();openOtherIncomeListModal();" class="px-2 py-1 rounded text-sm text-gray-800">
+                            <option value="" ${!filterBank?'selected':''}>All banks</option>
+                            ${banks.map(b => `<option value="${b.id}" ${filterBank===b.id?'selected':''}>${b.accountName || b.bankName}</option>`).join('')}
+                        </select>
+                        <button onclick="document.getElementById('otherIncomeListModal').remove()" class="text-white/70 hover:text-white text-xl leading-none">×</button>
+                    </div>
+                </div>
+                <div class="flex-1 overflow-y-auto p-4">
+                    ${rows.length === 0 ? `<p class="text-sm text-gray-400 text-center py-8">No entries yet${filterBank ? ' for this bank' : ''}.</p>` : `
+                    <table class="w-full text-xs">
+                        <thead class="text-gray-500 border-b">
+                            <tr>
+                                <th class="text-left px-2 py-1">Date</th>
+                                <th class="text-left px-2 py-1">Type</th>
+                                <th class="text-left px-2 py-1">Bank</th>
+                                <th class="text-right px-2 py-1">Amount</th>
+                                <th class="text-left px-2 py-1">FD Ref / Bank Ref / Remarks</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${rows.map(r => {
+                                const ba = banks.find(b => b.id === r.bankAccountId);
+                                const meta = [r.fdRef && ('FD '+r.fdRef), r.bankRef && ('Ref '+r.bankRef), r.remarks].filter(Boolean).join(' · ');
+                                return `<tr class="border-b border-gray-100 hover:bg-indigo-50 cursor-pointer" onclick="document.getElementById('otherIncomeListModal').remove();openOtherIncomeModal('${r.incomeID}')">
+                                    <td class="px-2 py-1.5 whitespace-nowrap">${r.date || '—'}</td>
+                                    <td class="px-2 py-1.5">${_otherIncomeTypeLabel(r.incomeType)}</td>
+                                    <td class="px-2 py-1.5 text-gray-500">${ba?.accountName || ba?.bankName || '—'}</td>
+                                    <td class="px-2 py-1.5 text-right font-semibold text-green-700">${fmt(r.amount)}</td>
+                                    <td class="px-2 py-1.5 text-gray-500 max-w-xs truncate" title="${meta.replace(/"/g,'&quot;')}">${meta || ''}</td>
+                                    <td class="px-2 py-1.5 text-right text-indigo-500">✎</td>
+                                </tr>`;
+                            }).join('')}
+                        </tbody>
+                    </table>`}
+                </div>
+                <div class="border-t p-3 flex justify-end gap-3">
+                    <button onclick="document.getElementById('otherIncomeListModal').remove()" class="px-4 py-2 border rounded-lg text-sm">Close</button>
+                    <button onclick="document.getElementById('otherIncomeListModal').remove();openOtherIncomeModal()" class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm">+ New Entry</button>
+                </div>
+            </div>`;
+            document.body.appendChild(modal);
+        }
+
         function _bankLedgerEntries(bankId) {
             const ba = (bankAccounts||[]).find(b => b.id === bankId);
             if (!ba) return [];
@@ -35745,23 +36280,97 @@ Automated WFH alert — ${company} Attendance System.`;
             // the bank), not the bill's own date.
             (expenses||[]).forEach(e => {
                 if (e.billType === 'INTERBANK') return;   // handled separately below
-                if (e.bankAccountId !== bankId) return;
                 const who = e.vendor || e.description || 'Bill/Expense';
-                if ((e.paymentsMade||[]).length > 0) {
-                    // Multi-installment bill — one debit row per payment made,
-                    // each dated by when that specific instalment actually
-                    // went out (instead of one lump-sum row on a single date).
-                    (e.paymentsMade||[]).forEach(p => {
-                        const amt = +p.amount || 0;
-                        if (amt <= 0) return;
-                        rows.push({ date:p.date||'', desc:`${who}${e.billNo?' — Bill '+e.billNo:''}${p.remarks?' — '+p.remarks:''} (instalment)`, credit:0, debit:amt, src:'Expenses/Bills' });
+                const billBank = e.bankAccountId || '';
+
+                // ── 1) Advance paid at bill time is a real cash outflow. ──
+                // Uses the bill-level bank (advance has no per-row picker —
+                // it's a single field on the main form).
+                const advAmt = +e.advanceAmt || 0;
+                if (advAmt > 0 && billBank === bankId) {
+                    rows.push({
+                        date: e.advanceDate || e.payDate || e.billDate || '',
+                        desc: `${who}${e.billNo?' — Bill '+e.billNo:''} (advance)`,
+                        credit: 0, debit: advAmt, src: 'Expenses/Bills'
                     });
-                } else {
-                    // Single advance+final model (unchanged, existing behaviour)
-                    const amt = +(e.balanceAmt ?? e.netPayable ?? e.billAmtINR) || 0;
-                    if (amt <= 0) return;
-                    rows.push({ date:e.payDate||e.billDate||'', desc:`${who}${e.billNo?' — Bill '+e.billNo:''}`, credit:0, debit:amt, src:'Expenses/Bills' });
                 }
+
+                // ── 2) Multi-installment payments — each row carries its own
+                // bankAccountId (per-row picker). Falls back to bill-level
+                // bank when the row's picker was left as "Same as bill".
+                // Older records without the per-row field also fall back to
+                // billBank, so nothing is lost from historical data.
+                (e.paymentsMade||[]).forEach(p => {
+                    const amt = +p.amount || 0;
+                    if (amt <= 0) return;
+                    const payBank = p.bankAccountId || billBank;
+                    if (payBank !== bankId) return;
+                    rows.push({
+                        date: p.date || '',
+                        desc: `${who}${e.billNo?' — Bill '+e.billNo:''}${p.remarks?' — '+p.remarks:''} (instalment)`,
+                        credit: 0, debit: amt, src: 'Expenses/Bills'
+                    });
+                });
+
+                // ── 3) Old-model backwards compat. ──
+                // Bills recorded before advance/paymentsMade tracking that
+                // are simply marked "Paid" — treat the full netPayable as a
+                // single outflow on the payDate. Only fires when we have
+                // nothing else to show (no advance, no instalments), so it
+                // never double-counts modern records. Uses bill-level bank.
+                if (advAmt <= 0 && !(e.paymentsMade||[]).length && e.payStatus === 'Paid' && billBank === bankId) {
+                    const amt = +(e.netPayable ?? e.billAmtINR) || 0;
+                    if (amt > 0) {
+                        rows.push({
+                            date: e.payDate || e.billDate || '',
+                            desc: `${who}${e.billNo?' — Bill '+e.billNo:''}`,
+                            credit: 0, debit: amt, src: 'Expenses/Bills'
+                        });
+                    }
+                }
+            });
+
+            // Vendor Refunds Received — money BACK from a supplier who was
+            // overpaid (or issued a partial refund for damaged / short-
+            // supplied goods). Contra to expense, NOT income — so the P&L
+            // report ignores these, but the bank ledger MUST show the inflow
+            // so the bank statement reconciles. Each refund row on any
+            // expense is scanned; the per-row bankAccountId (falling back to
+            // the parent expense's bankAccountId for older records without
+            // the per-row picker) decides which bank it lands in. Rows appear
+            // as credits with a distinctive "Vendor Refund" source label.
+            (expenses||[]).forEach(e => {
+                if (e.billType === 'INTERBANK') return;
+                const who = e.vendor || e.description || 'Vendor';
+                (e.refundsReceived||[]).forEach(r => {
+                    const amt = +r.amount || 0;
+                    if (amt <= 0) return;
+                    const rBank = r.bankAccountId || e.bankAccountId || '';
+                    if (rBank !== bankId) return;
+                    rows.push({
+                        date: r.date || '',
+                        desc: `Vendor Refund — ${who}${e.billNo?' — Bill '+e.billNo:''}${r.mode?' · '+r.mode:''}${r.ref?' · Ref '+r.ref:''}${r.remarks?' — '+r.remarks:' (excess return)'}`,
+                        credit: amt, debit: 0, src: 'Vendor Refund'
+                    });
+                });
+            });
+
+            // Other Income — bank interest (current/savings/FD) and misc
+            // non-invoice receipts. Genuine income (feeds P&L Interest Income
+            // / Other Income), unlike vendor refunds which are contra to
+            // expense. Bank ledger shows a credit row on the date the money
+            // hit the bank; source label distinguishes it from customer
+            // invoice payments in "Source" column filters.
+            (otherIncome||[]).forEach(oi => {
+                if (oi.bankAccountId !== bankId) return;
+                const amt = +oi.amount || 0;
+                if (amt <= 0) return;
+                const typeLabel = _otherIncomeTypeLabel(oi.incomeType);
+                rows.push({
+                    date: oi.date || '',
+                    desc: `${typeLabel}${oi.fdRef?' · FD '+oi.fdRef:''}${oi.bankRef?' · Ref '+oi.bankRef:''}${oi.remarks?' — '+oi.remarks:''}`,
+                    credit: amt, debit: 0, src: 'Other Income'
+                });
             });
 
             // Interbank transfers (Office Expenses module) — both legs.
@@ -35916,7 +36525,11 @@ Automated WFH alert — ${company} Attendance System.`;
             <div class="mb-6 flex items-center justify-between flex-wrap gap-3">
                 <div>
                     <h2 class="text-2xl font-bold text-gray-800">🏦 Bank</h2>
-                    <p class="text-xs text-gray-400 mt-1">Read-only view — aggregates Transactions (invoice payments received), AR Historical Invoice receipts, Payment Requests, Expenses/Bills (final Net Payable, by Paid Date), and Interbank transfers. Petty Cash replenishments and Fund Pool disbursements are <em>excluded</em> — they're paid via Payment Requests which are already counted above, so including them separately would double-count. Individual petty-cash and pool spending stays in their own modules (they draw from the float, not the bank). Nothing here writes data.</p>
+                    <p class="text-xs text-gray-400 mt-1">Read-only view — aggregates Transactions (invoice payments received), AR Historical Invoice receipts, Payment Requests, Expenses/Bills (final Net Payable, by Paid Date), Vendor Refunds, Interest & Other Income, and Interbank transfers. Petty Cash replenishments and Fund Pool disbursements are <em>excluded</em> — they're paid via Payment Requests which are already counted above, so including them separately would double-count. Individual petty-cash and pool spending stays in their own modules (they draw from the float, not the bank). Only the Record Income button writes data.</p>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="openOtherIncomeListModal()" class="px-3 py-2 bg-white border border-indigo-300 text-indigo-700 rounded-lg text-sm font-semibold hover:bg-indigo-50 whitespace-nowrap" title="View, edit, or delete past Interest / Other Income entries">📋 Manage</button>
+                    <button onclick="openOtherIncomeModal()" class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 whitespace-nowrap">💰 Record Interest / Other Income</button>
                 </div>
             </div>
             <div class="bg-white rounded-xl border p-4 mb-4 flex items-center gap-4 flex-wrap">
