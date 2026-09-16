@@ -525,3 +525,66 @@ model ChangeEvent {
   @@index([collection, ts])
   @@index([ts])
 }
+// --- OTHER INCOME ---------------------------------------------------
+
+model OtherIncome {
+  id             String    @id @default(cuid())
+  incomeID       String    @unique
+  date           DateTime?
+  bankAccountId  String?
+  incomeType     String?
+  amount         Float?
+  data           Json
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  lastModifiedBy String?
+  version        Int       @default(1)
+
+  @@index([date])
+  @@index([bankAccountId])
+  @@index([incomeType])
+}
+
+// --- LETTERS --------------------------------------------------------
+
+model CoverLetter {
+  id             String    @id @default(cuid())
+  letterID       String    @unique
+  letterDate     DateTime?
+  refNo          String?
+  invoiceID      String?
+  partyID        String?
+  data           Json
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  lastModifiedBy String?
+  version        Int       @default(1)
+
+  @@index([letterDate])
+  @@index([partyID])
+  @@index([invoiceID])
+}
+
+model ReturnableToolsLetter {
+  id             String    @id @default(cuid())
+  letterID       String    @unique
+  letterDate     DateTime?
+  refNo          String?
+  staffID        String?
+  projectID      String?
+  status         String?
+  returnedDate   DateTime?
+  data           Json
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  createdBy      String?
+  lastModifiedBy String?
+  version        Int       @default(1)
+
+  @@index([letterDate])
+  @@index([staffID])
+  @@index([status])
+  @@index([projectID])
+}
