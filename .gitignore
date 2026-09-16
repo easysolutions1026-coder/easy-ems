@@ -59,6 +59,6 @@ _backups/
 *.backup
 
 
-# Migration artifacts — local only, never commit
+# Migration artifacts - local only, never commit
 staff.json
 staff-stripped.json
