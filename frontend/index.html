@@ -181,12 +181,11 @@
     window.fetch = function(input, init) {
       var url = typeof input === 'string' ? input : (input && input.url) || '';
 
-      if (url.indexOf('https://sheets.googleapis.com') === 0) {
-        console.info('[Cloud Run] Sheets call blocked:', url.slice(0, 120));
-        return Promise.resolve(jsonResponse({
-          sheets: [], values: [], spreadsheetId: null, replies: []
-        }));
-      }
+      // Sheets calls pass through to Google directly. The prior stub is
+      // removed now that per-user Sheets export is supported end-to-end
+      // from Cloud Run (frontend-direct, using the OAuth token's
+      // spreadsheets scope). Drive JSON reads/writes are still gated
+      // below and re-routed to /api/data/*.
 
       var disc = parseDiscovery(url);
       if (disc) {
@@ -248,30 +247,10 @@
       });
     }
 
-    var installStub = function() {
-      if (typeof window.syncToGoogleSheets === 'function' && !window.syncToGoogleSheets.__cloudRunStub) {
-        window.syncToGoogleSheets = function() {
-          console.info('[Cloud Run] Sheets sync button suppressed');
-          if (typeof _showToast === 'function') {
-            _showToast('Cloud Run mode - Sheets sync disabled during testing', '#0369a1', 4000);
-          } else {
-            alert('Cloud Run mode - Sheets sync is disabled during testing.');
-          }
-        };
-        window.syncToGoogleSheets.__cloudRunStub = true;
-        console.info('[Cloud Run] syncToGoogleSheets stub installed');
-        return true;
-      }
-      return false;
-    };
-    if (!installStub()) {
-      var tries = 0;
-      var t = setInterval(function() {
-        if (installStub() || ++tries > 50) clearInterval(t);
-      }, 200);
-    }
+    // syncToGoogleSheets is no longer stubbed — the real function in
+    // index.html handles the export directly against sheets.googleapis.com.
 
-    console.info('[Cloud Run] Sheets + Drive JSON isolation active - Cloud SQL only mode');
+    console.info('[Cloud Run] Drive JSON isolation active — Cloud SQL storage, direct Sheets writes');
   })();
   </script>
   <!-- CLOUD_RUN_GATE_END -->  
@@ -3964,6 +3943,7 @@
                 }
             }
             _startAutoRefresh();
+            _startAutoSheetsSync();
             if (_lockRefresh) clearInterval(_lockRefresh);
             _lockRefresh = setInterval(_checkActiveLocks, 120000);
             setTimeout(_checkActiveLocks, 3000);
@@ -5548,6 +5528,103 @@
                 refreshDataFromDrive().catch(()=>{});
             }
         });
+
+        // ─── Auto-sync to Google Sheets at 6 AM and 6 PM IST ───
+        // Twice-daily automatic Sheets export. Goal: at any point in the day,
+        // the reporting Sheet is at most ~12 hours behind Cloud SQL. Requires
+        // no server-side scheduler — an in-page timer checks every 2 minutes
+        // whether the most recent 6 AM or 6 PM IST cutoff has been serviced,
+        // and fires syncToGoogleSheets() if not. Also checked on app load
+        // (miss-recovery: if nobody was on the app when a cutoff passed, the
+        // next open catches up — but only the most recent missed cutoff,
+        // never a backlog).
+        //
+        // De-duped across concurrent browsers via settings.lastSheetsSync,
+        // which the sync itself updates on success. View-only users and
+        // sessions without a Sheet configured are silently skipped.
+        const _AUTO_SHEETS_TICK_MS = 2 * 60 * 1000;   // 2 min
+        let _autoSheetsSyncTimer = null;
+        let _autoSheetsSyncInFlight = false;
+
+        // Compute the most recent 6 AM or 6 PM IST cutoff that has passed.
+        // IST is UTC+5:30, so 6 AM IST = 00:30 UTC, 6 PM IST = 12:30 UTC.
+        function _currentSheetsCutoff() {
+            const parts = new Intl.DateTimeFormat('en-US', {
+                timeZone: 'Asia/Kolkata',
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit',
+                hour12: false
+            }).formatToParts(new Date());
+            const p = {};
+            parts.forEach(x => { p[x.type] = x.value; });
+            const y = +p.year, m = +p.month, d = +p.day, h = +p.hour;
+
+            let cutoffHour, cy = y, cm = m, cd = d;
+            if (h >= 18) {
+                cutoffHour = 18;                 // Today's 6 PM
+            } else if (h >= 6) {
+                cutoffHour = 6;                  // Today's 6 AM
+            } else {
+                // Midnight to 5:59 AM IST — most recent cutoff was yesterday's 6 PM.
+                // Roll the date back one day, accounting for month/year boundaries.
+                const yesterday = new Date(Date.UTC(y, m - 1, d));
+                yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+                cy = yesterday.getUTCFullYear();
+                cm = yesterday.getUTCMonth() + 1;
+                cd = yesterday.getUTCDate();
+                cutoffHour = 18;
+            }
+            // Build the cutoff Date in UTC. 6 AM IST = UTC 00:30, 6 PM IST = UTC 12:30.
+            const utcHours   = cutoffHour === 6 ? 0 : 12;
+            const utcMinutes = 30;
+            return {
+                at: new Date(Date.UTC(cy, cm - 1, cd, utcHours, utcMinutes)),
+                label: cutoffHour === 6 ? '6 AM IST' : '6 PM IST'
+            };
+        }
+
+        async function _maybeAutoSyncSheets() {
+            if (_autoSheetsSyncInFlight) return;
+            // Prerequisites for firing — silent skip on all of these
+            if (!accessToken) return;
+            if (!settings || !settings.googleSheetsId) return;
+            if (ENABLE_LOGIN && _bmsSession && _bmsSession.role === 'View Only') return;
+            // Don't fire while the user is on a modal — the sync's ~5-10s
+            // network round-trip can steal focus / repaint under an active
+            // dialog. Two-minute tick will catch it as soon as they're done.
+            if (document.querySelector('.modal.show, dialog[open]')) return;
+
+            const cutoff = _currentSheetsCutoff();
+            const lastSyncStr = settings.lastSheetsSync;
+            const lastSync    = lastSyncStr ? new Date(lastSyncStr) : null;
+            // If we've already synced at or after the current cutoff, done.
+            if (lastSync && lastSync >= cutoff.at) return;
+
+            _autoSheetsSyncInFlight = true;
+            console.log(`🕕 Auto-syncing to Sheets for ${cutoff.label} cutoff (last: ${lastSyncStr || 'never'})`);
+            if (typeof _showToast === 'function') {
+                _showToast(`📊 Auto-sync to Sheets (${cutoff.label})…`, '#0369a1', 3500);
+            }
+            try {
+                await syncToGoogleSheets();
+                // syncToGoogleSheets updates settings.lastSheetsSync on success,
+                // so subsequent ticks in this browser (and in any other
+                // browser that refreshes settings) will see the cutoff as
+                // serviced and skip.
+            } catch (e) {
+                console.warn('Auto Sheets sync failed:', e);
+            } finally {
+                _autoSheetsSyncInFlight = false;
+            }
+        }
+
+        function _startAutoSheetsSync() {
+            if (_autoSheetsSyncTimer) clearInterval(_autoSheetsSyncTimer);
+            // Fire once after a short delay so the initial render settles,
+            // then tick every 2 minutes.
+            setTimeout(_maybeAutoSyncSheets, 5000);
+            _autoSheetsSyncTimer = setInterval(_maybeAutoSyncSheets, _AUTO_SHEETS_TICK_MS);
+        }
 
         async function loadDataFromDrive() {
             // Show loading indicator
