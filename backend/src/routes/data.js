@@ -349,6 +349,44 @@ const COLLECTIONS = {
     }),
     mapOut: defaultMapOut,
   },
+    otherIncome: {
+    model: prisma.otherIncome, idField: 'incomeID',
+    mapIn: (r) => ({
+      incomeID: r.incomeID,
+      date: r.date ? new Date(r.date) : null,
+      bankAccountId: r.bankAccountId ?? null,
+      incomeType: r.incomeType ?? null,
+      amount: r.amount != null ? Number(r.amount) : null,
+      data: r,
+    }),
+    mapOut: defaultMapOut,
+  },
+  coverLetters: {
+    model: prisma.coverLetter, idField: 'letterID',
+    mapIn: (r) => ({
+      letterID: r.letterID,
+      letterDate: r.letterDate ? new Date(r.letterDate) : null,
+      refNo: r.refNo ?? null,
+      invoiceID: r.invoiceID ?? null,
+      partyID: r.partyID ?? null,
+      data: r,
+    }),
+    mapOut: defaultMapOut,
+  },
+  returnableToolsLetters: {
+    model: prisma.returnableToolsLetter, idField: 'letterID',
+    mapIn: (r) => ({
+      letterID: r.letterID,
+      letterDate: r.letterDate ? new Date(r.letterDate) : null,
+      refNo: r.refNo ?? null,
+      staffID: r.staffID ?? null,
+      projectID: r.projectID ?? null,
+      status: r.status ?? null,
+      returnedDate: r.returnedDate ? new Date(r.returnedDate) : null,
+      data: r,
+    }),
+    mapOut: defaultMapOut,
+  },
 };
 
 // ---- Settings helpers ----

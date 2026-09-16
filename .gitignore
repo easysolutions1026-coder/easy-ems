@@ -49,3 +49,16 @@ erspcimse-easy-ems
 *.pre-oauth-fix
 *.backup
 *.bak
+
+_backups/
+
+
+# Editor backups
+*.pre-*
+*.bak
+*.backup
+
+
+# Migration artifacts — local only, never commit
+staff.json
+staff-stripped.json
