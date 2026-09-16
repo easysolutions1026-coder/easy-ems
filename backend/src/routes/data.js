@@ -262,18 +262,29 @@ const COLLECTIONS = {
   },
   workLogs: {
     model: prisma.workLog, idField: 'wlID',
-    mapIn: (r) => ({
-      wlID: r.wlID,
-      // Prod records don't have technicianID directly — they have a
-      // `technicians` array of staff IDs (first is usually the lead).
-      technicianID: r.technicianID ?? (Array.isArray(r.technicians) && r.technicians[0]) ?? null,
-      // Prod uses `project` (project name), backend expects projectRef.
-      projectRef: r.projectRef ?? r.project ?? null,
-      // Prod uses `workStartDate`, backend expects weekStartDate.
-      weekStartDate: dateOrNull(r.weekStartDate || r.workStartDate),
-      status: r.status ?? null,
-      data: r,
-    }),
+    mapIn: (r) => {
+      // Extract technicianID robustly. Prod's `technicians` field is
+      // an array of objects like { name, staffID } — we need the staffID
+      // from the first entry, not the whole object (Prisma expects a
+      // string or null). Also tolerate a plain-string form and an
+      // explicit technicianID for older records.
+      let techID = r.technicianID ?? null;
+      if (!techID && Array.isArray(r.technicians) && r.technicians.length > 0) {
+        const t0 = r.technicians[0];
+        if (typeof t0 === 'string') techID = t0;
+        else if (t0 && typeof t0 === 'object') techID = t0.staffID ?? t0.id ?? t0.techID ?? null;
+      }
+      return {
+        wlID: r.wlID,
+        technicianID: techID,
+        // Prod uses `project` (project name), backend expects projectRef.
+        projectRef: r.projectRef ?? r.project ?? null,
+        // Prod uses `workStartDate`, backend expects weekStartDate.
+        weekStartDate: dateOrNull(r.weekStartDate || r.workStartDate),
+        status: r.status ?? null,
+        data: r,
+      };
+    },
     mapOut: defaultMapOut,
   },
   payslips: {
