@@ -127,9 +127,6 @@
       'gstCashLedgerSnapshots.json': 'gstCashLedgerSnapshots',
       'companyDocuments.json': 'companyDocuments',
       'directorExpenses.json': 'directorExpenses',
-      'coverLetters.json': 'coverLetters',
-      'returnableToolsLetters.json': 'returnableToolsLetters',
-      'otherIncome.json': 'otherIncome',
       '_locks.json': '__NOOP__'
     };
 
@@ -27409,7 +27406,12 @@ Automated WFH alert — ${company} Attendance System.`;
                                 <td class="px-4 py-2.5 text-xs font-semibold ${age>90?'text-red-700':age>60?'text-red-500':age>30?'text-amber-600':'text-gray-500'}">${a.dueDate||'—'}</td>
                                 <td class="px-4 py-2.5 text-xs text-gray-600 max-w-xs" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(a.description||'').replace(/"/g,'')}">${a.description||'—'}</td>
                                 <td class="px-4 py-2.5 text-right text-xs">${fmt(a.invoiceAmt)}</td>
-                                <td class="px-4 py-2.5 text-right text-xs text-green-600">${a.received>0?fmt(a.received):'—'}</td>
+                                <td class="px-4 py-2.5 text-right text-xs text-green-600">${(() => {
+                                    const cash = Array.isArray(a.paymentsReceived) && a.paymentsReceived.length
+                                        ? a.paymentsReceived.reduce((s,p) => s + (+p.amount || 0), 0)
+                                        : (+a.received || 0);
+                                    return cash > 0 ? fmt(cash) : '—';
+                                })()}</td>
                                 <td class="px-4 py-2.5 text-right text-sm font-bold text-red-700">${fmt(a.balance)}</td>
                                 <td class="px-4 py-2.5 text-center">
                                     <span class="text-xs font-bold px-2 py-0.5 rounded-full" style="background:${bucketColor(bucket)}15;color:${bucketColor(bucket)}">${age}d</span>
@@ -27444,6 +27446,14 @@ Automated WFH alert — ${company} Attendance System.`;
                     const settled = (arInvoices||[]).filter(a => (a.balance||0) <= 0.01);
                     if (!settled.length) return '';
                     const settledTotal = settled.reduce((s,a)=>s+(+a.invoiceAmt||0),0);
+                    // Compute displayed Received from paymentsReceived array
+                    // when present, so old records saved with the buggy
+                    // legacyReceived (which double-counted TDS) render the
+                    // correct cash amount. Falls back to stored .received
+                    // for legacy records without a payments array.
+                    const _arCashReceived = a => Array.isArray(a.paymentsReceived) && a.paymentsReceived.length
+                        ? a.paymentsReceived.reduce((s,p) => s + (+p.amount || 0), 0)
+                        : (+a.received || 0);
                     const rowsHtml = settled
                         .sort((a,b)=>(b.invoiceDate||'').localeCompare(a.invoiceDate||''))
                         .map(a=>`
@@ -27453,7 +27463,7 @@ Automated WFH alert — ${company} Attendance System.`;
                             <td class="px-4 py-2.5 text-xs text-gray-500">${a.invoiceDate||'—'}</td>
                             <td class="px-4 py-2.5 text-xs text-gray-600" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(a.description||'').replace(/"/g,'')}">${a.description||'—'}</td>
                             <td class="px-4 py-2.5 text-right text-xs">${fmt(a.invoiceAmt)}</td>
-                            <td class="px-4 py-2.5 text-right text-xs text-green-600 font-semibold">${fmt(a.received)}</td>
+                            <td class="px-4 py-2.5 text-right text-xs text-green-600 font-semibold">${fmt(_arCashReceived(a))}</td>
                             <td class="px-4 py-2.5 text-center"><span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700">✓ Settled</span></td>
                             <td class="px-4 py-2.5 text-center">
                                 <div class="flex gap-1 justify-center">
@@ -27853,12 +27863,22 @@ Automated WFH alert — ${company} Attendance System.`;
             const paymentsReceived = (window._arWorkingPayments || []).map(p => ({...p}));
             if (!client||!invNo||!invDate||!invAmt){alert('Please fill in Client, Invoice Number, Date, and Amount.');return;}
             const received = paymentsReceived.reduce((s, p) => s + (+p.amount || 0), 0);
-            const tdsDeducted = paymentsReceived.reduce((s, p) => s + (+p.tdsAmt||0) + (+p.itTdsAmt||0) + (+p.gstTdsAmt||0), 0);
+            // Effective TDS per payment = max(combined, itTds + gstTds). Same
+            // logic as the row-level Amt Receivable calc in _arUpdateRowSurgical.
+            // Fixes a bug where entering BOTH combined and broken-down TDS
+            // caused all three fields to be summed (double-counting), which
+            // inflated the stored `received` and broke reconciliation.
+            const tdsDeducted = paymentsReceived.reduce((s, p) => {
+                const combinedTDS   = +p.tdsAmt || 0;
+                const brokendownTDS = (+p.itTdsAmt || 0) + (+p.gstTdsAmt || 0);
+                return s + Math.max(combinedTDS, brokendownTDS);
+            }, 0);
             const balance = Math.max(0, +(invAmt - received - tdsDeducted).toFixed(2));
-            // Keep legacy `received` and `receivedDate` in sync with the array
-            // so any older reports/aggregators that still read those fields
-            // don't break.
-            const legacyReceived = received + tdsDeducted;
+            // Store `received` as the cash amount only (not TDS credit),
+            // matching how TXN-sourced invoices compute their received value.
+            // Previously stored `received + tdsDeducted` which showed as an
+            // inflated Received column and confused reconciliation.
+            const legacyReceived = received;
             const lastPaymentDate = paymentsReceived.length ? paymentsReceived.map(p => p.date).filter(Boolean).sort().slice(-1)[0] || '' : '';
             if (arID) {
                 const idx=arInvoices.findIndex(a=>a.arID===arID);
@@ -28035,19 +28055,29 @@ Automated WFH alert — ${company} Attendance System.`;
                     const lastFU=[...(a.followUps||[])].sort((x,y)=>(y.date||'').localeCompare(x.date||''))[0];
                     const nextFU=[...(a.followUps||[])].filter(f=>f.nextDate).sort((x,y)=>(x.nextDate||'').localeCompare(y.nextDate||''))[0];
                     const ac=age>90?[127,29,29]:age>60?[220,38,38]:age>30?[180,83,9]:[21,128,61];
+                    // Cash received (not TDS credit) — matches on-screen list;
+                    // rescues stored `.received` that has TDS double-counted.
+                    const aReceived = Array.isArray(a.paymentsReceived) && a.paymentsReceived.length
+                        ? a.paymentsReceived.reduce((s,p) => s + (+p.amount || 0), 0)
+                        : (+a.received || 0);
                     return [{content:String(i+1),styles:{halign:'center'}},
                         {content:a.client,styles:{fontStyle:'bold'}},a.invoiceNo||'—',a.invoiceDate||'—',
                         {content:a.dueDate||'—',styles:{textColor:age>30?ac:[0,0,0]}},
                         {content:(a.description||'—').substring(0,55),styles:{fontSize:7}},
                         {content:fmt(a.invoiceAmt),styles:{halign:'right'}},
-                        {content:a.received>0?fmt(a.received):'—',styles:{halign:'right',textColor:[21,128,61]}},
+                        {content:aReceived>0?fmt(aReceived):'—',styles:{halign:'right',textColor:[21,128,61]}},
                         {content:fmt(a.balance),styles:{halign:'right',fontStyle:'bold',textColor:ac}},
                         {content:String(age)+'d',styles:{halign:'center',fontStyle:'bold',textColor:ac}},
                         {content:lastFU?(lastFU.date||'').substring(0,10)+' ('+lastFU.mode+')'+(nextFU?'\nNext: '+nextFU.nextDate:''):'No follow-up',styles:{fontSize:7,textColor:lastFU?[29,78,216]:[220,38,38]}}];
                 }),
                 foot:[[{content:'TOTAL',colSpan:6,styles:{fontStyle:'bold',halign:'right'}},
                     {content:fmt(allAR.reduce((s,a)=>s+a.invoiceAmt,0)),styles:{halign:'right',fontStyle:'bold'}},
-                    {content:fmt(allAR.reduce((s,a)=>s+a.received,0)),styles:{halign:'right',fontStyle:'bold',textColor:[21,128,61]}},
+                    {content:fmt(allAR.reduce((s,a) => {
+                        const cash = Array.isArray(a.paymentsReceived) && a.paymentsReceived.length
+                            ? a.paymentsReceived.reduce((ss,p) => ss + (+p.amount || 0), 0)
+                            : (+a.received || 0);
+                        return s + cash;
+                    }, 0)),styles:{halign:'right',fontStyle:'bold',textColor:[21,128,61]}},
                     {content:fmt(totalOut),styles:{halign:'right',fontStyle:'bold',textColor:[127,29,29]}},'','']],
                 columnStyles:{0:{cellWidth:8},1:{cellWidth:36},2:{cellWidth:28},3:{cellWidth:18},4:{cellWidth:18},5:{cellWidth:55},6:{cellWidth:24,halign:'right'},7:{cellWidth:22,halign:'right'},8:{cellWidth:26,halign:'right'},9:{cellWidth:14,halign:'center'},10:{cellWidth:40}}
             });
