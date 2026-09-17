@@ -1909,6 +1909,17 @@
     function _setWlLimit(n) { _wlLimit = n; _wlPage = 0; _saveNum('field_wlLimit', n); renderView(); }
     function _setWlPage(n)  { _wlPage = n; renderView(); try { window.scrollTo({ top: 0, behavior: 'instant' }); } catch { window.scrollTo(0, 0); } }
 
+    // ── Project card expand/collapse state (in-memory, resets on reload) ──
+    // Projects start collapsed so the pagination stays scannable. Search-hits
+    // force-expand so matched items are visible without extra clicks.
+    let _peExpanded = new Set();
+    function _toggleProjExpanded(projExpID, ev) {
+        if (ev) { ev.stopPropagation(); }
+        if (_peExpanded.has(projExpID)) _peExpanded.delete(projExpID);
+        else _peExpanded.add(projExpID);
+        renderView();
+    }
+
     // Page-size pill row: [10] [20] [100] — active one styled solid green.
     function _pageSizePills(currentLimit, fnName) {
         return [10, 20, 100].map(n => {
@@ -2405,15 +2416,31 @@
             const pendReq = 0; // Old per-project requests deprecated — pool-based now
             const totalReq= 0;
 
+            // Expand/collapse: force-expand when search is active (so hit context
+            // is visible) or when the user has toggled it open. Body sections
+            // (fund requests, transfers, expense entries) only render when open.
+            const _isExpanded = !!_peSearchQ || _peExpanded.has(p.projExpID);
+            const _fundReqCount = (p.fundRequests || []).length;
+            const _fundTfCount  = (p.fundTransfers || []).length;
+            const _itemCount    = (p.items || []).length;
+            // Short summary on the collapsed header so user knows there is content.
+            const _bodySummary  = [
+                _fundReqCount ? `${_fundReqCount} fund req${_fundReqCount>1?'s':''}` : '',
+                _fundTfCount  ? `${_fundTfCount} transfer${_fundTfCount>1?'s':''}` : '',
+                _itemCount    ? `${_itemCount} expense${_itemCount>1?'s':''}` : ''
+            ].filter(Boolean).join(' · ') || 'No entries yet';
+
             return `
             <div class="card mb-4" style="border-left:4px solid ${bal>=0?'#0d7c66':'#dc2626'}">
-                <!-- Project header -->
-                <div class="p-4">
+                <!-- Project header — click to expand/collapse -->
+                <div class="p-4" onclick="_toggleProjExpanded('${p.projExpID}', event)" style="cursor:pointer">
                     <div class="flex justify-between items-start mb-2">
                         <div class="flex-1 min-w-0 mr-2">
-                            <p class="font-bold" style="color:var(--navy);font-size:15px">${p.projectName}</p>
-                            ${p.projectRef?`<p style="font-size:11px;color:var(--muted)">Ref: ${p.projectRef}</p>`:''}
-                            ${p.startDate?`<p style="font-size:11px;color:var(--muted)">${p.startDate}${p.endDate?' → '+p.endDate:''}</p>`:''}
+                            <p class="font-bold" style="color:var(--navy);font-size:15px">
+                                <span style="display:inline-block;transition:transform .15s;transform:rotate(${_isExpanded ? '90' : '0'}deg);color:var(--muted);margin-right:6px;font-size:12px">▶</span>${p.projectName}
+                            </p>
+                            ${p.projectRef?`<p style="font-size:11px;color:var(--muted);margin-left:18px">Ref: ${p.projectRef}</p>`:''}
+                            ${p.startDate?`<p style="font-size:11px;color:var(--muted);margin-left:18px">${p.startDate}${p.endDate?' → '+p.endDate:''}</p>`:''}
                         </div>
                         <span class="badge" style="background:${bal>=0?'#f0fdf4':'#fef2f2'};color:${bal>=0?'#15803d':'#dc2626'};font-size:12px">Bal: ${fmt(bal)}</span>
                     </div>
@@ -2427,14 +2454,20 @@
                     <div class="prog-track"><div class="prog-fill" style="width:${pct}%;background:${barCol}"></div></div>
                     ${pendReq>0?`<p style="font-size:11px;color:#1d4ed8;margin-top:4px">⏳ ${pendReq} pending fund request${pendReq>1?'s':''}</p>`:''}
 
-                    <!-- Action buttons -->
-                    <div class="flex gap-2 mt-3 flex-wrap">
+                    <!-- Body summary — always visible; hints what expanding reveals -->
+                    <p style="font-size:11px;color:#94a3b8;margin-top:6px">
+                        <span style="font-weight:600;color:var(--muted)">${_isExpanded ? '▼ Showing' : '▶ Tap to view'}:</span> ${_bodySummary}
+                    </p>
+
+                    <!-- Action buttons — clicks don't collapse the card -->
+                    <div class="flex gap-2 mt-3 flex-wrap" onclick="event.stopPropagation()">
                         <button onclick="openExpItemModal('${p.projExpID}')" class="btn-primary" style="padding:7px 12px;font-size:12px">+ Add Expense</button>
                         <button onclick="reconcilePDF('${p.projExpID}')" style="padding:7px 12px;border-radius:9px;background:#7c3aed;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:600">📄 Reconcile PDF</button>
                         <button onclick="reconcileCSV('${p.projExpID}')" style="padding:7px 12px;border-radius:9px;background:#15803d;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:600">📊 Reconcile CSV</button>
                     </div>
                 </div>
 
+                ${_isExpanded ? `
                 <!-- Fund requests section -->
                 ${(p.fundRequests||[]).length ? `
                 <div style="border-top:1px solid var(--border);background:#f0f9ff">
@@ -2505,6 +2538,7 @@
                         </div>`;
                     }).join('')}
                 </div>` : `<p style="padding:10px 14px;font-size:12px;color:var(--muted);border-top:1px solid var(--border)">No expenses recorded yet.</p>`}
+                ` : ''}
             </div>`;
         }).join('') + _pagerHtml(_pePage, _peLimit, _filtered.length, '_setPePage');
         })()}`;
@@ -4051,6 +4085,9 @@
             // So we DON'T saveData('fundPools', ...) — that would fail with permission error.
             _concurEndEdit();
             closeExpItemModal();
+            // Auto-expand the project card so the just-saved expense is visible
+            // instead of hidden behind a collapsed header.
+            _peExpanded.add(projID);
             renderView();
             const baseToast = newPoolID
                 ? `✅ Expense saved · allocated to ${newPoolID}`
