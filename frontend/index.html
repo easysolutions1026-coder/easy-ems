@@ -5581,7 +5581,10 @@
         // De-duped across concurrent browsers via settings.lastSheetsSync,
         // which the sync itself updates on success. View-only users and
         // sessions without a Sheet configured are silently skipped.
-        const _AUTO_SHEETS_TICK_MS = 2 * 60 * 1000;   // 2 min
+        // Auto-sync fires ONLY at the next 6 AM / 6 PM IST cutoff (event-driven,
+        // no polling). The 2-minute polling tick was removed after DB migration —
+        // Sheets is now a periodic export destination, not the source of truth,
+        // so twice-daily is enough and lightens quota use significantly.
         let _autoSheetsSyncTimer = null;
         let _autoSheetsSyncInFlight = false;
 
@@ -5657,12 +5660,59 @@
             }
         }
 
+        // Compute milliseconds until the NEXT 6 AM or 6 PM IST cutoff after
+        // right now. Used to schedule the next setTimeout precisely rather
+        // than polling every 2 min.
+        function _msUntilNextCutoff() {
+            const now = new Date();
+            const parts = new Intl.DateTimeFormat('en-US', {
+                timeZone: 'Asia/Kolkata',
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit',
+                hour12: false
+            }).formatToParts(now);
+            const p = {};
+            parts.forEach(x => { p[x.type] = x.value; });
+            const y = +p.year, m = +p.month, d = +p.day, h = +p.hour;
+
+            let nextCutoffHour, ny = y, nm = m, nd = d;
+            if (h < 6)       nextCutoffHour = 6;        // Next: today's 6 AM
+            else if (h < 18) nextCutoffHour = 18;       // Next: today's 6 PM
+            else {
+                // Past 6 PM IST — next is tomorrow's 6 AM
+                const tomorrow = new Date(Date.UTC(y, m - 1, d));
+                tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+                ny = tomorrow.getUTCFullYear();
+                nm = tomorrow.getUTCMonth() + 1;
+                nd = tomorrow.getUTCDate();
+                nextCutoffHour = 6;
+            }
+            const utcHours   = nextCutoffHour === 6 ? 0 : 12;
+            const utcMinutes = 30;
+            const nextAt = new Date(Date.UTC(ny, nm - 1, nd, utcHours, utcMinutes));
+            return Math.max(1000, nextAt.getTime() - now.getTime());
+        }
+
         function _startAutoSheetsSync() {
-            if (_autoSheetsSyncTimer) clearInterval(_autoSheetsSyncTimer);
-            // Fire once after a short delay so the initial render settles,
-            // then tick every 2 minutes.
+            if (_autoSheetsSyncTimer) clearTimeout(_autoSheetsSyncTimer);
+            // Boot-time check: catches a missed cutoff. If the app is opened
+            // at 8 AM but no browser was open at 6 AM to run the sync, this
+            // fires shortly after boot and services the 6 AM cutoff. The
+            // silent-skip preconditions in _maybeAutoSyncSheets ensure this
+            // is a no-op if the cutoff was already synced by another browser.
             setTimeout(_maybeAutoSyncSheets, 5000);
-            _autoSheetsSyncTimer = setInterval(_maybeAutoSyncSheets, _AUTO_SHEETS_TICK_MS);
+            // Schedule the next event-driven fire at the actual cutoff time.
+            // Chains itself after each fire so it runs indefinitely without
+            // any polling interval.
+            const _scheduleNext = () => {
+                const ms = _msUntilNextCutoff();
+                console.log(`⏰ Next Sheets auto-sync in ${Math.round(ms/60000)} min`);
+                _autoSheetsSyncTimer = setTimeout(async () => {
+                    try { await _maybeAutoSyncSheets(); } catch(e) {}
+                    _scheduleNext();
+                }, ms);
+            };
+            _scheduleNext();
         }
 
         async function loadDataFromDrive() {
