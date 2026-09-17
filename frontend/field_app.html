@@ -1014,6 +1014,10 @@
     let fundRequests = [], fundPools = [];   // NEW: pool-based fund tracking (Phase A+B)
     let currentView = 'projexp';  // 'projexp' | 'worklogs'
     let _wlPhotos = [], _editWlID = null;
+    // Work Logs SPA: 'list' shows the table of all logs, 'detail' shows one log.
+    // The New/Edit form still uses the existing wlModal overlay from either view.
+    let _wlSubView = 'list';    // 'list' | 'detail'
+    let _wlDetailID = null;     // wlID currently in detail view (null in list)
     let currentUser = null;  // { name, staffID } — set after login, persists for session
     let _signedInEmail = '';  // Google OAuth email (device-level), used for record stamping
 
@@ -5290,212 +5294,265 @@
     //     recommendations, witnessName, witnessDesig, witnessRemarks,
     //     photos[]}]
 
-    function renderWorkLogs(el) {
-        const statusSty = {
-            'Completed':  {bg:'#dcfce7',col:'#15803d',dot:'#16a34a'},
-            'In Progress':{bg:'#fef3c7',col:'#b45309',dot:'#d97706'},
-            'Pending':    {bg:'#f1f5f9',col:'#475569',dot:'#94a3b8'},
-            'On Hold':    {bg:'#fee2e2',col:'#dc2626',dot:'#ef4444'}
-        };
-        const sorted=[...workLogs].sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
+    // ── Work Logs helpers: navigate between list and detail sub-views ──
+    function _openWorkLog(wlID) {
+        _wlDetailID = wlID;
+        _wlSubView = 'detail';
+        renderView();
+        try { window.scrollTo({ top: 0, behavior: 'instant' }); } catch { window.scrollTo(0, 0); }
+    }
 
-        // Apply search filter — same item-level approach as Project Expenses screen:
-        //   1. If query matches the work log itself (project, location, status,
-        //      technicians, period dates), include the work log with all daily entries.
-        //   2. Otherwise, filter daily entries by the query. Each entry's haystack
-        //      includes the parent work log fields so cross-level AND works
-        //      (e.g. "completed apr 06" — project status at log level, date at entry).
-        //   3. Include only work logs with at least one matching daily entry.
-        const filtered = !_wlSearchQ ? sorted.map(w => ({ w, entries: w.dailyEntries || [], showAllEntries: true })) :
-        sorted.map(w => {
-            // Step 1: log-level match → include with all entries
-            const logHay = [
+    function _backToWlList() {
+        _wlDetailID = null;
+        _wlSubView = 'list';
+        renderView();
+    }
+
+    // ── Status style map — shared between list and detail views ──
+    const _wlStatusSty = {
+        'Completed':  {bg:'#dcfce7',col:'#15803d',dot:'#16a34a'},
+        'In Progress':{bg:'#fef3c7',col:'#b45309',dot:'#d97706'},
+        'Pending':    {bg:'#f1f5f9',col:'#475569',dot:'#94a3b8'},
+        'On Hold':    {bg:'#fee2e2',col:'#dc2626',dot:'#ef4444'}
+    };
+
+    function renderWorkLogs(el) {
+        if (_wlSubView === 'detail' && _wlDetailID) {
+            return _renderWlDetail(el);
+        }
+        return _renderWlList(el);
+    }
+
+    // ── LIST VIEW — table of Project | Status, click row to open detail ──
+    function _renderWlList(el) {
+        // Sort: most recent activity first (latest daily entry date, else workEndDate,
+        // else workStartDate, else createdAt). Falls back through the chain so a log
+        // with recent daily entries always outranks an older log with none.
+        const _activity = w => {
+            const dates = (w.dailyEntries || []).map(e => e.date).filter(Boolean);
+            const latest = dates.length ? dates.sort().pop() : '';
+            return latest || w.workEndDate || w.workStartDate || w.createdAt || '';
+        };
+        const sorted = [...workLogs].sort((a, b) => (_activity(b) || '').localeCompare(_activity(a) || ''));
+
+        // Search filter — simplified for list view: only match log-level fields
+        // (project, location, status, technicians, dates). Daily-entry search is
+        // available inside the detail view.
+        const filtered = !_wlSearchQ ? sorted : sorted.filter(w => {
+            const hay = [
                 w.project, w.location, w.status,
                 _dateHaystack(w.workStartDate), _dateHaystack(w.workEndDate),
-                ...(w.technicians||[]).map(t => t.name)
+                ...(w.technicians || []).map(t => t.name)
             ].filter(Boolean).join(' ');
-            if (_matchTokens(logHay, _wlSearchQ)) {
-                return { w, entries: w.dailyEntries || [], showAllEntries: true };
-            }
-            // Step 2: entry-level filtering. Fold logHay into each entry's haystack
-            // so cross-level AND works.
-            const matchingEntries = (w.dailyEntries||[]).filter(e => {
-                const eHay = [
-                    logHay,    // ← parent fields for cross-level AND
-                    e.description, e.remarks, e.category,
-                    _dateHaystack(e.date),
-                    ...(e.technicians||[]).map(t => t.name)
-                ].filter(Boolean).join(' ');
-                return _matchTokens(eHay, _wlSearchQ);
-            });
-            if (matchingEntries.length > 0) {
-                return { w, entries: matchingEntries, showAllEntries: false };
-            }
-            return null;
-        }).filter(Boolean);
+            return _matchTokens(hay, _wlSearchQ);
+        });
 
-        el.innerHTML=`
+        el.innerHTML = `
         <button onclick="openWlModal()" class="btn-primary w-full mb-4 flex items-center justify-center gap-2" style="background:linear-gradient(135deg,#1e3a5f,#1d4ed8)">
             <span style="font-size:18px">+</span> New Project Work Log
         </button>
 
-        <!-- ── Work-log search ──
-             Live filter. Matches project, location, status, technician names,
-             and daily-entry descriptions/remarks/category. -->
+        <!-- Search bar — filters project name, location, status, technicians, dates -->
         <div style="position:relative;margin-bottom:12px">
             <input type="search" id="wlSearchInput"
                 value="${_wlSearchQ.replace(/"/g,'&quot;')}"
-                placeholder="🔍 Search by project, technician, status, date (e.g. 'completed apr')…"
+                placeholder="🔍 Search by project, technician, status, date…"
                 oninput="_setSearch('wl', this.value, 'wlSearchInput')"
                 autocomplete="off"
                 style="width:100%;padding:10px 36px 10px 14px;border:1px solid var(--border);border-radius:10px;font-size:14px;background:#fff;outline:none"/>
             ${_wlSearchQ ? `<button onclick="_clearSearch('wl','wlSearchInput')" title="Clear search" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;font-size:18px;color:#94a3b8;cursor:pointer;padding:4px 8px;line-height:1">✕</button>` : ''}
         </div>
 
-        ${!sorted.length?`<div class="card p-10 text-center"><div style="font-size:48px;margin-bottom:8px">📋</div><p class="font-medium text-gray-400">No work logs yet</p><p class="text-sm text-gray-400 mt-1">Create a Project Work Log, then add daily entries</p></div>`
-        :!filtered.length?`<div class="card p-10 text-center"><div style="font-size:36px;margin-bottom:8px">🔍</div><p class="font-medium text-gray-500">No work logs match "${_wlSearchQ.replace(/</g,'&lt;')}"</p><p class="text-sm text-gray-400 mt-1">Try a different search term or <button onclick="_clearSearch('wl','wlSearchInput')" style="color:#0d7c66;background:none;border:none;text-decoration:underline;cursor:pointer;font-size:13px">clear the filter</button>.</p></div>`
-        :filtered.map(({ w, entries: _visibleEntries, showAllEntries: _showAllEntries })=>{
-            const ss=statusSty[w.status]||statusSty['Pending'];
-            const techNames=(w.technicians||[]).map(t=>t.name).join(', ')||'—';
-            const days=(w.dailyEntries||[]).length;
-            const lastEntry=days?[...w.dailyEntries].sort((a,b)=>(b.date||'').localeCompare(a.date||''))[0]:null;
-            return `
-            <div class="card mb-4" style="border-left:4px solid ${ss.dot}">
-                <!-- Project header -->
-                <div class="p-4">
-                    <div class="flex justify-between items-start mb-2">
-                        <div class="flex-1 min-w-0 mr-2">
-                            <p class="font-bold" style="color:var(--navy);font-size:15px">${w.project||'—'}</p>
-                            <p style="font-size:12px;color:var(--muted)">📍 ${w.location||'—'}${w.workStartDate?' · '+w.workStartDate+(w.workEndDate?' → '+w.workEndDate:''):''}</p>
-                            <p style="font-size:12px;color:var(--muted)">👷 ${techNames}</p>
-                        </div>
-                        <div style="display:flex;flex-direction:column;gap:5px;align-items:flex-end">
-                            <span class="badge" style="background:${ss.bg};color:${ss.col}">${w.status||'—'}</span>
-                            <span class="badge" style="background:#f0f9ff;color:#0369a1">${days} day${days!==1?'s':''}</span>
-                        </div>
+        ${!sorted.length ? `<div class="card p-10 text-center"><div style="font-size:48px;margin-bottom:8px">📋</div><p class="font-medium text-gray-400">No work logs yet</p><p class="text-sm text-gray-400 mt-1">Create a Project Work Log, then add daily entries</p></div>`
+        : !filtered.length ? `<div class="card p-10 text-center"><div style="font-size:36px;margin-bottom:8px">🔍</div><p class="font-medium text-gray-500">No work logs match "${_wlSearchQ.replace(/</g,'&lt;')}"</p><p class="text-sm text-gray-400 mt-1">Try a different search term or <button onclick="_clearSearch('wl','wlSearchInput')" style="color:#0d7c66;background:none;border:none;text-decoration:underline;cursor:pointer;font-size:13px">clear the filter</button>.</p></div>`
+        : `<div class="card" style="overflow:hidden">
+            <table style="width:100%;border-collapse:collapse;font-size:14px">
+                <thead>
+                    <tr style="background:#f8fafc;border-bottom:1px solid var(--border)">
+                        <th style="padding:10px 14px;text-align:left;font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.04em;text-transform:uppercase">Project</th>
+                        <th style="padding:10px 14px;text-align:right;font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;white-space:nowrap">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${filtered.map(w => {
+                        const ss = _wlStatusSty[w.status] || _wlStatusSty['Pending'];
+                        return `
+                        <tr onclick="_openWorkLog('${w.wlID}')"
+                            style="cursor:pointer;border-bottom:1px solid var(--border);transition:background .12s"
+                            onmouseover="this.style.background='#f8fafc'"
+                            onmouseout="this.style.background='#fff'">
+                            <td style="padding:12px 14px;color:var(--navy);font-weight:600;line-height:1.4">
+                                ${w.project || '—'}
+                            </td>
+                            <td style="padding:12px 14px;text-align:right;white-space:nowrap">
+                                <span class="badge" style="background:${ss.bg};color:${ss.col}">${w.status || '—'}</span>
+                            </td>
+                        </tr>`;
+                    }).join('')}
+                </tbody>
+            </table>
+        </div>`}`;
+    }
+
+    // ── DETAIL VIEW — one work log with full daily-entry breakdown ──
+    // Reuses the exact card layout the app rendered before the list/detail
+    // split, so all inline actions (Add Daily Update, Report, Feedback, Edit,
+    // Delete, per-entry buttons) keep working unchanged.
+    function _renderWlDetail(el) {
+        const w = workLogs.find(x => x.wlID === _wlDetailID);
+        if (!w) {
+            // Log was deleted or never existed — fall back to list.
+            _backToWlList();
+            return;
+        }
+
+        const ss = _wlStatusSty[w.status] || _wlStatusSty['Pending'];
+        const techNames = (w.technicians || []).map(t => t.name).join(', ') || '—';
+        const days = (w.dailyEntries || []).length;
+
+        // In detail view, no filtering — show every daily entry.
+        const _visibleEntries = w.dailyEntries || [];
+        const _showAllEntries = true;
+
+        el.innerHTML = `
+        <button onclick="_backToWlList()" class="mb-3 flex items-center gap-1.5" style="background:none;border:none;color:var(--navy);font-size:14px;font-weight:600;cursor:pointer;padding:6px 0">
+            <span style="font-size:18px">←</span> Back to work logs
+        </button>
+
+        <div class="card mb-4" style="border-left:4px solid ${ss.dot}">
+            <!-- Project header -->
+            <div class="p-4">
+                <div class="flex justify-between items-start mb-2">
+                    <div class="flex-1 min-w-0 mr-2">
+                        <p class="font-bold" style="color:var(--navy);font-size:15px">${w.project || '—'}</p>
+                        <p style="font-size:12px;color:var(--muted)">📍 ${w.location || '—'}${w.workStartDate ? ' · ' + w.workStartDate + (w.workEndDate ? ' → ' + w.workEndDate : '') : ''}</p>
+                        <p style="font-size:12px;color:var(--muted)">👷 ${techNames}</p>
                     </div>
-                    <!-- Action buttons -->
-                    <div class="flex gap-2 mt-3 flex-wrap">
-                        <button onclick="openDayModal('${w.wlID}')" class="btn-primary flex-1" style="font-size:12px;padding:8px 10px;background:linear-gradient(135deg,#065f46,#0d9488);min-width:140px">
-                            + Add Daily Update
-                        </button>
-                        <button onclick="wlPDF('${w.wlID}')" style="padding:8px 12px;border-radius:10px;background:#1e3a5f;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:600">📄 Report</button>
-                        <button onclick="openFeedbackModal('${w.wlID}')" style="padding:8px 12px;border-radius:10px;background:${w.customerFeedback?'#f59e0b':'#fff'};color:${w.customerFeedback?'#fff':'#92400e'};border:1.5px solid #f59e0b;cursor:pointer;font-size:12px;font-weight:600" title="${w.customerFeedback ? 'View / re-print customer feedback (already captured)' : 'Capture customer feedback at project completion'}">📋 Feedback${w.customerFeedback ? ' ✓' : ''}</button>
-                        <button onclick="editWorkLog('${w.wlID}')" style="padding:8px 10px;border-radius:10px;border:1.5px solid var(--border);background:#fff;cursor:pointer;font-size:12px;color:var(--muted)">✏️</button>
-                        <button onclick="deleteWorkLog('${w.wlID}')" style="padding:8px 10px;border-radius:10px;border:1.5px solid #fecaca;background:#fff;cursor:pointer;font-size:12px;color:#dc2626">✕</button>
+                    <div style="display:flex;flex-direction:column;gap:5px;align-items:flex-end">
+                        <span class="badge" style="background:${ss.bg};color:${ss.col}">${w.status || '—'}</span>
+                        <span class="badge" style="background:#f0f9ff;color:#0369a1">${days} day${days !== 1 ? 's' : ''}</span>
                     </div>
                 </div>
-                <!-- Daily entries -->
-                ${!_visibleEntries.length?`<div style="padding:10px 16px;border-top:1px solid var(--border);font-size:12px;color:var(--muted)">${days?`No matching daily entries.`:`No daily entries yet — tap "+ Add Daily Update" to begin.`}</div>`:`
-                <div style="border-top:1px solid var(--border)">
-                    ${(!_showAllEntries && _wlSearchQ) ? `<div style="padding:6px 16px;font-size:10px;color:#94a3b8;background:#fafafa">Showing ${_visibleEntries.length} of ${days} daily entries (filtered)</div>` : ''}
-                    ${(() => {
-                        // Pre-compute the original chronological day number for every entry
-                        // so filtered views still show "Day N" with the correct N relative to
-                        // the whole work log (not the filtered slice).
-                        const allSortedDesc = [...(w.dailyEntries||[])].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
-                        const dayNumByID = {};
-                        allSortedDesc.forEach((e, i) => { if (e.entryID) dayNumByID[e.entryID] = days - i; });
-                        return [..._visibleEntries].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map((d, idx)=>{
-                            const dayNum = dayNumByID[d.entryID] || '?';
-                            const dur=(d.startTime&&d.endTime)?calcDuration(d.startTime,d.endTime):'';
-                            const dayTechs=(d.technicians||[]).map(t=>t.name).join(', ')||(w.technicians||[]).map(t=>t.name).join(', ')||'—';
-                        return `
-                        <div style="padding:12px 16px;border-bottom:1px solid var(--border);background:${idx%2===0?'#fff':'#f8fafc'}">
-                            <!-- Header row: day number, date, time, category, actions -->
-                            <div class="flex justify-between items-start mb-2">
-                                <div>
-                                    <span class="font-semibold" style="font-size:13px;color:var(--navy)">Day ${dayNum} — ${d.date||'—'}</span>
-                                    ${d.startTime?`<span style="font-size:11px;color:var(--muted);margin-left:8px">⏱ ${d.startTime}–${d.endTime||'?'}${dur?' ('+dur+')':''}</span>`:''}
-                                    ${d.category?`<span class="badge" style="margin-left:6px;background:#eff6ff;color:#1d4ed8;font-size:10px">${d.category}</span>`:''}
-                                </div>
-                                <div class="flex gap-1.5 flex-wrap">
-                                    <button onclick="editDayEntry('${w.wlID}','${d.entryID}')" style="padding:4px 8px;border-radius:6px;border:1.5px solid var(--border);background:#fff;cursor:pointer;font-size:11px;color:var(--muted)" title="Edit entry">✏️</button>
-                                    <button onclick="openCalibModal('${w.wlID}','${d.entryID}')" style="padding:4px 8px;border-radius:6px;border:1.5px solid #e9d5ff;background:#faf5ff;cursor:pointer;font-size:11px;color:#7c3aed;font-weight:600" title="Add/edit calibration">📐 ${(d.calibrations||[]).length?d.calibrations.length+' Cal':'+ Cal'}</button>
-                                    <button onclick="dayEntryPDF('${w.wlID}','${d.entryID}')" style="padding:4px 8px;border-radius:6px;border:1.5px solid #bfdbfe;background:#eff6ff;cursor:pointer;font-size:11px;color:#1d4ed8;font-weight:600" title="Download this day's activity as PDF">📄 PDF</button>
-                                    <button onclick="deleteDayEntry('${w.wlID}','${d.entryID}')" style="padding:4px 8px;border-radius:6px;border:1.5px solid #fecaca;background:#fff;cursor:pointer;font-size:11px;color:#dc2626" title="Delete entry">✕</button>
-                                </div>
+                <!-- Action buttons -->
+                <div class="flex gap-2 mt-3 flex-wrap">
+                    <button onclick="openDayModal('${w.wlID}')" class="btn-primary flex-1" style="font-size:12px;padding:8px 10px;background:linear-gradient(135deg,#065f46,#0d9488);min-width:140px">
+                        + Add Daily Update
+                    </button>
+                    <button onclick="wlPDF('${w.wlID}')" style="padding:8px 12px;border-radius:10px;background:#1e3a5f;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:600">📄 Report</button>
+                    <button onclick="openFeedbackModal('${w.wlID}')" style="padding:8px 12px;border-radius:10px;background:${w.customerFeedback ? '#f59e0b' : '#fff'};color:${w.customerFeedback ? '#fff' : '#92400e'};border:1.5px solid #f59e0b;cursor:pointer;font-size:12px;font-weight:600" title="${w.customerFeedback ? 'View / re-print customer feedback (already captured)' : 'Capture customer feedback at project completion'}">📋 Feedback${w.customerFeedback ? ' ✓' : ''}</button>
+                    <button onclick="editWorkLog('${w.wlID}')" style="padding:8px 10px;border-radius:10px;border:1.5px solid var(--border);background:#fff;cursor:pointer;font-size:12px;color:var(--muted)">✏️</button>
+                    <button onclick="deleteWorkLog('${w.wlID}')" style="padding:8px 10px;border-radius:10px;border:1.5px solid #fecaca;background:#fff;cursor:pointer;font-size:12px;color:#dc2626">✕</button>
+                </div>
+            </div>
+            <!-- Daily entries -->
+            ${!_visibleEntries.length ? `<div style="padding:10px 16px;border-top:1px solid var(--border);font-size:12px;color:var(--muted)">No daily entries yet — tap "+ Add Daily Update" to begin.</div>` : `
+            <div style="border-top:1px solid var(--border)">
+                ${(() => {
+                    // Pre-compute the original chronological day number for every entry
+                    // so filtered views still show "Day N" with the correct N relative to
+                    // the whole work log (not the filtered slice).
+                    const allSortedDesc = [...(w.dailyEntries || [])].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+                    const dayNumByID = {};
+                    allSortedDesc.forEach((e, i) => { if (e.entryID) dayNumByID[e.entryID] = days - i; });
+                    return [..._visibleEntries].sort((a, b) => (b.date || '').localeCompare(a.date || '')).map((d, idx) => {
+                        const dayNum = dayNumByID[d.entryID] || '?';
+                        const dur = (d.startTime && d.endTime) ? calcDuration(d.startTime, d.endTime) : '';
+                        const dayTechs = (d.technicians || []).map(t => t.name).join(', ') || (w.technicians || []).map(t => t.name).join(', ') || '—';
+                    return `
+                    <div style="padding:12px 16px;border-bottom:1px solid var(--border);background:${idx % 2 === 0 ? '#fff' : '#f8fafc'}">
+                        <!-- Header row: day number, date, time, category, actions -->
+                        <div class="flex justify-between items-start mb-2">
+                            <div>
+                                <span class="font-semibold" style="font-size:13px;color:var(--navy)">Day ${dayNum} — ${d.date || '—'}</span>
+                                ${d.startTime ? `<span style="font-size:11px;color:var(--muted);margin-left:8px">⏱ ${d.startTime}–${d.endTime || '?'}${dur ? ' (' + dur + ')' : ''}</span>` : ''}
+                                ${d.category ? `<span class="badge" style="margin-left:6px;background:#eff6ff;color:#1d4ed8;font-size:10px">${d.category}</span>` : ''}
                             </div>
-                            <!-- Technicians -->
-                            <p style="font-size:11px;color:#7c3aed;margin-bottom:4px">👷 <strong>On Site:</strong> ${dayTechs}</p>
-                            <!-- Work done -->
-                            ${d.description?`<div style="background:#fffbeb;border-left:3px solid #f59e0b;padding:6px 10px;border-radius:0 6px 6px 0;margin-bottom:4px">
-                                <p style="font-size:10px;font-weight:700;color:#b45309;letter-spacing:.04em;margin-bottom:2px">🔧 WORK CARRIED OUT</p>
-                                <p style="font-size:12px;color:var(--text);line-height:1.6">${d.description}</p>
-                            </div>`:''}
-                            <!-- Observations -->
-                            ${d.observations?`<div style="background:#eff6ff;border-left:3px solid #3b82f6;padding:5px 10px;border-radius:0 6px 6px 0;margin-bottom:4px">
-                                <p style="font-size:10px;font-weight:700;color:#1d4ed8;margin-bottom:2px">🔍 OBSERVATIONS / FINDINGS</p>
-                                <p style="font-size:12px;color:var(--text)">${d.observations}</p>
-                            </div>`:''}
-                            <!-- Exclusions -->
-                            ${d.exclusions?`<div style="background:#fff7ed;border-left:3px solid #f97316;padding:5px 10px;border-radius:0 6px 6px 0;margin-bottom:4px">
-                                <p style="font-size:10px;font-weight:700;color:#b45309;margin-bottom:2px">⚠️ EXCLUSIONS / REMARKS</p>
-                                <p style="font-size:12px;color:var(--text)">${d.exclusions}</p>
-                            </div>`:''}
-                            <!-- Recommendations -->
-                            ${d.recommendations?`<div style="background:#f0fdf4;border-left:3px solid #22c55e;padding:5px 10px;border-radius:0 6px 6px 0;margin-bottom:4px">
-                                <p style="font-size:10px;font-weight:700;color:#15803d;margin-bottom:2px">💡 RECOMMENDATIONS</p>
-                                <p style="font-size:12px;color:var(--text)">${d.recommendations}</p>
-                            </div>`:''}
-                            <!-- Witness -->
-                            ${d.witnessName?`<div style="background:#fff1f2;border-left:3px solid #f43f5e;padding:5px 10px;border-radius:0 6px 6px 0;margin-bottom:4px">
-                                <p style="font-size:10px;font-weight:700;color:#be123c;margin-bottom:2px">✍️ WITNESSED BY</p>
-                                <p style="font-size:12px;color:var(--text)">${d.witnessName}${d.witnessDesig?' — '+d.witnessDesig:''}</p>
-                                ${d.witnessRemarks?`<p style="font-size:11px;color:var(--muted);margin-top:2px">"${d.witnessRemarks}"</p>`:''}
-                            </div>`:''}
-                            <!-- Calibration Records -->
-                            ${(d.calibrations||[]).length?`<div style="margin-top:8px">
-                                <p style="font-size:10px;font-weight:700;color:#7c3aed;margin-bottom:4px">📐 CALIBRATION / INSPECTION RECORDS (${d.calibrations.length})</p>
-                                ${d.calibrations.map(c=>`
-                                <div style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:8px;padding:8px 10px;margin-bottom:6px">
-                                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-                                        <span style="font-size:12px;font-weight:600;color:#7c3aed">
-                                            ${c._isCustom ? '🆕 ' : ''}${c.component}${c.unitNo?' — '+c.unitNo:''}${c._isCustom && c.customTitle ? ' · ' + c.customTitle : ''}
-                                        </span>
-                                        <div style="display:flex;gap:4px;align-items:center">
-                                            <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;background:${c.overall==='PASS'?'#dcfce7':c.overall==='FAIL'?'#fee2e2':'#fef3c7'};color:${c.overall==='PASS'?'#15803d':c.overall==='FAIL'?'#dc2626':'#b45309'}">${c.overall}</span>
-                                            <button onclick="openCalibModal('${w.wlID}','${d.entryID}','${c.calibID}')" style="font-size:10px;padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:#fff;cursor:pointer;color:var(--muted)">✏️</button>
-                                            <button onclick="openCopyCalibModal('${w.wlID}','${d.entryID}','${c.calibID}')" style="font-size:10px;padding:2px 6px;border-radius:4px;border:1px solid #bfdbfe;background:#eff6ff;cursor:pointer;color:#1d4ed8" title="Copy this table to another date">📋</button>
-                                            <button onclick="deleteCalibRecord('${w.wlID}','${d.entryID}','${c.calibID}')" style="font-size:10px;padding:2px 6px;border-radius:4px;border:1px solid #fecaca;background:#fff;cursor:pointer;color:#dc2626">✕</button>
-                                        </div>
+                            <div class="flex gap-1.5 flex-wrap">
+                                <button onclick="editDayEntry('${w.wlID}','${d.entryID}')" style="padding:4px 8px;border-radius:6px;border:1.5px solid var(--border);background:#fff;cursor:pointer;font-size:11px;color:var(--muted)" title="Edit entry">✏️</button>
+                                <button onclick="openCalibModal('${w.wlID}','${d.entryID}')" style="padding:4px 8px;border-radius:6px;border:1.5px solid #e9d5ff;background:#faf5ff;cursor:pointer;font-size:11px;color:#7c3aed;font-weight:600" title="Add/edit calibration">📐 ${(d.calibrations || []).length ? d.calibrations.length + ' Cal' : '+ Cal'}</button>
+                                <button onclick="dayEntryPDF('${w.wlID}','${d.entryID}')" style="padding:4px 8px;border-radius:6px;border:1.5px solid #bfdbfe;background:#eff6ff;cursor:pointer;font-size:11px;color:#1d4ed8;font-weight:600" title="Download this day's activity as PDF">📄 PDF</button>
+                                <button onclick="deleteDayEntry('${w.wlID}','${d.entryID}')" style="padding:4px 8px;border-radius:6px;border:1.5px solid #fecaca;background:#fff;cursor:pointer;font-size:11px;color:#dc2626" title="Delete entry">✕</button>
+                            </div>
+                        </div>
+                        <!-- Technicians -->
+                        <p style="font-size:11px;color:#7c3aed;margin-bottom:4px">👷 <strong>On Site:</strong> ${dayTechs}</p>
+                        <!-- Work done -->
+                        ${d.description ? `<div style="background:#fffbeb;border-left:3px solid #f59e0b;padding:6px 10px;border-radius:0 6px 6px 0;margin-bottom:4px">
+                            <p style="font-size:10px;font-weight:700;color:#b45309;letter-spacing:.04em;margin-bottom:2px">🔧 WORK CARRIED OUT</p>
+                            <p style="font-size:12px;color:var(--text);line-height:1.6">${d.description}</p>
+                        </div>` : ''}
+                        <!-- Observations -->
+                        ${d.observations ? `<div style="background:#eff6ff;border-left:3px solid #3b82f6;padding:5px 10px;border-radius:0 6px 6px 0;margin-bottom:4px">
+                            <p style="font-size:10px;font-weight:700;color:#1d4ed8;margin-bottom:2px">🔍 OBSERVATIONS / FINDINGS</p>
+                            <p style="font-size:12px;color:var(--text)">${d.observations}</p>
+                        </div>` : ''}
+                        <!-- Exclusions -->
+                        ${d.exclusions ? `<div style="background:#fff7ed;border-left:3px solid #f97316;padding:5px 10px;border-radius:0 6px 6px 0;margin-bottom:4px">
+                            <p style="font-size:10px;font-weight:700;color:#b45309;margin-bottom:2px">⚠️ EXCLUSIONS / REMARKS</p>
+                            <p style="font-size:12px;color:var(--text)">${d.exclusions}</p>
+                        </div>` : ''}
+                        <!-- Recommendations -->
+                        ${d.recommendations ? `<div style="background:#f0fdf4;border-left:3px solid #22c55e;padding:5px 10px;border-radius:0 6px 6px 0;margin-bottom:4px">
+                            <p style="font-size:10px;font-weight:700;color:#15803d;margin-bottom:2px">💡 RECOMMENDATIONS</p>
+                            <p style="font-size:12px;color:var(--text)">${d.recommendations}</p>
+                        </div>` : ''}
+                        <!-- Witness -->
+                        ${d.witnessName ? `<div style="background:#fff1f2;border-left:3px solid #f43f5e;padding:5px 10px;border-radius:0 6px 6px 0;margin-bottom:4px">
+                            <p style="font-size:10px;font-weight:700;color:#be123c;margin-bottom:2px">✍️ WITNESSED BY</p>
+                            <p style="font-size:12px;color:var(--text)">${d.witnessName}${d.witnessDesig ? ' — ' + d.witnessDesig : ''}</p>
+                            ${d.witnessRemarks ? `<p style="font-size:11px;color:var(--muted);margin-top:2px">"${d.witnessRemarks}"</p>` : ''}
+                        </div>` : ''}
+                        <!-- Calibration Records -->
+                        ${(d.calibrations || []).length ? `<div style="margin-top:8px">
+                            <p style="font-size:10px;font-weight:700;color:#7c3aed;margin-bottom:4px">📐 CALIBRATION / INSPECTION RECORDS (${d.calibrations.length})</p>
+                            ${d.calibrations.map(c => `
+                            <div style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:8px;padding:8px 10px;margin-bottom:6px">
+                                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                                    <span style="font-size:12px;font-weight:600;color:#7c3aed">
+                                        ${c._isCustom ? '🆕 ' : ''}${c.component}${c.unitNo ? ' — ' + c.unitNo : ''}${c._isCustom && c.customTitle ? ' · ' + c.customTitle : ''}
+                                    </span>
+                                    <div style="display:flex;gap:4px;align-items:center">
+                                        <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;background:${c.overall === 'PASS' ? '#dcfce7' : c.overall === 'FAIL' ? '#fee2e2' : '#fef3c7'};color:${c.overall === 'PASS' ? '#15803d' : c.overall === 'FAIL' ? '#dc2626' : '#b45309'}">${c.overall}</span>
+                                        <button onclick="openCalibModal('${w.wlID}','${d.entryID}','${c.calibID}')" style="font-size:10px;padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:#fff;cursor:pointer;color:var(--muted)">✏️</button>
+                                        <button onclick="openCopyCalibModal('${w.wlID}','${d.entryID}','${c.calibID}')" style="font-size:10px;padding:2px 6px;border-radius:4px;border:1px solid #bfdbfe;background:#eff6ff;cursor:pointer;color:#1d4ed8" title="Copy this table to another date">📋</button>
+                                        <button onclick="deleteCalibRecord('${w.wlID}','${d.entryID}','${c.calibID}')" style="font-size:10px;padding:2px 6px;border-radius:4px;border:1px solid #fecaca;background:#fff;cursor:pointer;color:#dc2626">✕</button>
                                     </div>
-                                    ${c.maker?`<p style="font-size:10px;color:var(--muted)">Maker: ${c.maker}${c.nominal?' | Nominal: '+c.nominal+' mm':''}</p>`:''}
-                                    ${c.wearLimit?`<p style="font-size:10px;color:var(--muted)">Wear Limit: ${c.wearLimit} mm${c.stdValue?' | Standard: '+c.stdValue+' mm':''}</p>`:''}
-                                    ${c.rows?.length?`<div style="overflow-x:auto;margin-top:6px">
-                                        <table style="width:100%;border-collapse:collapse;font-size:10px">
-                                            <thead><tr>${(c.columns||[]).map(h=>`<th style="padding:3px 6px;background:#1e3a5f;color:#fff;font-size:10px;white-space:nowrap">${h}</th>`).join('')}</tr></thead>
-                                            <tbody>${c.rows.map(r=>`<tr>${(c.rowKeys||[]).map(k=>{
-                                                const v=r[k]||'';
-                                                const bg=k==='result'?(v==='PASS'?'#dcfce7':v==='FAIL'?'#fee2e2':'#fff'):'#fff';
-                                                const col=k==='result'?(v==='PASS'?'#15803d':v==='FAIL'?'#dc2626':'#374151'):'#374151';
-                                                return `<td style="padding:3px 6px;border:1px solid #e9d5ff;background:${bg};color:${col};font-weight:${k==='result'?'700':'400'}">${v||'—'}</td>`;
-                                            }).join('')}</tr>`).join('')}</tbody>
-                                        </table>
-                                    </div>`:''}
-                                    ${c.remarks?`<p style="font-size:10px;color:#64748b;margin-top:4px;font-style:italic">"${c.remarks}"</p>`:''}
-                                </div>`).join('')}
-                            </div>`:''}
-                            <!-- Photos -->
-                            ${(d.photos||[]).length?`<div style="margin-top:8px">
-                                <p style="font-size:10px;font-weight:700;color:var(--muted);margin-bottom:4px">📷 PHOTOS (${d.photos.length})</p>
-                                <div style="display:flex;gap:8px;flex-wrap:wrap">${d.photos.map((ph,i)=>{
-                                            const src=_photoSrc(ph);
-                                            const title=_photoTitle(ph);
-                                            const hasTitle=!!title;
-                                            return `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;max-width:60px">
-                                                <img src="${src}" onclick="viewDayPhoto('${w.wlID}','${d.entryID}',${i})" style="width:60px;height:60px;border-radius:8px;object-fit:cover;cursor:pointer;border:2px solid ${hasTitle?'#10b981':'var(--border)'}" title="${title||'Untitled'}"
-                                                    onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2260%22 height=%2260%22><rect width=%2260%22 height=%2260%22 fill=%22%23e0f2fe%22/><text x=%2250%%22 y=%2265%%22 text-anchor=%22middle%22 font-size=%2226%22>📷</text></svg>'"/>
-                                                <div style="font-size:9px;color:${hasTitle?'#0f172a':'#94a3b8'};font-style:${hasTitle?'normal':'italic'};max-width:60px;line-height:1.1;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${title||'Untitled'}</div>
-                                            </div>`;
-                                        }).join('')}</div>
-                            </div>`:''}
-                        </div>`;
-                    }).join('');
-                    })()}
-                </div>`}
-            </div>`;
-        }).join('')}`;
+                                </div>
+                                ${c.maker ? `<p style="font-size:10px;color:var(--muted)">Maker: ${c.maker}${c.nominal ? ' | Nominal: ' + c.nominal + ' mm' : ''}</p>` : ''}
+                                ${c.wearLimit ? `<p style="font-size:10px;color:var(--muted)">Wear Limit: ${c.wearLimit} mm${c.stdValue ? ' | Standard: ' + c.stdValue + ' mm' : ''}</p>` : ''}
+                                ${c.rows?.length ? `<div style="overflow-x:auto;margin-top:6px">
+                                    <table style="width:100%;border-collapse:collapse;font-size:10px">
+                                        <thead><tr>${(c.columns || []).map(h => `<th style="padding:3px 6px;background:#1e3a5f;color:#fff;font-size:10px;white-space:nowrap">${h}</th>`).join('')}</tr></thead>
+                                        <tbody>${c.rows.map(r => `<tr>${(c.rowKeys || []).map(k => {
+                                            const v = r[k] || '';
+                                            const bg = k === 'result' ? (v === 'PASS' ? '#dcfce7' : v === 'FAIL' ? '#fee2e2' : '#fff') : '#fff';
+                                            const col = k === 'result' ? (v === 'PASS' ? '#15803d' : v === 'FAIL' ? '#dc2626' : '#374151') : '#374151';
+                                            return `<td style="padding:3px 6px;border:1px solid #e9d5ff;background:${bg};color:${col};font-weight:${k === 'result' ? '700' : '400'}">${v || '—'}</td>`;
+                                        }).join('')}</tr>`).join('')}</tbody>
+                                    </table>
+                                </div>` : ''}
+                                ${c.remarks ? `<p style="font-size:10px;color:#64748b;margin-top:4px;font-style:italic">"${c.remarks}"</p>` : ''}
+                            </div>`).join('')}
+                        </div>` : ''}
+                        <!-- Photos -->
+                        ${(d.photos || []).length ? `<div style="margin-top:8px">
+                            <p style="font-size:10px;font-weight:700;color:var(--muted);margin-bottom:4px">📷 PHOTOS (${d.photos.length})</p>
+                            <div style="display:flex;gap:8px;flex-wrap:wrap">${d.photos.map((ph, i) => {
+                                        const src = _photoSrc(ph);
+                                        const title = _photoTitle(ph);
+                                        const hasTitle = !!title;
+                                        return `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;max-width:60px">
+                                            <img src="${src}" onclick="viewDayPhoto('${w.wlID}','${d.entryID}',${i})" style="width:60px;height:60px;border-radius:8px;object-fit:cover;cursor:pointer;border:2px solid ${hasTitle ? '#10b981' : 'var(--border)'}" title="${title || 'Untitled'}"
+                                                onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2260%22 height=%2260%22><rect width=%2260%22 height=%2260%22 fill=%22%23e0f2fe%22/><text x=%2250%%22 y=%2265%%22 text-anchor=%22middle%22 font-size=%2226%22>📷</text></svg>'"/>
+                                            <div style="font-size:9px;color:${hasTitle ? '#0f172a' : '#94a3b8'};font-style:${hasTitle ? 'normal' : 'italic'};max-width:60px;line-height:1.1;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${title || 'Untitled'}</div>
+                                        </div>`;
+                                    }).join('')}</div>
+                        </div>` : ''}
+                    </div>`;
+                }).join('');
+                })()}
+            </div>`}
+        </div>`;
     }
 
     function calcDuration(start,end){
@@ -5587,14 +5644,30 @@
         else workLogs.push(obj);
         await saveData('workLogs',workLogs);
         _concurEndEdit();
-        closeWlModal();renderView();showToast('✅ Work log saved');
+        // On new-log creation from list view, jump the user into the new log's
+        // detail view. On edit (or if already viewing detail), just re-render.
+        const wasNew = !_editWlID;
+        closeWlModal();
+        if (wasNew) {
+            _openWorkLog(obj.wlID);
+        } else {
+            renderView();
+        }
+        showToast('✅ Work log saved');
     }
 
     async function deleteWorkLog(id){
         if(!confirm('Delete this project work log and ALL daily entries? This cannot be undone.'))return;
         if (await _concurBlockIfStale('workLogs', [{ id, idKey: 'wlID' }])) return;
         workLogs=workLogs.filter(x=>x.wlID!==id);
-        await saveData('workLogs',workLogs);renderView();showToast('🗑️ Work log deleted');
+        await saveData('workLogs',workLogs);
+        // If we were viewing the log we just deleted, snap back to the list.
+        if (_wlSubView === 'detail' && _wlDetailID === id) {
+            _backToWlList();
+        } else {
+            renderView();
+        }
+        showToast('🗑️ Work log deleted');
     }
 
     // ── DAILY ENTRY CRUD ─────────────────────────────────────────
