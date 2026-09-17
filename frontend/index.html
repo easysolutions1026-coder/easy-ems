@@ -18845,25 +18845,45 @@
                             <button onclick="togglePayslipEditLock()" class="px-3 py-1.5 text-sm border border-teal-300 text-teal-600 rounded-lg hover:bg-teal-50">${settings.payslipEditUnlocked?'Lock Editing':'Unlock Editing'}</button>
                         </div>
                     </div>
-                    <div class="overflow-x-auto">
-                    ${(()=>{
-                        if(!payslips.length) return '<p class="text-sm text-gray-400 text-center py-8 border border-dashed border-gray-200 rounded-xl">No approved payslips yet. Generate and approve payslips from the Pay Slips tab.</p>';
-                        return `<table class="w-full text-sm"><thead class="bg-teal-50 text-xs text-gray-500 uppercase"><tr>
-                            <th class="px-3 py-2 text-left">Staff</th><th class="px-3 py-2 text-left">Period</th><th class="px-3 py-2 text-right">Gross</th><th class="px-3 py-2 text-right">Net Pay</th><th class="px-3 py-2 text-center">Status</th><th class="px-3 py-2 text-center">Actions</th>
-                        </tr></thead><tbody>${payslips.map(ps=>`<tr class="border-b hover:bg-teal-50">
-                            <td class="px-3 py-2 font-medium">${ps.staffName}</td>
-                            <td class="px-3 py-2 text-xs">${ps.periodLabel}</td>
-                            <td class="px-3 py-2 text-right">₹${(+ps.gross||0).toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
-                            <td class="px-3 py-2 text-right font-semibold text-teal-700">₹${(+ps.netPay||0).toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
-                            <td class="px-3 py-2 text-center"><span class="px-2 py-0.5 rounded-full text-xs ${ps.approved?'bg-green-100 text-green-700':'bg-yellow-100 text-yellow-700'}">${ps.approved?'Approved':'Draft'}</span></td>
-                            <td class="px-3 py-2 text-center whitespace-nowrap">
-                                <button onclick="viewPayslipPDF('${ps.psID}')" class="text-blue-600 text-xs font-medium px-2 py-1 border border-blue-200 rounded hover:bg-blue-50 mr-1">PDF</button>
-                                ${!ps.approved?`<button onclick="approvePayslip('${ps.psID}')" class="text-green-600 text-xs font-medium px-2 py-1 border border-green-200 rounded hover:bg-green-50 mr-1">Approve</button>`:''}
-                                ${(!ps.approved||settings.payslipEditUnlocked)?`<button onclick="deletePayslipRecord('${ps.psID}')" class="text-red-500 text-xs font-medium px-2 py-1 border border-red-200 rounded hover:bg-red-50">Delete</button>`:'<span class="text-xs text-gray-300">Locked</span>'}
-                            </td>
-                        </tr>`).join('')}</tbody></table>`;
-                    })()}
-                    </div>
+
+                    <!-- Quick Download: pick staff+period from a single dropdown → instant PDF -->
+                    ${payslips.length ? `
+                    <div class="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-3 mb-3 border border-blue-200">
+                        <label class="block text-xs font-bold text-blue-800 mb-1.5">📥 Quick Download — pick any staff & period below to download their payslip PDF instantly</label>
+                        <select id="psQuickDownloadSettings"
+                                onchange="if(this.value){viewPayslipPDF(this.value);this.value='';}"
+                                class="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm bg-white">
+                            <option value="">— Select staff &amp; period —</option>
+                            ${[...payslips]
+                                .sort((a,b) => (a.staffName||'').localeCompare(b.staffName||'') || (b.periodYear-a.periodYear) || (b.periodMonth-a.periodMonth))
+                                .map(ps => `<option value="${ps.psID}">${ps.staffName} — ${ps.periodLabel}${ps.approved ? '' : ' (Draft)'}</option>`).join('')}
+                        </select>
+                    </div>` : ''}
+
+                    <details class="mt-2">
+                        <summary class="cursor-pointer text-sm text-teal-700 font-medium hover:text-teal-900 select-none py-2">
+                            📋 Manage all records (approve, delete, see amounts) — ${payslips.length} record${payslips.length===1?'':'s'}
+                        </summary>
+                        <div class="overflow-x-auto mt-2">
+                        ${(()=>{
+                            if(!payslips.length) return '<p class="text-sm text-gray-400 text-center py-8 border border-dashed border-gray-200 rounded-xl">No approved payslips yet. Generate and approve payslips from the Pay Slips tab.</p>';
+                            return `<table class="w-full text-sm"><thead class="bg-teal-50 text-xs text-gray-500 uppercase"><tr>
+                                <th class="px-3 py-2 text-left">Staff</th><th class="px-3 py-2 text-left">Period</th><th class="px-3 py-2 text-right">Gross</th><th class="px-3 py-2 text-right">Net Pay</th><th class="px-3 py-2 text-center">Status</th><th class="px-3 py-2 text-center">Actions</th>
+                            </tr></thead><tbody>${payslips.map(ps=>`<tr class="border-b hover:bg-teal-50">
+                                <td class="px-3 py-2 font-medium">${ps.staffName}</td>
+                                <td class="px-3 py-2 text-xs">${ps.periodLabel}</td>
+                                <td class="px-3 py-2 text-right">₹${(+ps.gross||0).toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
+                                <td class="px-3 py-2 text-right font-semibold text-teal-700">₹${(+ps.netPay||0).toLocaleString('en-IN',{minimumFractionDigits:2})}</td>
+                                <td class="px-3 py-2 text-center"><span class="px-2 py-0.5 rounded-full text-xs ${ps.approved?'bg-green-100 text-green-700':'bg-yellow-100 text-yellow-700'}">${ps.approved?'Approved':'Draft'}</span></td>
+                                <td class="px-3 py-2 text-center whitespace-nowrap">
+                                    <button onclick="viewPayslipPDF('${ps.psID}')" class="text-blue-600 text-xs font-medium px-2 py-1 border border-blue-200 rounded hover:bg-blue-50 mr-1">PDF</button>
+                                    ${!ps.approved?`<button onclick="approvePayslip('${ps.psID}')" class="text-green-600 text-xs font-medium px-2 py-1 border border-green-200 rounded hover:bg-green-50 mr-1">Approve</button>`:''}
+                                    ${(!ps.approved||settings.payslipEditUnlocked)?`<button onclick="deletePayslipRecord('${ps.psID}')" class="text-red-500 text-xs font-medium px-2 py-1 border border-red-200 rounded hover:bg-red-50">Delete</button>`:'<span class="text-xs text-gray-300">Locked</span>'}
+                                </td>
+                            </tr>`).join('')}</tbody></table>`;
+                        })()}
+                        </div>
+                    </details>
                 </div>
 
                 <!-- Project Delete Control -->
@@ -24641,26 +24661,49 @@ ${'─'.repeat(50)}
                         🧹 Remove Duplicates
                     </button>
                 </div>
-                <div class="px-4 py-3 border-b border-gray-100 flex flex-wrap gap-2 items-center bg-gray-50">
-                    <input type="text" value="${(window._payslipSearch||'').replace(/"/g,'&quot;')}"
-                        oninput="_debouncedSearch('_payslipSearch',this.value)"
-                        placeholder="🔍 Search by staff name…"
-                        class="px-3 py-1.5 border rounded-lg text-xs w-56"/>
-                    <select onchange="window._payslipFilterMonth=this.value;renderView();" class="px-2 py-1.5 border rounded-lg text-xs">
-                        <option value="">All Months</option>
-                        ${MN.map((m,i)=>`<option value="${i+1}" ${psFM==(i+1)?'selected':''}>${m}</option>`).join('')}
+
+                <!-- Quick Download: pick staff+period from a single dropdown → instant PDF -->
+                ${payslips.length ? `
+                <div class="mx-4 my-3 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-3 border border-blue-200">
+                    <label class="block text-xs font-bold text-blue-800 mb-1.5">📥 Quick Download — pick any staff &amp; period below to download their payslip PDF instantly</label>
+                    <select id="psQuickDownloadStaff"
+                            onchange="if(this.value){viewPayslipPDF(this.value);this.value='';}"
+                            class="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm bg-white">
+                        <option value="">— Select staff &amp; period —</option>
+                        ${[...payslips]
+                            .sort((a,b) => (a.staffName||'').localeCompare(b.staffName||'') || (b.periodYear-a.periodYear) || (b.periodMonth-a.periodMonth))
+                            .map(ps => `<option value="${ps.psID}">${ps.staffName} — ${ps.periodLabel}${ps.approved ? '' : ' (Draft)'}</option>`).join('')}
                     </select>
-                    <select onchange="window._payslipFilterYear=this.value;renderView();" class="px-2 py-1.5 border rounded-lg text-xs">
-                        <option value="">All Years</option>
-                        ${psYears.map(y=>`<option value="${y}" ${psFY==y?'selected':''}>${y}</option>`).join('')}
-                    </select>
-                    ${(psQ||psFM||psFY) ? `<button onclick="window._payslipSearch='';window._payslipFilterMonth='';window._payslipFilterYear='';renderView();" class="px-2 py-1.5 text-xs text-gray-500 hover:text-gray-700 underline">Clear filters</button>` : ''}
-                </div>
-                ${!payslips.length?'<p class="text-center text-gray-400 py-8 text-sm">No payslip records yet. Generate a payslip below and click "Approve & Save Record".</p>':
-                !psFiltered.length?'<p class="text-center text-gray-400 py-8 text-sm">No payslips match the current search/filter.</p>':
-                `<div class="overflow-x-auto"><table class="w-full text-sm"><thead class="bg-teal-50 text-xs text-gray-500 uppercase"><tr>
-                    <th class="px-3 py-2 text-left">Staff</th><th class="px-3 py-2 text-left">Period</th><th class="px-3 py-2 text-right">Gross</th><th class="px-3 py-2 text-right">Net Pay</th><th class="px-3 py-2 text-center">Status</th><th class="px-3 py-2 text-center">Actions</th>
-                </tr></thead><tbody>${psRows}</tbody></table></div>`}
+                </div>` : ''}
+
+                <!-- Manage records: collapsed by default so the tab stays compact when payslip
+                     count grows. Contains the filters, search, and full table (which is still
+                     needed for Approve/Delete drafts and reviewing amounts). -->
+                <details class="mx-4 my-3">
+                    <summary class="cursor-pointer text-sm text-teal-700 font-medium hover:text-teal-900 select-none py-2">
+                        📋 Manage all records (search, filter, approve, delete)
+                    </summary>
+                    <div class="px-4 py-3 border-b border-gray-100 flex flex-wrap gap-2 items-center bg-gray-50 rounded-t-lg mt-2">
+                        <input type="text" value="${(window._payslipSearch||'').replace(/"/g,'&quot;')}"
+                            oninput="_debouncedSearch('_payslipSearch',this.value)"
+                            placeholder="🔍 Search by staff name…"
+                            class="px-3 py-1.5 border rounded-lg text-xs w-56"/>
+                        <select onchange="window._payslipFilterMonth=this.value;renderView();" class="px-2 py-1.5 border rounded-lg text-xs">
+                            <option value="">All Months</option>
+                            ${MN.map((m,i)=>`<option value="${i+1}" ${psFM==(i+1)?'selected':''}>${m}</option>`).join('')}
+                        </select>
+                        <select onchange="window._payslipFilterYear=this.value;renderView();" class="px-2 py-1.5 border rounded-lg text-xs">
+                            <option value="">All Years</option>
+                            ${psYears.map(y=>`<option value="${y}" ${psFY==y?'selected':''}>${y}</option>`).join('')}
+                        </select>
+                        ${(psQ||psFM||psFY) ? `<button onclick="window._payslipSearch='';window._payslipFilterMonth='';window._payslipFilterYear='';renderView();" class="px-2 py-1.5 text-xs text-gray-500 hover:text-gray-700 underline">Clear filters</button>` : ''}
+                    </div>
+                    ${!payslips.length?'<p class="text-center text-gray-400 py-8 text-sm">No payslip records yet. Generate a payslip below and click "Approve & Save Record".</p>':
+                    !psFiltered.length?'<p class="text-center text-gray-400 py-8 text-sm">No payslips match the current search/filter.</p>':
+                    `<div class="overflow-x-auto"><table class="w-full text-sm"><thead class="bg-teal-50 text-xs text-gray-500 uppercase"><tr>
+                        <th class="px-3 py-2 text-left">Staff</th><th class="px-3 py-2 text-left">Period</th><th class="px-3 py-2 text-right">Gross</th><th class="px-3 py-2 text-right">Net Pay</th><th class="px-3 py-2 text-center">Status</th><th class="px-3 py-2 text-center">Actions</th>
+                    </tr></thead><tbody>${psRows}</tbody></table></div>`}
+                </details>
             </div>
 
             <!-- Generator -->
