@@ -10338,9 +10338,11 @@
                 let chip;
                 if ((t.paymentsReceived||[]).length === 0) {
                     chip = `<span class="text-xs text-gray-400">— no payments —</span>`;
-                } else if (Math.abs(balance) < 0.005) {
+                } else if (Math.abs(balance) < 1) {
+                    // ±₹1 tolerance — rounding and fractional TDS residuals
+                    // shouldn't flag an invoice as due or overpaid.
                     chip = `<span class="px-2 py-1 rounded-full bg-green-100 text-green-700 text-xs font-bold">✓ Paid in full</span>`;
-                } else if (balance < 0) {
+                } else if (balance <= -1) {
                     chip = `<span class="px-2 py-1 rounded-full bg-amber-100 text-amber-700 text-xs font-bold" title="Received more than invoiced">⚠ Overpaid ${fmt(-balance)}</span>`;
                 } else {
                     chip = `<span class="px-2 py-1 rounded-full bg-red-100 text-red-700 text-xs font-bold">${fmt(balance)} due</span>
@@ -27321,10 +27323,10 @@ Automated WFH alert — ${company} Attendance System.`;
                     // invoice looks perpetually outstanding here.
                     const tdsDeducted=(t.paymentsReceived||[]).reduce((s,p)=>s+(parseFloat(p.tdsAmount)||0)+(parseFloat(p.itTdsAmount)||0)+(parseFloat(p.gstTdsAmount)||0),0);
                     const balance=Math.max(0,(tot.total||0)-received-tdsDeducted);
-                    return {arID:'TXN-'+t.txnID,source:'app',txnID:t.txnID,client:t.partyName||'—',invoiceNo:t.txnID,invoiceDate:t.txnDate||'',dueDate:t.dueDate||'',invoiceAmt:tot.total||0,received,balance,description:(t.items||[]).map(i=>i.description||'').filter(Boolean).join('; '),followUps:t.arFollowUps||[]};
-                }).filter(t=>t.balance>0.01);
+                    return {arID:'TXN-'+t.txnID,source:'app',txnID:t.txnID,client:t.partyName||'—',invoiceNo:t.txnID,invoiceDate:t.txnDate||'',dueDate:t.dueDate||'',invoiceAmt:tot.total||0,received,balance,description:(t.subject||'').trim()||(t.items||[]).map(i=>i.description||'').filter(Boolean).join('; '),followUps:t.arFollowUps||[]};
+                }).filter(t=>t.balance>=1);
 
-            const allAR=[...(arInvoices||[]).filter(a=>a.balance>0.01),...appInvoices].sort((a,b)=>(a.dueDate||a.invoiceDate||'').localeCompare(b.dueDate||b.invoiceDate||''));
+            const allAR=[...(arInvoices||[]).filter(a=>a.balance>=1),...appInvoices].sort((a,b)=>(a.dueDate||a.invoiceDate||'').localeCompare(b.dueDate||b.invoiceDate||''));
             const totalOutstanding=allAR.reduce((s,a)=>s+a.balance,0);
             const buckets={'0-30':0,'31-60':0,'61-90':0,'90+':0};
             allAR.forEach(a=>{buckets[ageBucket(a.dueDate||a.invoiceDate)]+=a.balance;});
@@ -27443,7 +27445,10 @@ Automated WFH alert — ${company} Attendance System.`;
                     // duplicate). This section surfaces those settled historical
                     // invoices with Edit + Delete. App-generated (TXN) invoices
                     // are not shown here — they're managed from Transactions.
-                    const settled = (arInvoices||[]).filter(a => (a.balance||0) <= 0.01);
+                    // Settled = balance within ±₹1 (rounding, tiny TDS residuals,
+                    // fractional amounts are treated as fully paid rather than
+                    // shown as outstanding sub-rupee dues).
+                    const settled = (arInvoices||[]).filter(a => Math.abs(+a.balance||0) < 1);
                     if (!settled.length) return '';
                     const settledTotal = settled.reduce((s,a)=>s+(+a.invoiceAmt||0),0);
                     // Compute displayed Received from paymentsReceived array
@@ -28017,8 +28022,8 @@ Automated WFH alert — ${company} Attendance System.`;
             const ageDays=d=>d?Math.floor((today-new Date(d))/86400000):0;
             const ageBucket=d=>{const a=ageDays(d);return a<=30?'0-30':a<=60?'31-60':a<=90?'61-90':'90+';};
 
-            const appInvs=(transactions||[]).filter(t=>t.txnCategory==='INVOICE'&&t.txnDirection==='Outgoing'&&!['Draft','Cancelled'].includes(t.status)).map(t=>{const tot=calculateTotals(t.items||[]);const rec=(t.paymentsReceived||[]).reduce((s,p)=>s+(parseFloat(p.amount)||0),0);const tds=(t.paymentsReceived||[]).reduce((s,p)=>s+(parseFloat(p.tdsAmount)||0)+(parseFloat(p.itTdsAmount)||0)+(parseFloat(p.gstTdsAmount)||0),0);return{arID:'TXN-'+t.txnID,source:'app',client:t.partyName||'—',invoiceNo:t.txnID,invoiceDate:t.txnDate||'',dueDate:t.dueDate||'',invoiceAmt:tot.total||0,received:rec,balance:Math.max(0,(tot.total||0)-rec-tds),description:(t.items||[]).map(i=>i.description||'').filter(Boolean).join('; '),followUps:t.arFollowUps||[]};}).filter(t=>t.balance>0.01);
-            const allAR=[...(arInvoices||[]).filter(a=>a.balance>0.01),...appInvs].sort((a,b)=>(a.client||'').localeCompare(b.client||''));
+            const appInvs=(transactions||[]).filter(t=>t.txnCategory==='INVOICE'&&t.txnDirection==='Outgoing'&&!['Draft','Cancelled'].includes(t.status)).map(t=>{const tot=calculateTotals(t.items||[]);const rec=(t.paymentsReceived||[]).reduce((s,p)=>s+(parseFloat(p.amount)||0),0);const tds=(t.paymentsReceived||[]).reduce((s,p)=>s+(parseFloat(p.tdsAmount)||0)+(parseFloat(p.itTdsAmount)||0)+(parseFloat(p.gstTdsAmount)||0),0);return{arID:'TXN-'+t.txnID,source:'app',client:t.partyName||'—',invoiceNo:t.txnID,invoiceDate:t.txnDate||'',dueDate:t.dueDate||'',invoiceAmt:tot.total||0,received:rec,balance:Math.max(0,(tot.total||0)-rec-tds),description:(t.subject||'').trim()||(t.items||[]).map(i=>i.description||'').filter(Boolean).join('; '),followUps:t.arFollowUps||[]};}).filter(t=>t.balance>=1);
+            const allAR=[...(arInvoices||[]).filter(a=>a.balance>=1),...appInvs].sort((a,b)=>(a.client||'').localeCompare(b.client||''));
             const totalOut=allAR.reduce((s,a)=>s+a.balance,0);
             const buckets={'0-30':0,'31-60':0,'61-90':0,'90+':0};
             allAR.forEach(a=>{buckets[ageBucket(a.dueDate||a.invoiceDate)]+=a.balance;});
