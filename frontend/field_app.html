@@ -1891,12 +1891,56 @@
     let _peSearchQ = '';
     let _wlSearchQ = '';
 
+    // ── Pagination state — persisted across sessions ──
+    // Each tab remembers its own page size in localStorage so the
+    // technician's choice survives reloads and browser restarts.
+    function _loadNum(key, dflt) {
+        try { const v = localStorage.getItem(key); const n = v ? parseInt(v, 10) : NaN; return isNaN(n) ? dflt : n; }
+        catch { return dflt; }
+    }
+    function _saveNum(key, val) { try { localStorage.setItem(key, String(val)); } catch {} }
+    let _peLimit = _loadNum('field_peLimit', 10);
+    let _pePage  = 0;
+    let _wlLimit = _loadNum('field_wlLimit', 10);
+    let _wlPage  = 0;
+
+    function _setPeLimit(n) { _peLimit = n; _pePage = 0; _saveNum('field_peLimit', n); renderView(); }
+    function _setPePage(n)  { _pePage = n; renderView(); try { window.scrollTo({ top: 0, behavior: 'instant' }); } catch { window.scrollTo(0, 0); } }
+    function _setWlLimit(n) { _wlLimit = n; _wlPage = 0; _saveNum('field_wlLimit', n); renderView(); }
+    function _setWlPage(n)  { _wlPage = n; renderView(); try { window.scrollTo({ top: 0, behavior: 'instant' }); } catch { window.scrollTo(0, 0); } }
+
+    // Page-size pill row: [10] [20] [100] — active one styled solid green.
+    function _pageSizePills(currentLimit, fnName) {
+        return [10, 20, 100].map(n => {
+            const active = n === currentLimit;
+            return `<button onclick="${fnName}(${n})" style="padding:6px 12px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid ${active?'#0d7c66':'var(--border)'};background:${active?'#0d7c66':'#fff'};color:${active?'#fff':'var(--muted)'};min-width:44px">${n}</button>`;
+        }).join('');
+    }
+
+    // Bottom pager: ← Prev  Page X of Y · N total  Next →
+    // Hidden entirely when everything fits on a single page.
+    function _pagerHtml(page, limit, total, setPageFn) {
+        const totalPages = Math.max(1, Math.ceil(total / limit));
+        const currentPage = Math.min(page, totalPages - 1);
+        if (total <= limit) return '';
+        const prevDisabled = currentPage === 0;
+        const nextDisabled = currentPage >= totalPages - 1;
+        return `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;padding:8px 4px;font-size:13px;color:var(--muted);gap:8px;flex-wrap:wrap">
+            <button onclick="${setPageFn}(${currentPage - 1})" ${prevDisabled ? 'disabled' : ''}
+                style="padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:${prevDisabled ? '#f1f5f9' : '#fff'};color:${prevDisabled ? '#cbd5e1' : 'var(--navy)'};cursor:${prevDisabled ? 'not-allowed' : 'pointer'};font-weight:600">← Prev</button>
+            <span style="text-align:center">Page ${currentPage + 1} of ${totalPages} <span style="color:#94a3b8">· ${total} total</span></span>
+            <button onclick="${setPageFn}(${currentPage + 1})" ${nextDisabled ? 'disabled' : ''}
+                style="padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:${nextDisabled ? '#f1f5f9' : '#fff'};color:${nextDisabled ? '#cbd5e1' : 'var(--navy)'};cursor:${nextDisabled ? 'not-allowed' : 'pointer'};font-weight:600">Next →</button>
+        </div>`;
+    }
+
     // Update the query and re-render, then restore focus + caret.
     // The whole point: typing should feel uninterrupted even though
     // we're triggering a full innerHTML rewrite on every keystroke.
     function _setSearch(field, value, inputId) {
-        if (field === 'pe') _peSearchQ = value;
-        else if (field === 'wl') _wlSearchQ = value;
+        if (field === 'pe') { _peSearchQ = value; _pePage = 0; }
+        else if (field === 'wl') { _wlSearchQ = value; _wlPage = 0; }
         renderView();
         // Re-focus the SAME input (matched by id) and put the caret at the end.
         // requestAnimationFrame waits for the new DOM to be in place.
@@ -2277,6 +2321,13 @@
             ${_peSearchQ ? `<button onclick="_clearSearch('pe','peSearchInput')" title="Clear search" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;font-size:18px;color:#94a3b8;cursor:pointer;padding:4px 8px;line-height:1">✕</button>` : ''}
         </div>
 
+        <!-- Page-size selector — persists in localStorage -->
+        <div style="display:flex;justify-content:flex-end;align-items:center;gap:6px;margin-bottom:12px;font-size:12px;color:var(--muted)">
+            <span>Show:</span>
+            ${_pageSizePills(_peLimit, '_setPeLimit')}
+            <span>per page</span>
+        </div>
+
         <!-- Project cards -->
         ${(() => {
             // ── Item-level search ──
@@ -2342,7 +2393,7 @@
             `<div class="card p-10 text-center"><div style="font-size:48px;margin-bottom:8px">🧳</div><p class="font-medium text-gray-400">No projects yet</p><p class="text-sm text-gray-400 mt-1">Projects will appear here once created by the office team.</p></div>` :
             !_filtered.length ?
             `<div class="card p-10 text-center"><div style="font-size:36px;margin-bottom:8px">🔍</div><p class="font-medium text-gray-500">No projects match "${_peSearchQ.replace(/</g,'&lt;')}"</p><p class="text-sm text-gray-400 mt-1">Try a different search term or <button onclick="_clearSearch('pe','peSearchInput')" style="color:#0d7c66;background:none;border:none;text-decoration:underline;cursor:pointer;font-size:13px">clear the filter</button>.</p></div>` :
-            _filtered.map(({ p, items: _visibleItems, showAllItems: _showAllItems }) => {
+            _filtered.slice(_pePage * _peLimit, (_pePage + 1) * _peLimit).map(({ p, items: _visibleItems, showAllItems: _showAllItems }) => {
             const funds   = parseFloat(p.totalFunds)||0;
             const spent   = (p.items||[]).reduce((a,i)=>a+(parseFloat(i.amount)||0),0);
             const tfIn    = (p.fundTransfers||[]).filter(t=>t.direction==='in').reduce((a,t)=>a+(parseFloat(t.amount)||0),0);
@@ -2455,7 +2506,7 @@
                     }).join('')}
                 </div>` : `<p style="padding:10px 14px;font-size:12px;color:var(--muted);border-top:1px solid var(--border)">No expenses recorded yet.</p>`}
             </div>`;
-        }).join('');
+        }).join('') + _pagerHtml(_pePage, _peLimit, _filtered.length, '_setPePage');
         })()}`;
     }
 
@@ -5363,6 +5414,13 @@
             ${_wlSearchQ ? `<button onclick="_clearSearch('wl','wlSearchInput')" title="Clear search" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;font-size:18px;color:#94a3b8;cursor:pointer;padding:4px 8px;line-height:1">✕</button>` : ''}
         </div>
 
+        <!-- Page-size selector — persists in localStorage -->
+        <div style="display:flex;justify-content:flex-end;align-items:center;gap:6px;margin-bottom:12px;font-size:12px;color:var(--muted)">
+            <span>Show:</span>
+            ${_pageSizePills(_wlLimit, '_setWlLimit')}
+            <span>per page</span>
+        </div>
+
         ${!sorted.length ? `<div class="card p-10 text-center"><div style="font-size:48px;margin-bottom:8px">📋</div><p class="font-medium text-gray-400">No work logs yet</p><p class="text-sm text-gray-400 mt-1">Create a Project Work Log, then add daily entries</p></div>`
         : !filtered.length ? `<div class="card p-10 text-center"><div style="font-size:36px;margin-bottom:8px">🔍</div><p class="font-medium text-gray-500">No work logs match "${_wlSearchQ.replace(/</g,'&lt;')}"</p><p class="text-sm text-gray-400 mt-1">Try a different search term or <button onclick="_clearSearch('wl','wlSearchInput')" style="color:#0d7c66;background:none;border:none;text-decoration:underline;cursor:pointer;font-size:13px">clear the filter</button>.</p></div>`
         : `<div class="card" style="overflow:hidden">
@@ -5374,7 +5432,7 @@
                     </tr>
                 </thead>
                 <tbody>
-                    ${filtered.map(w => {
+                    ${filtered.slice(_wlPage * _wlLimit, (_wlPage + 1) * _wlLimit).map(w => {
                         const ss = _wlStatusSty[w.status] || _wlStatusSty['Pending'];
                         return `
                         <tr onclick="_openWorkLog('${w.wlID}')"
@@ -5391,7 +5449,7 @@
                     }).join('')}
                 </tbody>
             </table>
-        </div>`}`;
+        </div>${_pagerHtml(_wlPage, _wlLimit, filtered.length, '_setWlPage')}`}`;
     }
 
     // ── DETAIL VIEW — one work log with full daily-entry breakdown ──
