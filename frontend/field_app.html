@@ -1920,6 +1920,63 @@
         renderView();
     }
 
+    // ── Freshness check before saving — prevents silent overwrites ──
+    // When User A saves a whole-collection POST, it replaces the entire
+    // collection on the server. If User B had just added a record that
+    // User A doesn't have locally, User A's save would silently delete it.
+    // This helper re-fetches the collection, compares IDs, and alerts if
+    // NEW records exist remotely that we don't know about. The user must
+    // Sync (top-right) to pull them, then retry.
+    //
+    // Returns true if safe to save (nothing new remotely).
+    // Returns false if the user should abort (new remote records exist).
+    //
+    // For a project-scoped collection (projectExpenses), we also check
+    // whether a new ITEM has been added inside any project we know about,
+    // not just whether a whole new PROJECT has appeared. Handled by the
+    // optional itemIdField parameter.
+    async function _checkFreshBeforeSave(collection, localArray, idField, itemIdField) {
+        try {
+            const remote = await loadFileFromDrive(collection + '.json');
+            if (!Array.isArray(remote)) return true; // no remote or fetch failed — allow save
+            const localIds = new Set((localArray || []).map(x => x[idField]).filter(Boolean));
+            const newRemote = remote.filter(r => r[idField] && !localIds.has(r[idField]));
+            let newItems = 0;
+            if (itemIdField) {
+                // Also scan into each project's items[] for records the local copy missed.
+                const localByProj = new Map();
+                (localArray || []).forEach(p => {
+                    localByProj.set(p[idField], new Set((p.items || []).map(it => it[itemIdField]).filter(Boolean)));
+                });
+                remote.forEach(rp => {
+                    const known = localByProj.get(rp[idField]);
+                    if (!known) return; // that's a whole new project, already counted above
+                    (rp.items || []).forEach(it => {
+                        if (it[itemIdField] && !known.has(it[itemIdField])) newItems++;
+                    });
+                });
+            }
+            const total = newRemote.length + newItems;
+            if (total > 0) {
+                const label = collection === 'projectExpenses' ? 'expense/project'
+                            : collection === 'workLogs'        ? 'work log'
+                            : 'record';
+                alert(
+                    `⚠️ ${total} new ${label}${total > 1 ? 's have' : ' has'} been added by someone else since you opened this.\n\n` +
+                    `Your entry has NOT been saved — saving now would silently overwrite their changes.\n\n` +
+                    `Please tap "🔄 Sync" at the top of the screen to pull the latest, then re-open the form and try again.`
+                );
+                return false;
+            }
+            return true;
+        } catch (e) {
+            // Network error, gate failure, etc. — don't block the save, just proceed.
+            // Safer to allow than to strand the user.
+            console.warn('[freshness] check failed, allowing save:', e);
+            return true;
+        }
+    }
+
     // Page-size pill row: [10] [20] [100] — active one styled solid green.
     function _pageSizePills(currentLimit, fnName) {
         return [10, 20, 100].map(n => {
@@ -4078,6 +4135,13 @@
         const retry = _fieldAutoRetryUnallocated();
         if (retry.allocated > 0) anyPoolChanged = true;
 
+        // Freshness check — abort if someone else added an expense while we were
+        // filling this out. The whole-collection save would silently overwrite it.
+        if (!(await _checkFreshBeforeSave('projectExpenses', projectExpenses, 'projExpID', 'itemID'))) {
+            _releaseBtn();
+            return;
+        }
+
         try {
             await saveData('projectExpenses', projectExpenses);
             // Field app cannot write fundPools (Viewer-only). Pool status changes will sync next time
@@ -5735,6 +5799,14 @@
             createdAt:    existing?.createdAt||new Date().toISOString()
         };
         _stampRecord(obj);
+        // Freshness check — abort if someone else added a work log while we were
+        // filling this out. Only guard on NEW records (not edits — edits are
+        // covered by _concurBlockIfStale above).
+        if (!_editWlID) {
+            if (!(await _checkFreshBeforeSave('workLogs', workLogs, 'wlID'))) {
+                return;
+            }
+        }
         if(_editWlID){const i=workLogs.findIndex(x=>x.wlID===_editWlID);if(i>=0)workLogs[i]=obj;else workLogs.push(obj);}
         else workLogs.push(obj);
         await saveData('workLogs',workLogs);
@@ -6123,6 +6195,14 @@
         }
         // Stamp the daily entry itself — this is the lock unit
         _stampRecord(entry);
+        // Freshness check for NEW daily entries — guards against silent overwrite
+        // if someone else added a work log or daily entry while this form was open.
+        // Edits are already protected by _concurBlockIfStale earlier in this flow.
+        if(!entryID){
+            if (!(await _checkFreshBeforeSave('workLogs', workLogs, 'wlID'))) {
+                return;
+            }
+        }
         if(entryID){
             const ei=workLogs[wlIdx].dailyEntries.findIndex(x=>x.entryID===entryID);
             if(ei>=0)workLogs[wlIdx].dailyEntries[ei]=entry;else workLogs[wlIdx].dailyEntries.push(entry);
