@@ -33532,6 +33532,34 @@ Automated WFH alert — ${company} Attendance System.`;
         let _projExpProjectFilter = '';  // matches project name + projectRef
         let _projExpFocusedField  = '';  // 'entry' | 'project' — to restore focus after re-render
 
+        // ── Project card collapse state ──
+        // Default: all projects collapsed (empty Set). User clicks the header to expand one.
+        // Auto-expand overrides (see _projExpIsExpanded): when the user is typing in the
+        // ENTRY search box, matching projects auto-expand so their hits are visible.
+        // Kept module-level so state survives partial re-renders and view switches.
+        let _projExpExpanded = new Set();
+
+        function _toggleProjExpExpand(id) {
+            if (_projExpExpanded.has(id)) _projExpExpanded.delete(id);
+            else _projExpExpanded.add(id);
+            _refreshProjExpList();
+        }
+        function _projExpIsExpanded(projExpID) {
+            // While an entry search is active, every project the list still shows
+            // has at least one matching item — auto-expand them so the user can
+            // see the hits without hunting through headers.
+            if (_projExpEntrySearch) return true;
+            return _projExpExpanded.has(projExpID);
+        }
+        function _projExpExpandAll() {
+            (projectExpenses || []).forEach(p => _projExpExpanded.add(p.projExpID));
+            _refreshProjExpList();
+        }
+        function _projExpCollapseAll() {
+            _projExpExpanded.clear();
+            _refreshProjExpList();
+        }
+
         // ── Handlers called by the input's oninput event ──
         // Bug fix history (the two visible symptoms were "space bar does nothing"
         // and "types continuously / characters dropped"):
@@ -33690,27 +33718,37 @@ Automated WFH alert — ${company} Attendance System.`;
                     return { inline, tooltip };
                 };
                 const _attrEscape = s => String(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                // ── Collapse/expand state for this card ──
+                // Default = collapsed. Entry search auto-expands (see _projExpIsExpanded).
+                // Header is clickable to toggle; Edit/Delete buttons stopPropagation so
+                // they don't collapse the card when clicked.
+                const isExpanded = _projExpIsExpanded(p.projExpID);
+                const chevron = isExpanded ? '▼' : '▶';
+                const expandTitle = isExpanded ? 'Click to collapse' : 'Click to expand';
                 return `
                 <div class="bg-white border border-gray-200 rounded-xl shadow-sm mb-4 overflow-hidden">
-                    <!-- Project header -->
-                    <div class="p-4">
+                    <!-- Project header (click to toggle) -->
+                    <div class="p-4 cursor-pointer hover:bg-gray-50 select-none" onclick="_toggleProjExpExpand('${p.projExpID}')" title="${expandTitle}">
                         <div class="flex justify-between items-start mb-2">
-                            <div>
-                                <p class="font-bold text-gray-800 text-lg">${p.projectName}</p>
-                                <p class="text-xs text-gray-500">${p.projectRef||''} · ${p.startDate||''} ${p.endDate?'→ '+p.endDate:''}</p>
-                                <p class="text-xs text-gray-400 mt-0.5">${p.description||''}</p>
+                            <div class="flex-1 min-w-0">
+                                <p class="font-bold text-gray-800 text-lg flex items-center gap-2">
+                                    <span class="text-gray-400 text-sm w-3 inline-block">${chevron}</span>
+                                    <span>${p.projectName}</span>
+                                </p>
+                                <p class="text-xs text-gray-500 ml-5">${p.projectRef||''} · ${p.startDate||''} ${p.endDate?'→ '+p.endDate:''}</p>
+                                ${isExpanded && p.description ? `<p class="text-xs text-gray-400 mt-0.5 ml-5">${p.description}</p>` : ''}
                             </div>
-                            <div class="flex gap-2 items-start">
-                                <button onclick="editProjExp('${p.projExpID}')" class="px-3 py-1.5 border text-gray-600 rounded-lg text-xs hover:bg-gray-50">Edit</button>
-                                ${settings.allowProjectDelete?`<button onclick="deleteProjExp('${p.projExpID}')" class="text-red-500 hover:text-red-700 text-xs px-2" title="Delete Project">🗑️</button>`:''}
+                            <div class="flex gap-2 items-start" onclick="event.stopPropagation()">
+                                <button onclick="event.stopPropagation(); editProjExp('${p.projExpID}')" class="px-3 py-1.5 border text-gray-600 rounded-lg text-xs hover:bg-gray-50">Edit</button>
+                                ${settings.allowProjectDelete?`<button onclick="event.stopPropagation(); deleteProjExp('${p.projExpID}')" class="text-red-500 hover:text-red-700 text-xs px-2" title="Delete Project">🗑️</button>`:''}
                             </div>
                         </div>
-                        <div class="flex justify-between items-center text-xs text-gray-500 mt-2 pt-2 border-t border-gray-100">
-                            <span>${(p.items||[]).length} expense ${((p.items||[]).length===1?'entry':'entries')}</span>
+                        <div class="flex justify-between items-center text-xs text-gray-500 mt-2 pt-2 border-t border-gray-100 ml-5">
+                            <span>${(p.items||[]).length} expense ${((p.items||[]).length===1?'entry':'entries')}${entryQ && displayItems.length < (p.items||[]).length ? ` <span class="text-yellow-600">· 🔍 ${displayItems.length} match${displayItems.length===1?'':'es'}</span>` : ''}</span>
                             <span>Total spent: <strong class="text-red-600">${fmt(spent)}</strong></span>
                         </div>
-                        ${poolEntries.length || unallocatedCount > 0 ? `
-                        <div class="mt-3 pt-3 border-t border-gray-100">
+                        ${isExpanded && (poolEntries.length || unallocatedCount > 0) ? `
+                        <div class="mt-3 pt-3 border-t border-gray-100 ml-5" onclick="event.stopPropagation()">
                             <p class="text-xs font-bold text-emerald-700 uppercase tracking-wide mb-2">💰 Pool Allocation Breakdown <span class="text-gray-400 font-normal normal-case">(click a pool to view full reconciliation)</span></p>
                             <div class="flex flex-wrap gap-2">
                                 ${poolEntries.map(([poolID, info]) => {
@@ -33720,7 +33758,7 @@ Automated WFH alert — ${company} Attendance System.`;
                                     // Tooltip combines pool status + full tech list (line-break in title is honoured by most browsers)
                                     const tipBase = isClosed ? 'Closed pool — click to view reconciliation' : 'Active pool — click to view';
                                     const tip = techLabel.tooltip ? tipBase + '\n' + techLabel.tooltip : tipBase;
-                                    return `<button onclick="viewPoolDetail('${poolID}')" class="text-xs px-2 py-1 rounded-lg border ${isClosed?'bg-gray-100 text-gray-600 border-gray-300 hover:bg-gray-200':'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'} cursor-pointer transition-colors" title="${_attrEscape(tip)}">
+                                    return `<button onclick="event.stopPropagation(); viewPoolDetail('${poolID}')" class="text-xs px-2 py-1 rounded-lg border ${isClosed?'bg-gray-100 text-gray-600 border-gray-300 hover:bg-gray-200':'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'} cursor-pointer transition-colors" title="${_attrEscape(tip)}">
                                         <span class="font-mono font-semibold">${poolID}</span>: ${fmt(info.amount)} <span class="text-gray-500">(${info.count})</span>${isClosed?' ✓':''}${techLabel.inline?` <span class="text-gray-500" style="font-weight:normal">· 👷 ${techLabel.inline}</span>`:''}
                                     </button>`;
                                 }).join('')}
@@ -33735,8 +33773,8 @@ Automated WFH alert — ${company} Attendance System.`;
                         </div>` : ''}
                     </div>
 
-                    <!-- Field expense entries -->
-                    ${(p.items||[]).length ? `
+                    <!-- Field expense entries (hidden when collapsed) -->
+                    ${isExpanded ? ((p.items||[]).length ? `
                     <div class="border-t">
                         <div class="px-4 py-2 bg-yellow-50 text-xs font-bold text-yellow-700 uppercase tracking-wide flex justify-between items-center">
                             <span>Field Expense Entries (${entryQ ? displayItems.length + ' of ' + (p.items||[]).length : (p.items||[]).length})</span>
@@ -33795,7 +33833,7 @@ Automated WFH alert — ${company} Attendance System.`;
                             }).join('')}</tbody>
                         </table>
                         ${_pgHtml('fe_' + p.projExpID, displayItems.length)}
-                    </div>` : '<p class="text-xs text-gray-400 px-4 py-2 border-t">No field expense entries yet.</p>'}
+                    </div>` : '<p class="text-xs text-gray-400 px-4 py-2 border-t">No field expense entries yet.</p>') : ''}
                 </div>`;
             }).join('');
         }
@@ -33881,6 +33919,8 @@ Automated WFH alert — ${company} Attendance System.`;
                                class="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400" />
                     </div>
                     <button id="projExpClearBtn" onclick="_clearProjExpFilters()" style="${filterActive?'':'display:none'}" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 whitespace-nowrap">✕ Clear</button>
+                    <button onclick="_projExpExpandAll()" class="px-3 py-2 bg-yellow-50 text-yellow-700 border border-yellow-200 rounded-lg text-sm font-medium hover:bg-yellow-100 whitespace-nowrap" title="Expand every project">▼ Expand all</button>
+                    <button onclick="_projExpCollapseAll()" class="px-3 py-2 bg-gray-50 text-gray-700 border border-gray-200 rounded-lg text-sm font-medium hover:bg-gray-100 whitespace-nowrap" title="Collapse every project">▶ Collapse all</button>
                 </div>
                 <div id="projExpFilterStats">${_buildProjExpStatsHTML()}</div>
             </div>
