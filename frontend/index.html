@@ -35027,7 +35027,6 @@ Automated WFH alert — ${company} Attendance System.`;
         let _wlExpanded      = new Set();   // wlIDs of currently-expanded cards
         let _wlSearchQ       = '';
         let _wlFilterStatus  = '';
-        let _wlFilterTech    = '';
         let _wlDateFrom      = '';
         let _wlDateTo        = '';
 
@@ -35090,6 +35089,84 @@ Automated WFH alert — ${company} Attendance System.`;
         function _wlEscape(s) {
             return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
         }
+        // Rich-text → plain text. The field app stores pasted HTML (Gmail-style
+        // <p>/<ol>/<li> with inline styles) in daily-entry description,
+        // observations, exclusions and recommendations. Used for the PDF and
+        // for search matching so a query like "engine" hits the visible text
+        // rather than markup like rgb(34,34,34).
+        function _wlStripHtml(html) {
+            if (!html) return '';
+            let s = String(html);
+            // Ordered lists → numbered
+            s = s.replace(/<ol[^>]*>([\s\S]*?)<\/ol>/gi, (m, inner) => {
+                let n = 0;
+                return inner.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (mm, c) => {
+                    n++; return n + '. ' + c.replace(/<[^>]+>/g,'').trim() + '\n';
+                });
+            });
+            // Unordered lists → bullets
+            s = s.replace(/<ul[^>]*>([\s\S]*?)<\/ul>/gi, (m, inner) =>
+                inner.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (mm, c) => '• ' + c.replace(/<[^>]+>/g,'').trim() + '\n')
+            );
+            return s
+                .replace(/<\/p>|<br\s*\/?>/gi, '\n')
+                .replace(/<[^>]+>/g, '')
+                .replace(/&nbsp;/g, ' ')
+                .replace(/&amp;/g, '&')
+                .replace(/&lt;/g, '<')
+                .replace(/&gt;/g, '>')
+                .replace(/&quot;/g, '"')
+                .replace(/&#39;/g, "'")
+                .replace(/\u00A0/g, ' ')
+                .replace(/[\u200B-\u200F\u2028\u2029\uFEFF]/g, '')
+                .replace(/[ \t]{2,}/g, ' ')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
+        }
+        // Render pasted rich-text safely-ish. Field app trusts tech-authored
+        // HTML (same trust model here since it's the same internal data);
+        // defense-in-depth: strip script tags, on*= handlers and javascript:
+        // URLs so a malicious paste can't run code.
+        function _wlSafeRichHtml(html) {
+            if (!html) return '';
+            return String(html)
+                .replace(/<script[\s\S]*?<\/script>/gi, '')
+                .replace(/<style[\s\S]*?<\/style>/gi, '')
+                .replace(/\son\w+\s*=\s*"[^"]*"/gi, '')
+                .replace(/\son\w+\s*=\s*'[^']*'/gi, '')
+                .replace(/\son\w+\s*=\s*[^\s>]+/gi, '')
+                .replace(/javascript:/gi, '');
+        }
+        // Collect the unique technician names for a work log, handling both
+        // shapes we see in the wild:
+        //   • new field-app format: w.technicians = [{name:'X'}, {name:'Y'}]
+        //   • legacy / one-off:     w.staffName   = 'X, Y, Z'  (comma-joined)
+        // Splits staffName so we don't get "X, Y, Z, X, Y, Z" when both
+        // fields carry the same team.
+        function _wlCollectTechs(w) {
+            const set = new Set();
+            (w?.technicians || []).forEach(t => {
+                const n = (t?.name || '').trim();
+                if (n) set.add(n);
+            });
+            if (w?.staffName) {
+                String(w.staffName).split(',').forEach(part => {
+                    const n = part.trim();
+                    if (n) set.add(n);
+                });
+            }
+            return [...set];
+        }
+        // Per-day technician list, with the log-level list as fallback.
+        function _wlCollectDayTechs(d, w) {
+            const set = new Set();
+            (d?.technicians || []).forEach(t => {
+                const n = (t?.name || '').trim();
+                if (n) set.add(n);
+            });
+            if (set.size) return [...set];
+            return _wlCollectTechs(w);
+        }
         function _wlCalcDur(start, end) {
             if (!start || !end) return '';
             const [sh, sm] = start.split(':').map(Number);
@@ -35102,17 +35179,6 @@ Automated WFH alert — ${company} Attendance System.`;
         }
         function _wlFmtDate(iso) {
             return iso ? iso.split('-').reverse().join('.') : '';
-        }
-        function _wlAllTechnicians() {
-            const names = new Set();
-            (workLogs || []).forEach(w => {
-                (w.technicians || []).forEach(t => { if (t?.name) names.add(t.name); });
-                (w.dailyEntries || []).forEach(e =>
-                    (e.technicians || []).forEach(t => { if (t?.name) names.add(t.name); })
-                );
-                if (w.staffName) names.add(w.staffName);   // legacy single-day logs
-            });
-            return [...names].sort();
         }
         function _wlAllStatuses() {
             const set = new Set(['In Progress','Completed','On Hold','Pending']);
@@ -35149,24 +35215,22 @@ Automated WFH alert — ${company} Attendance System.`;
             if (clearBtn) clearBtn.style.display = _wlAnyFilterActive() ? '' : 'none';
         }
         function _wlSetStatus(v) { _wlFilterStatus = v; _wlRefreshList(); _wlUpdateClearBtn(); }
-        function _wlSetTech(v)   { _wlFilterTech   = v; _wlRefreshList(); _wlUpdateClearBtn(); }
         function _wlSetDateFrom(v){ _wlDateFrom    = v; _wlRefreshList(); _wlUpdateClearBtn(); }
         function _wlSetDateTo(v)  { _wlDateTo      = v; _wlRefreshList(); _wlUpdateClearBtn(); }
         function _wlAnyFilterActive() {
-            return !!(_wlSearchQ || _wlFilterStatus || _wlFilterTech || _wlDateFrom || _wlDateTo);
+            return !!(_wlSearchQ || _wlFilterStatus || _wlDateFrom || _wlDateTo);
         }
         function _wlUpdateClearBtn() {
             const b = document.getElementById('wlClearBtn');
             if (b) b.style.display = _wlAnyFilterActive() ? '' : 'none';
         }
         function _wlClearFilters() {
-            _wlSearchQ = ''; _wlFilterStatus = ''; _wlFilterTech = '';
+            _wlSearchQ = ''; _wlFilterStatus = '';
             _wlDateFrom = ''; _wlDateTo = '';
             // Update inputs in place instead of re-rendering the whole tab so
             // scroll position is preserved.
             const search = document.getElementById('wlSearchInput');   if (search) search.value = '';
             const st     = document.getElementById('wlFilterStatus');  if (st) st.value = '';
-            const tech   = document.getElementById('wlFilterTech');    if (tech) tech.value = '';
             const df     = document.getElementById('wlDateFrom');      if (df) df.value = '';
             const dt     = document.getElementById('wlDateTo');        if (dt) dt.value = '';
             _wlRefreshList();
@@ -35185,16 +35249,19 @@ Automated WFH alert — ${company} Attendance System.`;
 
             // Search — matches project, ref, location, description, technicians,
             // and every daily entry's description / category / observations.
+            // Rich-text fields are stripped of HTML so a query hits visible
+            // text rather than markup (rgb(...), font-family: ...).
             if (_wlSearchQ) {
                 list = list.filter(w => {
                     const parts = [
                         w.project, w.ref, w.location, w.vessel, w.client, w.status,
-                        w.description, w.observations, w.recommendations,
-                        w.staffName,
-                        ...(w.technicians || []).map(t => t.name),
+                        _wlStripHtml(w.description), _wlStripHtml(w.observations), _wlStripHtml(w.recommendations),
+                        ..._wlCollectTechs(w),
                         ...(w.dailyEntries || []).flatMap(e => [
-                            e.description, e.category, e.observations, e.exclusions,
-                            e.recommendations, e.witnessName, e.witnessRemarks, e.date,
+                            _wlStripHtml(e.description), e.category,
+                            _wlStripHtml(e.observations), _wlStripHtml(e.exclusions),
+                            _wlStripHtml(e.recommendations),
+                            e.witnessName, e.witnessRemarks, e.date,
                             ...(e.technicians || []).map(t => t.name)
                         ])
                     ].filter(Boolean).join(' ');
@@ -35202,17 +35269,6 @@ Automated WFH alert — ${company} Attendance System.`;
                 });
             }
             if (_wlFilterStatus) list = list.filter(w => (w.status || '') === _wlFilterStatus);
-            if (_wlFilterTech) {
-                list = list.filter(w => {
-                    const techs = new Set();
-                    (w.technicians || []).forEach(t => { if (t?.name) techs.add(t.name); });
-                    (w.dailyEntries || []).forEach(e =>
-                        (e.technicians || []).forEach(t => { if (t?.name) techs.add(t.name); })
-                    );
-                    if (w.staffName) techs.add(w.staffName);
-                    return techs.has(_wlFilterTech);
-                });
-            }
             if (_wlDateFrom || _wlDateTo) {
                 list = list.filter(w => {
                     // Include a log if ANY of its daily entries fall in the range,
@@ -35240,9 +35296,25 @@ Automated WFH alert — ${company} Attendance System.`;
 
         // ── MAIN RENDER ────────────────────────────────────────────────
         function renderWorkLogs(content) {
-            const techOpts = _wlAllTechnicians();
             const statusOpts = _wlAllStatuses();
             content.innerHTML = `
+            <!-- Scoped styles for pasted rich-text content in daily entries.
+                 Tailwind's preflight zeroes out ul/ol/li margins and bullets,
+                 so pasted numbered/bulleted lists need these rules to be
+                 readable — same look as they have in the field app. -->
+            <style>
+                .wl-rich { color: #1f2937; }
+                .wl-rich ul { list-style: disc; padding-left: 22px; margin: 4px 0; }
+                .wl-rich ol { list-style: decimal; padding-left: 22px; margin: 4px 0; }
+                .wl-rich li { margin: 2px 0; }
+                .wl-rich p  { margin: 4px 0; }
+                .wl-rich strong { font-weight: 700; }
+                .wl-rich em { font-style: italic; }
+                .wl-rich a { color: #2563eb; text-decoration: underline; }
+                /* Neutralize inline fonts/colors from pasted Gmail HTML so
+                   everything blends with the app's own type system. */
+                .wl-rich * { font-family: inherit !important; color: inherit !important; }
+            </style>
             <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
                 <div>
                     <h2 class="text-3xl font-bold text-gray-800">📋 Project Work Logs</h2>
@@ -35269,13 +35341,6 @@ Automated WFH alert — ${company} Attendance System.`;
                         <select id="wlFilterStatus" onchange="_wlSetStatus(this.value)" class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
                             <option value="">All statuses</option>
                             ${statusOpts.map(s => `<option value="${_wlEscape(s)}" ${_wlFilterStatus===s?'selected':''}>${_wlEscape(s)}</option>`).join('')}
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-xs font-semibold text-gray-600 mb-1">Technician</label>
-                        <select id="wlFilterTech" onchange="_wlSetTech(this.value)" class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
-                            <option value="">All technicians</option>
-                            ${techOpts.map(t => `<option value="${_wlEscape(t)}" ${_wlFilterTech===t?'selected':''}>${_wlEscape(t)}</option>`).join('')}
                         </select>
                     </div>
                     <div>
@@ -35341,12 +35406,9 @@ Automated WFH alert — ${company} Attendance System.`;
             const isExp = _wlExpanded.has(w.wlID);
             const chevron = isExp ? '▼' : '▶';
 
-            // Technicians shown at project level — union of top-level w.technicians
-            // and staffName (legacy). Per-day tech list is shown on each entry.
-            const topLevelTechs = new Set();
-            (w.technicians || []).forEach(t => { if (t?.name) topLevelTechs.add(t.name); });
-            if (w.staffName) topLevelTechs.add(w.staffName);
-            const techNames = [...topLevelTechs].join(', ') || '—';
+            // Technicians shown at project level — dedupe against w.staffName
+            // which may itself be a comma-joined list of the same names.
+            const techNames = _wlCollectTechs(w).join(', ') || '—';
 
             const days = (w.dailyEntries || []).length;
             const dateRange = (w.workStartDate && w.workEndDate)
@@ -35403,14 +35465,28 @@ Automated WFH alert — ${company} Attendance System.`;
             //   2. Legacy (single-day CRUD): w.description / w.photos on the log itself
             const hasDaily = (w.dailyEntries || []).length > 0;
             if (!hasDaily) {
-                // Legacy single-day view — mirror the old fields directly
-                if (w.description || (w.photos||[]).length) {
+                // Legacy single-day view — mirror the old fields directly.
+                // Text fields may contain pasted rich HTML, so render via
+                // _wlSafeRichHtml (same treatment as new-format daily entries).
+                if (w.description || w.observations || w.recommendations || (w.photos||[]).length) {
                     return `
                     <div class="p-4 bg-gray-50">
                         <p class="text-xs text-gray-500 mb-2">Legacy single-day log</p>
-                        ${w.description ? `<p class="text-sm text-gray-800 mb-2">${_wlEscape(w.description)}</p>` : ''}
-                        ${w.observations   ? `<p class="text-xs text-gray-600 mb-1"><strong>Findings:</strong> ${_wlEscape(w.observations)}</p>` : ''}
-                        ${w.recommendations? `<p class="text-xs text-gray-600 mb-1"><strong>Recommendations:</strong> ${_wlEscape(w.recommendations)}</p>` : ''}
+                        ${w.description ? `
+                            <div class="mb-2 pl-3 border-l-4 border-amber-400 bg-amber-50 rounded-r-lg p-2">
+                                <p class="text-xs font-bold text-amber-800 mb-1 uppercase">Details of Work Carried Out</p>
+                                <div class="text-sm text-gray-800 leading-relaxed wl-rich">${_wlSafeRichHtml(w.description)}</div>
+                            </div>` : ''}
+                        ${w.observations ? `
+                            <div class="mb-2 pl-3 border-l-4 border-blue-400 bg-blue-50 rounded-r-lg p-2">
+                                <p class="text-xs font-bold text-blue-800 mb-1 uppercase">Observations / Findings</p>
+                                <div class="text-sm text-gray-800 leading-relaxed wl-rich">${_wlSafeRichHtml(w.observations)}</div>
+                            </div>` : ''}
+                        ${w.recommendations ? `
+                            <div class="mb-2 pl-3 border-l-4 border-green-400 bg-green-50 rounded-r-lg p-2">
+                                <p class="text-xs font-bold text-green-800 mb-1 uppercase">Recommendations</p>
+                                <div class="text-sm text-gray-800 leading-relaxed wl-rich">${_wlSafeRichHtml(w.recommendations)}</div>
+                            </div>` : ''}
                         ${_wlRenderPhotos(w.photos || [])}
                     </div>`;
                 }
@@ -35428,9 +35504,7 @@ Automated WFH alert — ${company} Attendance System.`;
             return sortedDesc.map((d, idx) => {
                 const dayNum = dayNumByID[d.entryID] || (totalDays - idx);
                 const dur = _wlCalcDur(d.startTime, d.endTime);
-                const dayTechs = (d.technicians || []).map(t => t.name).filter(Boolean).join(', ')
-                              || (w.technicians || []).map(t => t.name).filter(Boolean).join(', ')
-                              || w.staffName || '—';
+                const dayTechs = _wlCollectDayTechs(d, w).join(', ') || '—';
                 return `
                 <div class="p-4 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} border-b border-gray-100">
                     <div class="flex justify-between items-start mb-2 flex-wrap gap-2">
@@ -35441,11 +35515,28 @@ Automated WFH alert — ${company} Attendance System.`;
                         </div>
                         <div class="text-xs text-gray-500">👷 ${_wlEscape(dayTechs)}</div>
                     </div>
-                    ${d.description ? `<p class="text-sm text-gray-800 mb-1">${_wlEscape(d.description)}</p>` : ''}
-                    ${d.observations   ? `<p class="text-xs text-gray-600 mt-1"><strong>Findings:</strong> ${_wlEscape(d.observations)}</p>` : ''}
-                    ${d.exclusions     ? `<p class="text-xs text-gray-600 mt-1"><strong>Exclusions:</strong> ${_wlEscape(d.exclusions)}</p>` : ''}
-                    ${d.recommendations? `<p class="text-xs text-gray-600 mt-1"><strong>Recommendations:</strong> ${_wlEscape(d.recommendations)}</p>` : ''}
-                    ${d.witnessName    ? `<p class="text-xs text-gray-500 mt-1"><strong>Witness:</strong> ${_wlEscape(d.witnessName)}${d.witnessDesig ? ' (' + _wlEscape(d.witnessDesig) + ')' : ''}${d.witnessRemarks ? ' — ' + _wlEscape(d.witnessRemarks) : ''}</p>` : ''}
+
+                    ${d.description ? `
+                        <div class="mb-2 pl-3 border-l-4 border-amber-400 bg-amber-50 rounded-r-lg p-2">
+                            <p class="text-xs font-bold text-amber-800 mb-1 uppercase">Details of Work Carried Out</p>
+                            <div class="text-sm text-gray-800 leading-relaxed wl-rich">${_wlSafeRichHtml(d.description)}</div>
+                        </div>` : ''}
+                    ${d.observations ? `
+                        <div class="mb-2 pl-3 border-l-4 border-blue-400 bg-blue-50 rounded-r-lg p-2">
+                            <p class="text-xs font-bold text-blue-800 mb-1 uppercase">Observations / Findings</p>
+                            <div class="text-sm text-gray-800 leading-relaxed wl-rich">${_wlSafeRichHtml(d.observations)}</div>
+                        </div>` : ''}
+                    ${d.exclusions ? `
+                        <div class="mb-2 pl-3 border-l-4 border-orange-400 bg-orange-50 rounded-r-lg p-2">
+                            <p class="text-xs font-bold text-orange-800 mb-1 uppercase">Exclusions / Remarks</p>
+                            <div class="text-sm text-gray-800 leading-relaxed wl-rich">${_wlSafeRichHtml(d.exclusions)}</div>
+                        </div>` : ''}
+                    ${d.recommendations ? `
+                        <div class="mb-2 pl-3 border-l-4 border-green-400 bg-green-50 rounded-r-lg p-2">
+                            <p class="text-xs font-bold text-green-800 mb-1 uppercase">Recommendations</p>
+                            <div class="text-sm text-gray-800 leading-relaxed wl-rich">${_wlSafeRichHtml(d.recommendations)}</div>
+                        </div>` : ''}
+                    ${d.witnessName    ? `<p class="text-xs text-gray-500 mt-2"><strong>Witness:</strong> ${_wlEscape(d.witnessName)}${d.witnessDesig ? ' (' + _wlEscape(d.witnessDesig) + ')' : ''}${d.witnessRemarks ? ' — ' + _wlEscape(d.witnessRemarks) : ''}</p>` : ''}
                     ${(d.calibrations || []).length ? `<p class="text-xs text-purple-700 mt-1"><strong>📐 Calibrations:</strong> ${d.calibrations.length}</p>` : ''}
                     ${_wlRenderPhotos(d.photos || [])}
                 </div>`;
@@ -36005,7 +36096,7 @@ Automated WFH alert — ${company} Attendance System.`;
                 body:[
                     ['Project', projName, 'Location / Vessel', vessel],
                     ['Ref', wl.ref || '—', 'Date Range', dateRange],
-                    ['Client', wl.client || '—', 'Technicians', (wl.technicians||[]).map(t=>t.name).filter(Boolean).join(', ') || wl.staffName || '—']
+                    ['Client', wl.client || '—', 'Technicians', _wlCollectTechs(wl).join(', ') || '—']
                 ]
             });
             y = doc.lastAutoTable.finalY + 4;
@@ -36014,9 +36105,7 @@ Automated WFH alert — ${company} Attendance System.`;
             for (let i = 0; i < days.length; i++) {
                 const d = days[i];
                 const dur = _wlCalcDur(d.startTime, d.endTime);
-                const dayTechs = (d.technicians||[]).map(t=>t.name).filter(Boolean).join(', ')
-                              || (wl.technicians||[]).map(t=>t.name).filter(Boolean).join(', ')
-                              || wl.staffName || '—';
+                const dayTechs = _wlCollectDayTechs(d, wl).join(', ') || '—';
                 const headerLine = `Day ${i+1}  ·  ${fmt(d.date)}${d.startTime ? '  ·  ' + d.startTime + '–' + (d.endTime||'?') + (dur ? ' (' + dur + ')' : '') : ''}${d.category ? '  ·  ' + d.category : ''}`;
 
                 // Force page break if near bottom
@@ -36031,12 +36120,15 @@ Automated WFH alert — ${company} Attendance System.`;
                 doc.setTextColor(0,0,0); doc.setFont('helvetica','normal'); doc.setFontSize(9);
                 doc.text('Technicians: ' + dayTechs, ML, y + 1); y += 5;
 
+                // Text fields are stored as pasted HTML — strip to plain text
+                // (with list markers preserved) before feeding to jsPDF, else
+                // the printed page shows <p style=...> and rgb(34,34,34) noise.
                 const paragraphs = [
-                    d.description   ? {label:'Description',      text:d.description}   : null,
-                    d.observations   ? {label:'Findings',        text:d.observations}   : null,
-                    d.exclusions     ? {label:'Exclusions',      text:d.exclusions}     : null,
-                    d.recommendations? {label:'Recommendations', text:d.recommendations}: null
-                ].filter(Boolean);
+                    d.description    ? {label:'Description',      text:_wlStripHtml(d.description)}    : null,
+                    d.observations   ? {label:'Findings',         text:_wlStripHtml(d.observations)}   : null,
+                    d.exclusions     ? {label:'Exclusions',       text:_wlStripHtml(d.exclusions)}     : null,
+                    d.recommendations? {label:'Recommendations',  text:_wlStripHtml(d.recommendations)}: null
+                ].filter(p => p && p.text);
 
                 paragraphs.forEach(p => {
                     doc.setFont('helvetica','bold'); doc.text(p.label + ':', ML, y);
