@@ -1481,6 +1481,17 @@
                               class="w-full px-4 py-2 border border-gray-300 rounded-lg resize-y min-h-[80px]" rows="3"></textarea>
                     <p class="text-xs text-gray-400 mt-1">These will appear at the end of the credit note PDF</p>
                 </div>
+
+                <!-- Reference Invoice for Credit Note — links this CN to a specific Invoice
+                     transaction. When linked, the CN amount can optionally reduce the
+                     referenced invoice's Balance and Bank credit (toggle on AR row). -->
+                <div id="cnRefInvoiceField" class="mb-4 hidden">
+                    <label class="block text-sm font-semibold text-gray-700 mb-2">Reference Invoice <span class="text-xs text-gray-400 font-normal">(optional — links this credit note to a specific invoice)</span></label>
+                    <select id="txnRefInvoiceTxnID" class="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm bg-white">
+                        <option value="">— Not linked to any invoice —</option>
+                    </select>
+                    <p class="text-xs text-gray-400 mt-1">List filters by the selected Party. Change the Party above to see their invoices.</p>
+                </div>
                 
                 <div class="mb-4">
                     <div class="flex justify-between items-center mb-3">
@@ -19816,6 +19827,13 @@
                 el.parentNode.replaceChild(clone, el);
             });
             document.getElementById('txnCategory').addEventListener('change', () => { toggleSupportingDocs(); updateReferenceField(); updateTxnBankSection(); toggleTxnPaymentsSection(); updateGstSummary(); });
+            // When Party changes, refresh the Credit Note reference-invoice
+            // dropdown so it lists only that party's invoices.
+            document.getElementById('txnPartyName')?.addEventListener('change', () => {
+                if (document.getElementById('txnCategory')?.value === 'CREDIT_NOTE') {
+                    updateReferenceField();
+                }
+            });
             document.getElementById('txnDirection').addEventListener('change', () => { updatePartyDropdown(); updateReferenceField(); updateTxnBankSection(); });
             document.getElementById('txnStatus').addEventListener('change', toggleSupportingDocs);
             // When the party changes, the GST mode (CGST/SGST vs IGST) may flip.
@@ -19928,6 +19946,16 @@
             // Load Remarks if exists (Credit Note)
             if (txn && txn.remarks) {
                 document.getElementById('txnRemarks').value = txn.remarks;
+            }
+            // Load Credit Note's linked invoice reference if present. The
+            // dropdown itself is populated by updateReferenceField(), which
+            // runs when category changes on modal open. This just restores
+            // the saved selection so it survives the re-populate.
+            if (txn && txn.refInvoiceTxnID && txn.txnCategory === 'CREDIT_NOTE') {
+                setTimeout(() => {
+                    const sel = document.getElementById('txnRefInvoiceTxnID');
+                    if (sel) sel.value = txn.refInvoiceTxnID;
+                }, 100);
             }
             
             // Load Client PIC and Email if exists (Quotation)
@@ -20870,6 +20898,11 @@
                     terms: document.getElementById('txnTerms')?.value || '',
                     enquiryRecipients: (document.getElementById('txnCategory')?.value === 'ENQUIRY') ? _collectEnqRecipients() : undefined,
                     remarks: document.getElementById('txnRemarks')?.value || '',
+                    // For Credit Note only — link to the referenced Invoice. Empty
+                    // when this CN isn't tied to a specific invoice.
+                    refInvoiceTxnID: document.getElementById('txnCategory')?.value === 'CREDIT_NOTE'
+                        ? (document.getElementById('txnRefInvoiceTxnID')?.value || '')
+                        : '',
                     clientPIC: document.getElementById('txnClientPIC')?.value || '',
                     clientEmail: document.getElementById('txnClientEmail')?.value || '',
                     signatoryName: document.getElementById('txnSignatoryName')?.value || '',
@@ -21485,6 +21518,37 @@
                 remarksField?.classList.remove('hidden');
             } else {
                 remarksField?.classList.add('hidden');
+            }
+
+            // Reference Invoice: Credit Note only. Populate the dropdown with
+            // the selected Party's outgoing Invoice transactions so the user
+            // can link the CN to a specific invoice. Preserves any existing
+            // selection (important when editing a saved Credit Note).
+            const cnRefField = document.getElementById('cnRefInvoiceField');
+            const cnRefSel   = document.getElementById('txnRefInvoiceTxnID');
+            if (cat === 'CREDIT_NOTE') {
+                cnRefField?.classList.remove('hidden');
+                if (cnRefSel) {
+                    const currentValue = cnRefSel.value;   // preserve if already set
+                    const party = document.getElementById('txnPartyName')?.value || '';
+                    const eligibleInvoices = (transactions || []).filter(t =>
+                        t.txnCategory === 'INVOICE' &&
+                        t.txnDirection === 'Outgoing' &&
+                        !['Draft', 'Cancelled'].includes(t.status) &&
+                        (!party || t.partyName === party)
+                    ).sort((a, b) => (b.txnDate || '').localeCompare(a.txnDate || ''));
+                    cnRefSel.innerHTML = `<option value="">— Not linked to any invoice —</option>` +
+                        eligibleInvoices.map(t => {
+                            const tot = calculateTotals(t.items || []).total || 0;
+                            return `<option value="${t.txnID}">${t.txnID} · ${t.txnDate || '—'} · ₹${tot.toLocaleString('en-IN', {minimumFractionDigits: 2})}</option>`;
+                        }).join('');
+                    // Restore prior selection if still valid
+                    if (currentValue && cnRefSel.querySelector(`option[value="${currentValue}"]`)) {
+                        cnRefSel.value = currentValue;
+                    }
+                }
+            } else {
+                cnRefField?.classList.add('hidden');
             }
 
             // Delivery Note: swap Status dropdown to DN-specific options,
@@ -27405,6 +27469,20 @@ Automated WFH alert — ${company} Attendance System.`;
             const ageBucket = d => { const a=ageDays(d); return a<=30?'0-30':a<=60?'31-60':a<=90?'61-90':'90+'; };
             const bucketColor = b => ({'0-30':'#15803d','31-60':'#b45309','61-90':'#dc2626','90+':'#7f1d1d'})[b]||'#374151';
 
+            // Build a lookup of Credit Notes indexed by the invoice txnID they reference.
+            // A single invoice can have multiple linked CNs — we sum them.
+            const _cnByInvoice = {};
+            (transactions || []).forEach(t => {
+                if (t.txnCategory === 'CREDIT_NOTE' &&
+                    t.refInvoiceTxnID &&
+                    !['Draft', 'Cancelled'].includes(t.status)) {
+                    const cnTot = (calculateTotals(t.items || []).total) || 0;
+                    if (!_cnByInvoice[t.refInvoiceTxnID]) _cnByInvoice[t.refInvoiceTxnID] = { total: 0, notes: [] };
+                    _cnByInvoice[t.refInvoiceTxnID].total += cnTot;
+                    _cnByInvoice[t.refInvoiceTxnID].notes.push({ txnID: t.txnID, date: t.txnDate || '', amount: cnTot });
+                }
+            });
+
             const appInvoices = (transactions||[])
                 .filter(t=>t.txnCategory==='INVOICE'&&t.txnDirection==='Outgoing'&&!['Draft','Cancelled'].includes(t.status))
                 .map(t=>{
@@ -27415,8 +27493,13 @@ Automated WFH alert — ${company} Attendance System.`;
                     // Due exactly like a payment does, or a fully-settled TDS
                     // invoice looks perpetually outstanding here.
                     const tdsDeducted=(t.paymentsReceived||[]).reduce((s,p)=>s+(parseFloat(p.tdsAmount)||0)+(parseFloat(p.itTdsAmount)||0)+(parseFloat(p.gstTdsAmount)||0),0);
-                    const balance=Math.max(0,(tot.total||0)-received-tdsDeducted);
-                    return {arID:'TXN-'+t.txnID,source:'app',txnID:t.txnID,client:t.partyName||'—',invoiceNo:t.txnID,invoiceDate:t.txnDate||'',dueDate:t.dueDate||'',invoiceAmt:tot.total||0,received,balance,description:(t.subject||'').trim()||(t.items||[]).map(i=>i.description||'').filter(Boolean).join('; '),followUps:t.arFollowUps||[]};
+                    // Credit notes linked to this invoice — only applied to Balance
+                    // when the invoice's applyCreditNote flag is on. Displayed on
+                    // the AR row regardless so the toggle is discoverable.
+                    const cnInfo = _cnByInvoice[t.txnID] || { total: 0, notes: [] };
+                    const cnApplied = !!t.applyCreditNote && cnInfo.total > 0;
+                    const balance = Math.max(0, (tot.total||0) - received - tdsDeducted - (cnApplied ? cnInfo.total : 0));
+                    return {arID:'TXN-'+t.txnID,source:'app',txnID:t.txnID,client:t.partyName||'—',invoiceNo:t.txnID,invoiceDate:t.txnDate||'',dueDate:t.dueDate||'',invoiceAmt:tot.total||0,received,balance,description:(t.subject||'').trim()||(t.items||[]).map(i=>i.description||'').filter(Boolean).join('; '),followUps:t.arFollowUps||[],creditNotesTotal:cnInfo.total,creditNotesList:cnInfo.notes,applyCreditNote:cnApplied};
                 }).filter(t=>t.balance>=1);
 
             const allAR=[...(arInvoices||[]).filter(a=>a.balance>=1),...appInvoices].sort((a,b)=>(a.dueDate||a.invoiceDate||'').localeCompare(b.dueDate||b.invoiceDate||''));
@@ -27515,9 +27598,13 @@ Automated WFH alert — ${company} Attendance System.`;
                                     ${lastF?`<div class="text-[10px] text-gray-500">${(lastF.date||'').substring(0,10)}</div><div class="text-[10px] font-semibold text-blue-600">${lastF.mode||''}</div>${nextF?`<div class="text-[9px] text-orange-500">Next: ${(nextF.nextDate||'').substring(0,10)}</div>`:''}`:'<span class="text-[10px] text-red-400">None</span>'}
                                 </td>
                                 <td class="px-4 py-2.5 text-center">
-                                    <div class="flex gap-1 justify-center flex-wrap">
+                                    <div class="flex gap-1 justify-center flex-wrap items-center">
                                         <button onclick="openARFollowUpModal('${a.arID}','${a.source}')" class="px-2 py-1 bg-blue-100 text-blue-700 rounded text-[10px] font-semibold hover:bg-blue-200">+ Follow-up</button>
                                         ${a.source==='historical'?`<button onclick="openARInvoiceModal('${a.arID}')" class="px-2 py-1 bg-gray-100 text-gray-600 rounded text-[10px] hover:bg-gray-200">Edit</button><button onclick="deleteARInvoice('${a.arID}')" class="px-2 py-1 bg-red-100 text-red-600 rounded text-[10px] font-semibold hover:bg-red-200" title="Delete this historical invoice">🗑</button>`:''}
+                                        ${a.source==='app' && (a.creditNotesTotal||0) > 0 ? `<label class="flex items-center gap-1 px-2 py-1 bg-purple-50 border border-purple-200 rounded text-[10px] font-semibold text-purple-700 cursor-pointer hover:bg-purple-100" title="${(a.creditNotesList||[]).map(cn=>cn.txnID+' · ₹'+cn.amount.toFixed(2)).join(', ')}">
+                                            <input type="checkbox" ${a.applyCreditNote?'checked':''} onchange="toggleApplyCreditNote('${a.txnID}')" style="margin:0"/>
+                                            🔗 CN ₹${(a.creditNotesTotal||0).toLocaleString('en-IN',{minimumFractionDigits:2})}
+                                        </label>` : ''}
                                     </div>
                                 </td>
                             </tr>`;
@@ -27991,6 +28078,22 @@ Automated WFH alert — ${company} Attendance System.`;
                 renderView();
                 _showToast('✓ Invoice saved to AR tracker','#4f46e5',3500);
             } catch(err){alert('Save failed: '+err.message);}
+        }
+
+        // Toggles the applyCreditNote flag on a TXN-source Invoice. When on,
+        // the AR dashboard reduces Balance by the linked CN total, and the
+        // bank ledger reduces the invoice's Credit line accordingly.
+        async function toggleApplyCreditNote(txnID) {
+            const t = (transactions||[]).find(x => x.txnID === txnID);
+            if (!t) return;
+            t.applyCreditNote = !t.applyCreditNote;
+            try {
+                await saveData('transactions', transactions);
+                renderView();
+            } catch(err) {
+                t.applyCreditNote = !t.applyCreditNote;   // revert on failure
+                alert('Save failed: ' + err.message);
+            }
         }
 
         async function deleteARInvoice(arID) {
@@ -36312,11 +36415,20 @@ Automated WFH alert — ${company} Attendance System.`;
                     const tax = items.reduce((s,it) => s + (+it.cgstAmt||0) + (+it.sgstAmt||0) + (+it.igstAmt||0), 0);
                     const gross = sub + tax;
                     const tdsFromClient = +t.tdsFromClient || 0;
-                    const netReceived = Math.max(0, gross - tdsFromClient);
+                    // Also subtract linked Credit Notes when applyCreditNote is on,
+                    // so the legacy bank credit reflects the actual net cash landed.
+                    const cnDeducted = t.applyCreditNote
+                        ? (transactions||[]).filter(cn =>
+                            cn.txnCategory === 'CREDIT_NOTE' &&
+                            cn.refInvoiceTxnID === t.txnID &&
+                            !['Draft','Cancelled'].includes(cn.status)
+                          ).reduce((s, cn) => s + (calculateTotals(cn.items || []).total || 0), 0)
+                        : 0;
+                    const netReceived = Math.max(0, gross - tdsFromClient - cnDeducted);
                     if (netReceived > 0) {
                         rows.push({
                             date: t.txnDate || '',
-                            desc: `${t.txnID||'INV'} — ${t.partyName||t.clientName||''} (payment received · legacy — no date on record)`,
+                            desc: `${t.txnID||'INV'} — ${t.partyName||t.clientName||''} (payment received · legacy — no date on record${cnDeducted>0?' · net of CN ₹'+cnDeducted.toFixed(2):''})`,
                             credit: netReceived, debit: 0, src: 'Transactions'
                         });
                     }
