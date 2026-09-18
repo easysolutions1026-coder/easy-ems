@@ -8290,6 +8290,7 @@
                             ${_canAccess('parties')?`<button onclick="switchView('parties')" class="px-3 py-2 rounded-lg whitespace-nowrap ${currentView === 'parties' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}">Parties</button>`:''}
                             ${_canAccess('docs')?`<button onclick="switchView('docs')" class="px-3 py-2 rounded-lg whitespace-nowrap ${currentView === 'docs' ? 'bg-purple-100 text-purple-700' : 'text-gray-600 hover:bg-gray-100'}" title="Company documents, certificates, insurance policies">📄 Documents${(()=>{const c=_countDocsExpiringOrExpired();return c>0?` <span class="ml-1 px-1.5 py-0.5 bg-red-500 text-white rounded-full text-xs font-bold" title="${c} document(s) need attention">${c}</span>`:'';})()}</button>`:''}
                             ${_canAccess('docs')?`<button onclick="switchView('letters')" class="px-3 py-2 rounded-lg whitespace-nowrap ${currentView === 'letters' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}" title="Cover letters for invoices, Returnable Tools letters for site trips">✉️ Letters</button>`:''}
+                            ${_canAccess('worklogs')?`<button onclick="switchView('worklogs')" class="px-3 py-2 rounded-lg whitespace-nowrap ${currentView === 'worklogs' ? 'bg-purple-100 text-purple-700' : 'text-gray-600 hover:bg-gray-100'}" title="Read-only view of project work logs added by field technicians">📋 Project Work Logs</button>`:''}
                             ${_canAccess('settings')||!_bmsSession?`<button onclick="switchView('settings')" class="px-3 py-2 rounded-lg whitespace-nowrap ${currentView === 'settings' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}">Settings</button>`:''}
                         </div>
                     </div>
@@ -8322,6 +8323,7 @@
             docs:          'Documents',
             parties:       'Parties',
             mis:           'MIS',
+            worklogs:      'Project Work Logs',
             settings:      'Settings'
         };
 
@@ -8455,11 +8457,11 @@
             // own entries — neither of which fits the maker-checker rule.
             // Existing installs with custom rolePermissions saved to
             // settings won't auto-update; re-set from Settings if needed.
-            'Accounts': ['dashboard','transactions','ar','expenses','projexp','payreq','direxp','pettycash','bank','tax','tax.verify','mis','parties','docs','auditlog','settings'],
+            'Accounts': ['dashboard','transactions','ar','expenses','projexp','payreq','direxp','pettycash','bank','tax','tax.verify','mis','parties','docs','worklogs','auditlog','settings'],
             'HR':       ['dashboard','staff','staff.list','staff.attendance','staff.documents','staff.payslip','mis','docs','auditlog'],
             'Field':    ['dashboard','docs','auditlog'],
-            'View Only':['dashboard','transactions','ar','expenses','projexp','funds','payreq','direxp','pettycash','bank','tax','tax.certify','mis','staff','staff.list','staff.attendance','staff.documents','staff.payslip','parties','docs','auditlog'],
-            'CA':       ['dashboard','transactions','ar','expenses','projexp','payreq','direxp','pettycash','bank','tax','tax.certify','mis','parties','docs','auditlog']
+            'View Only':['dashboard','transactions','ar','expenses','projexp','funds','payreq','direxp','pettycash','bank','tax','tax.certify','mis','staff','staff.list','staff.attendance','staff.documents','staff.payslip','parties','docs','worklogs','auditlog'],
+            'CA':       ['dashboard','transactions','ar','expenses','projexp','payreq','direxp','pettycash','bank','tax','tax.certify','mis','parties','docs','worklogs','auditlog']
         };
 
         // Build ROLE_ACCESS dynamically from saved settings (or defaults)
@@ -35006,320 +35008,1091 @@ Automated WFH alert — ${company} Attendance System.`;
         }
 
         // ════════════════════════════════════════════════════════════════════
-        //  MODULE 3 — WORK LOGS (Technician Work, Photos, Project Reports)
+        //  MODULE 3 — PROJECT WORK LOGS (READ-ONLY MIRROR of the Field App)
+        // ────────────────────────────────────────────────────────────────
+        //  This tab is a read-only view of the workLogs collection that
+        //  field technicians populate via field_app.html. Everything —
+        //  work logs, daily entries, customer feedback, kick-off records
+        //  and growth-of-work reports — is created and edited exclusively
+        //  on the field app; this main-app view only lets an admin browse,
+        //  search, and export PDFs.
+        //
+        //  Legacy single-day CRUD (previously here) has been retired. The
+        //  workLogs collection is the same Cloud SQL table the field app
+        //  writes to, so no schema change is needed.
         // ════════════════════════════════════════════════════════════════════
 
-        let currentWorkLog = null;
+        // Filter + expand state — module-level so it persists across re-renders
+        // triggered by unrelated tabs (auto-sync, sheets pull, etc.)
+        let _wlExpanded      = new Set();   // wlIDs of currently-expanded cards
+        let _wlSearchQ       = '';
+        let _wlFilterStatus  = '';
+        let _wlFilterTech    = '';
+        let _wlDateFrom      = '';
+        let _wlDateTo        = '';
 
+        const _wlStatusSty = {
+            'Completed':   { bg:'#dcfce7', col:'#15803d', dot:'#16a34a' },
+            'In Progress': { bg:'#fef3c7', col:'#b45309', dot:'#d97706' },
+            'Pending':     { bg:'#f1f5f9', col:'#475569', dot:'#94a3b8' },
+            'On Hold':     { bg:'#fee2e2', col:'#dc2626', dot:'#ef4444' }
+        };
+
+        // Constants that mirror the field app's ITSPL form schemas so the
+        // viewer modals and PDFs can render exactly what techs captured.
+        const _WL_KO_DOCUMENTS = [
+            { key: 'passport',          label: 'Passport' },
+            { key: 'aadhaar',           label: 'Aadhaar' },
+            { key: 'safetyTraining',    label: 'Safety Training' },
+            { key: 'medicalCert',       label: 'Medical Certificate' },
+            { key: 'cdc',               label: 'CDC' },
+            { key: 'articleAgreement',  label: 'Article of Agreement' }
+        ];
+        const _WL_KO_LOCATIONS = [
+            { key: 'at-site',   label: 'At Site' },
+            { key: 'port',      label: 'Port' },
+            { key: 'anchorage', label: 'Anchorage' },
+            { key: 'sailing',   label: 'Sailing' },
+            { key: 'workshop',  label: 'Workshop' },
+            { key: 'drydock',   label: 'Drydock' }
+        ];
+        const _WL_KO_MANUALS = [
+            { key: 'manual',           label: 'Manual' },
+            { key: 'clearanceTable',   label: 'Clearance Table' },
+            { key: 'importantNotes',   label: 'Important Notes' },
+            { key: 'reportingForms',   label: 'Reporting Forms' },
+            { key: 'dailyReport',      label: 'Daily Report' },
+            { key: 'workInstruction',  label: 'Work Instruction (Read & Understood)' }
+        ];
+        const _WL_KO_PPE = [
+            { key: 'safetyShoe',  label: 'Safety Shoe' },
+            { key: 'helmet',      label: 'Helmet' },
+            { key: 'earPlug',     label: 'Ear Plug' },
+            { key: 'goggle',      label: 'Goggle' },
+            { key: 'boilerSuit',  label: 'Boiler Suits' },
+            { key: 'handGlove',   label: 'Hand Glove' },
+            { key: 'mask',        label: 'Mask' }
+        ];
+        const _WL_FB_RATING_ITEMS = [
+            { key: 'workmanship', label: 'Quality of Workmanship' },
+            { key: 'timeliness',  label: 'Timely Completion of Jobs' },
+            { key: 'materials',   label: 'Quality of Materials Used' },
+            { key: 'supervision', label: 'Quality of Supervision / Co-ordination' },
+            { key: 'attitude',    label: 'Attitude of the Staff' }
+        ];
+        const _WL_FB_RATING_VALUES = [
+            { key: 'excellent', label: 'Excellent', score: 10, color: '#15803d' },
+            { key: 'good',      label: 'Good',      score: 7,  color: '#1d4ed8' },
+            { key: 'poor',      label: 'Poor',      score: 4,  color: '#dc2626' }
+        ];
+
+        // ── Helpers ────────────────────────────────────────────────────
+        function _wlEscape(s) {
+            return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+        function _wlCalcDur(start, end) {
+            if (!start || !end) return '';
+            const [sh, sm] = start.split(':').map(Number);
+            const [eh, em] = end.split(':').map(Number);
+            if ([sh,sm,eh,em].some(v => isNaN(v))) return '';
+            let mins = (eh*60 + em) - (sh*60 + sm);
+            if (mins < 0) mins += 24*60;
+            const h = Math.floor(mins/60), m = mins%60;
+            return h + 'h' + (m ? ' ' + m + 'm' : '');
+        }
+        function _wlFmtDate(iso) {
+            return iso ? iso.split('-').reverse().join('.') : '';
+        }
+        function _wlAllTechnicians() {
+            const names = new Set();
+            (workLogs || []).forEach(w => {
+                (w.technicians || []).forEach(t => { if (t?.name) names.add(t.name); });
+                (w.dailyEntries || []).forEach(e =>
+                    (e.technicians || []).forEach(t => { if (t?.name) names.add(t.name); })
+                );
+                if (w.staffName) names.add(w.staffName);   // legacy single-day logs
+            });
+            return [...names].sort();
+        }
+        function _wlAllStatuses() {
+            const set = new Set(['In Progress','Completed','On Hold','Pending']);
+            (workLogs || []).forEach(w => { if (w.status) set.add(w.status); });
+            return [...set];
+        }
+        // Match tokens against a haystack — every whitespace-separated token
+        // in the query must appear somewhere in the string (case-insensitive).
+        function _wlMatchTokens(hay, q) {
+            const h = String(hay || '').toLowerCase();
+            return String(q || '').toLowerCase().split(/\s+/).filter(Boolean).every(tok => h.includes(tok));
+        }
+
+        // ── Toolbar state setters — one per control ───────────────────
+        function _wlToggleExpand(id) {
+            if (_wlExpanded.has(id)) _wlExpanded.delete(id);
+            else _wlExpanded.add(id);
+            _wlRefreshList();
+        }
+        function _wlExpandAll() {
+            (workLogs || []).forEach(w => _wlExpanded.add(w.wlID));
+            _wlRefreshList();
+        }
+        function _wlCollapseAll() {
+            _wlExpanded.clear();
+            _wlRefreshList();
+        }
+        // Search fires on every keystroke — refresh the LIST only (not the
+        // whole tab) so the search box keeps focus. Same pattern as projexp.
+        function _wlSetSearch(v) {
+            _wlSearchQ = v;
+            _wlRefreshList();
+            const clearBtn = document.getElementById('wlClearBtn');
+            if (clearBtn) clearBtn.style.display = _wlAnyFilterActive() ? '' : 'none';
+        }
+        function _wlSetStatus(v) { _wlFilterStatus = v; _wlRefreshList(); _wlUpdateClearBtn(); }
+        function _wlSetTech(v)   { _wlFilterTech   = v; _wlRefreshList(); _wlUpdateClearBtn(); }
+        function _wlSetDateFrom(v){ _wlDateFrom    = v; _wlRefreshList(); _wlUpdateClearBtn(); }
+        function _wlSetDateTo(v)  { _wlDateTo      = v; _wlRefreshList(); _wlUpdateClearBtn(); }
+        function _wlAnyFilterActive() {
+            return !!(_wlSearchQ || _wlFilterStatus || _wlFilterTech || _wlDateFrom || _wlDateTo);
+        }
+        function _wlUpdateClearBtn() {
+            const b = document.getElementById('wlClearBtn');
+            if (b) b.style.display = _wlAnyFilterActive() ? '' : 'none';
+        }
+        function _wlClearFilters() {
+            _wlSearchQ = ''; _wlFilterStatus = ''; _wlFilterTech = '';
+            _wlDateFrom = ''; _wlDateTo = '';
+            // Update inputs in place instead of re-rendering the whole tab so
+            // scroll position is preserved.
+            const search = document.getElementById('wlSearchInput');   if (search) search.value = '';
+            const st     = document.getElementById('wlFilterStatus');  if (st) st.value = '';
+            const tech   = document.getElementById('wlFilterTech');    if (tech) tech.value = '';
+            const df     = document.getElementById('wlDateFrom');      if (df) df.value = '';
+            const dt     = document.getElementById('wlDateTo');        if (dt) dt.value = '';
+            _wlRefreshList();
+            _wlUpdateClearBtn();
+        }
+
+        // ── Filter pipeline ────────────────────────────────────────────
+        // Returns the list to render, sorted by most recent activity.
+        function _wlFilteredLogs() {
+            const activity = w => {
+                const dates = (w.dailyEntries || []).map(e => e.date).filter(Boolean);
+                const latest = dates.length ? dates.sort().pop() : '';
+                return latest || w.workEndDate || w.workStartDate || w.date || w.createdAt || '';
+            };
+            let list = [...(workLogs || [])];
+
+            // Search — matches project, ref, location, description, technicians,
+            // and every daily entry's description / category / observations.
+            if (_wlSearchQ) {
+                list = list.filter(w => {
+                    const parts = [
+                        w.project, w.ref, w.location, w.vessel, w.client, w.status,
+                        w.description, w.observations, w.recommendations,
+                        w.staffName,
+                        ...(w.technicians || []).map(t => t.name),
+                        ...(w.dailyEntries || []).flatMap(e => [
+                            e.description, e.category, e.observations, e.exclusions,
+                            e.recommendations, e.witnessName, e.witnessRemarks, e.date,
+                            ...(e.technicians || []).map(t => t.name)
+                        ])
+                    ].filter(Boolean).join(' ');
+                    return _wlMatchTokens(parts, _wlSearchQ);
+                });
+            }
+            if (_wlFilterStatus) list = list.filter(w => (w.status || '') === _wlFilterStatus);
+            if (_wlFilterTech) {
+                list = list.filter(w => {
+                    const techs = new Set();
+                    (w.technicians || []).forEach(t => { if (t?.name) techs.add(t.name); });
+                    (w.dailyEntries || []).forEach(e =>
+                        (e.technicians || []).forEach(t => { if (t?.name) techs.add(t.name); })
+                    );
+                    if (w.staffName) techs.add(w.staffName);
+                    return techs.has(_wlFilterTech);
+                });
+            }
+            if (_wlDateFrom || _wlDateTo) {
+                list = list.filter(w => {
+                    // Include a log if ANY of its daily entries fall in the range,
+                    // OR the log's own start/end range overlaps.
+                    const inRange = d => {
+                        if (!d) return false;
+                        if (_wlDateFrom && d < _wlDateFrom) return false;
+                        if (_wlDateTo   && d > _wlDateTo)   return false;
+                        return true;
+                    };
+                    const dailyDates = (w.dailyEntries || []).map(e => e.date).filter(Boolean);
+                    if (dailyDates.some(inRange)) return true;
+                    // Overlap between [workStartDate, workEndDate] and [dateFrom, dateTo]
+                    const ws = w.workStartDate || w.date;
+                    const we = w.workEndDate   || w.date;
+                    if (!ws && !we) return false;
+                    if (_wlDateFrom && we && we < _wlDateFrom) return false;
+                    if (_wlDateTo   && ws && ws > _wlDateTo)   return false;
+                    return true;
+                });
+            }
+
+            return list.sort((a, b) => (activity(b) || '').localeCompare(activity(a) || ''));
+        }
+
+        // ── MAIN RENDER ────────────────────────────────────────────────
         function renderWorkLogs(content) {
+            const techOpts = _wlAllTechnicians();
+            const statusOpts = _wlAllStatuses();
             content.innerHTML = `
-            <div class="flex items-center justify-between mb-6">
+            <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
                 <div>
-                    <h2 class="text-3xl font-bold text-gray-800">📋 Work Logs</h2>
-                    <p class="text-gray-500 text-sm mt-1">Technician work records, photos & project reports</p>
+                    <h2 class="text-3xl font-bold text-gray-800">📋 Project Work Logs</h2>
+                    <p class="text-gray-500 text-sm mt-1">Read-only view of work logs added by field technicians. Create / edit via the Field App.</p>
                 </div>
-                <button onclick="openWorkLogModal()" class="px-5 py-2 bg-purple-600 text-white rounded-xl hover:bg-purple-700 font-medium">+ New Work Log</button>
+                <div class="flex gap-2 flex-wrap">
+                    <button onclick="_wlExpandAll()"   class="px-3 py-2 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-sm font-medium hover:bg-purple-100 whitespace-nowrap" title="Expand every work log">▼ Expand all</button>
+                    <button onclick="_wlCollapseAll()" class="px-3 py-2 bg-gray-50 text-gray-700 border border-gray-200 rounded-lg text-sm font-medium hover:bg-gray-100 whitespace-nowrap" title="Collapse every work log">▶ Collapse all</button>
+                </div>
             </div>
 
             <!-- Filter bar -->
-            <div class="flex flex-wrap gap-3 mb-4">
-                <input type="text" id="wlSearch" placeholder="Search by project / staff..." class="px-3 py-2 border rounded-lg text-sm w-56" oninput="filterWorkLogs()"/>
-                <select id="wlFilterStaff" class="px-3 py-2 border rounded-lg text-sm" onchange="filterWorkLogs()">
-                    <option value="">All Staff</option>
-                    ${staff.map(s=>`<option value="${s.staffID}">${s.name}</option>`).join('')}
-                </select>
-                <button onclick="generateProjectReport()" class="px-4 py-2 bg-purple-600 text-white rounded-xl text-sm hover:bg-purple-700">📄 Generate Project Report PDF</button>
+            <div class="bg-white border border-gray-200 rounded-xl p-4 mb-4">
+                <div class="flex flex-wrap gap-3 items-end">
+                    <div class="flex-1 min-w-[220px]">
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">Search</label>
+                        <input type="search" id="wlSearchInput" value="${_wlEscape(_wlSearchQ)}"
+                            placeholder="🔍 project, ref, technician, description, status…"
+                            oninput="_wlSetSearch(this.value)"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"/>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">Status</label>
+                        <select id="wlFilterStatus" onchange="_wlSetStatus(this.value)" class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                            <option value="">All statuses</option>
+                            ${statusOpts.map(s => `<option value="${_wlEscape(s)}" ${_wlFilterStatus===s?'selected':''}>${_wlEscape(s)}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">Technician</label>
+                        <select id="wlFilterTech" onchange="_wlSetTech(this.value)" class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                            <option value="">All technicians</option>
+                            ${techOpts.map(t => `<option value="${_wlEscape(t)}" ${_wlFilterTech===t?'selected':''}>${_wlEscape(t)}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">Date from</label>
+                        <input type="date" id="wlDateFrom" value="${_wlEscape(_wlDateFrom)}" onchange="_wlSetDateFrom(this.value)" class="px-3 py-2 border border-gray-300 rounded-lg text-sm"/>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">Date to</label>
+                        <input type="date" id="wlDateTo" value="${_wlEscape(_wlDateTo)}" onchange="_wlSetDateTo(this.value)" class="px-3 py-2 border border-gray-300 rounded-lg text-sm"/>
+                    </div>
+                    <button id="wlClearBtn" onclick="_wlClearFilters()" style="${_wlAnyFilterActive()?'':'display:none'}" class="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 whitespace-nowrap">✕ Clear filters</button>
+                </div>
+                <div id="wlFilterStats" class="mt-2 text-xs text-gray-500"></div>
             </div>
 
             <div id="workLogList"></div>
 
-            <!-- Work Log Modal -->
-            <div id="workLogModal" class="modal">
-                <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto m-4">
-                    <div class="bg-gradient-to-r from-purple-600 to-indigo-600 p-5 text-white sticky top-0 z-10 flex justify-between items-center">
-                        <h2 class="text-xl font-bold" id="wlModalTitle">New Work Log</h2>
-                        <button onclick="closeWorkLogModal()" class="text-white text-2xl font-bold">✕</button>
+            <!-- Photo lightbox (created lazily) -->
+            <div id="wlPhotoLightbox" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:9999;align-items:center;justify-content:center" onclick="_wlPhotoClose()">
+                <img id="wlPhotoLightboxImg" src="" style="max-width:95vw;max-height:95vh;object-fit:contain;border:2px solid #fff;border-radius:8px;box-shadow:0 20px 60px rgba(0,0,0,.7)"/>
+                <button onclick="_wlPhotoClose()" style="position:absolute;top:20px;right:24px;background:rgba(0,0,0,.6);border:none;color:#fff;font-size:28px;width:44px;height:44px;border-radius:50%;cursor:pointer;line-height:1">✕</button>
+            </div>
+
+            <!-- Viewer modal for Feedback / Kick-Off / Growth-of-Work — populated on demand -->
+            <div id="wlViewer" class="modal">
+                <div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] overflow-y-auto m-4">
+                    <div id="wlViewerHeader" class="p-5 text-white sticky top-0 z-10 flex justify-between items-center rounded-t-2xl">
+                        <h2 id="wlViewerTitle" class="text-xl font-bold">—</h2>
+                        <button onclick="_wlCloseViewer()" class="text-white text-2xl font-bold" style="background:none;border:none;cursor:pointer">✕</button>
                     </div>
-                    <form id="workLogForm" onsubmit="saveWorkLog(event)" class="p-6 space-y-4">
-                        <div class="grid grid-cols-2 gap-4">
-                            <div><label class="block text-xs font-semibold text-gray-600 mb-1">Date *</label>
-                                <input type="date" id="wlDate" class="w-full px-3 py-2 border rounded-lg text-sm" required/></div>
-                            <div><label class="block text-xs font-semibold text-gray-600 mb-1">Staff / Technician *</label>
-                                <select id="wlStaff" class="w-full px-3 py-2 border rounded-lg text-sm" required>
-                                    <option value="">-- Select --</option>
-                                    ${staff.map(s=>`<option value="${s.staffID}" data-name="${s.name}">${s.name}</option>`).join('')}
-                                </select></div>
-                            <div><label class="block text-xs font-semibold text-gray-600 mb-1">Project Name *</label>
-                                <input type="text" id="wlProject" class="w-full px-3 py-2 border rounded-lg text-sm" required/></div>
-                            <div><label class="block text-xs font-semibold text-gray-600 mb-1">Location / Vessel</label>
-                                <input type="text" id="wlLocation" class="w-full px-3 py-2 border rounded-lg text-sm"/></div>
-                            <div><label class="block text-xs font-semibold text-gray-600 mb-1">Work Category</label>
-                                <select id="wlCategory" class="w-full px-3 py-2 border rounded-lg text-sm">
-                                    <option value="Inspection">Inspection</option>
-                                    <option value="Maintenance">Maintenance / Repair</option>
-                                    <option value="Installation">Installation</option>
-                                    <option value="Survey">Survey</option>
-                                    <option value="Testing">Testing / Commissioning</option>
-                                    <option value="Calibration">Calibration</option>
-                                    <option value="Other">Other</option>
-                                </select></div>
-                            <div><label class="block text-xs font-semibold text-gray-600 mb-1">Status</label>
-                                <select id="wlStatus" class="w-full px-3 py-2 border rounded-lg text-sm">
-                                    <option value="In Progress">In Progress</option>
-                                    <option value="Completed">Completed</option>
-                                    <option value="On Hold">On Hold</option>
-                                </select></div>
-                        </div>
-                        <div><label class="block text-xs font-semibold text-gray-600 mb-1">Work Description *</label>
-                            <textarea id="wlDescription" rows="3" placeholder="Describe the work done..." class="w-full px-3 py-2 border rounded-lg text-sm" required></textarea></div>
-                        <div><label class="block text-xs font-semibold text-gray-600 mb-1">Observations / Findings</label>
-                            <textarea id="wlObservations" rows="2" placeholder="Any findings, issues or observations..." class="w-full px-3 py-2 border rounded-lg text-sm"></textarea></div>
-                        <div><label class="block text-xs font-semibold text-gray-600 mb-1">Recommendations</label>
-                            <textarea id="wlRecommendations" rows="2" placeholder="Recommended actions..." class="w-full px-3 py-2 border rounded-lg text-sm"></textarea></div>
-                        <div>
-                            <label class="block text-xs font-semibold text-gray-600 mb-1">Photos (max 5, 2MB each)</label>
-                            <input type="file" id="wlPhotos" accept="image/*" multiple class="w-full px-3 py-2 border rounded-lg text-sm"/>
-                            <div id="wlPhotoPreview" class="mt-2 flex flex-wrap gap-2"></div>
-                        </div>
-                        <div class="flex gap-3 justify-end">
-                            <button type="button" onclick="closeWorkLogModal()" class="px-5 py-2 border rounded-xl text-gray-600">Cancel</button>
-                            <button type="submit" class="px-6 py-2 bg-purple-600 text-white rounded-xl font-semibold">Save Work Log</button>
-                        </div>
-                    </form>
+                    <div id="wlViewerBody" class="p-6"></div>
                 </div>
             </div>`;
 
-            filterWorkLogs();
-
-            // Photo preview handler
-            document.getElementById('wlPhotos')?.addEventListener('change', function() {
-                const preview = document.getElementById('wlPhotoPreview');
-                preview.innerHTML = '';
-                Array.from(this.files).slice(0,5).forEach(f => {
-                    if (!f.type.startsWith('image/')) return;
-                    const reader = new FileReader();
-                    reader.onload = e => {
-                        const img = document.createElement('img');
-                        img.src = e.target.result;
-                        img.className = 'h-20 w-20 object-cover rounded-lg border border-gray-300';
-                        preview.appendChild(img);
-                    };
-                    reader.readAsDataURL(f);
-                });
-            });
+            _wlRefreshList();
         }
 
-        function filterWorkLogs() {
-            const q = (document.getElementById('wlSearch')?.value||'').toLowerCase();
-            const sid = document.getElementById('wlFilterStaff')?.value||'';
-            const filtered = workLogs.filter(w => {
-                const mq = !q || (w.project||'').toLowerCase().includes(q) || (w.staffName||'').toLowerCase().includes(q) || (w.description||'').toLowerCase().includes(q);
-                const ms = !sid || w.staffID === sid;
-                return mq && ms;
-            });
+        // ── List refresh (called on every keystroke / filter change) ────
+        function _wlRefreshList() {
             const el = document.getElementById('workLogList');
             if (!el) return;
-            if (!filtered.length) { el.innerHTML = `<div class="text-center py-16 text-gray-400"><div class="text-5xl mb-4">📋</div><p>No work logs found.</p></div>`; return; }
-            const statusCls = {'In Progress':'bg-yellow-100 text-yellow-700','Completed':'bg-green-100 text-green-700','On Hold':'bg-gray-100 text-gray-600'};
-            el.innerHTML = filtered.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(w => `
-            <div class="bg-white border border-gray-200 rounded-xl shadow-sm mb-3 p-4">
-                <div class="flex justify-between items-start flex-wrap gap-2">
-                    <div>
-                        <div class="flex items-center gap-2 flex-wrap">
-                            <span class="font-bold text-gray-800">${w.project}</span>
-                            <span class="px-2 py-0.5 rounded-full text-xs ${statusCls[w.status]||'bg-gray-100'}">${w.status}</span>
-                            <span class="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">${w.category||'Work'}</span>
+
+            const filtered = _wlFilteredLogs();
+            const stats = document.getElementById('wlFilterStats');
+            if (stats) {
+                const total = (workLogs || []).length;
+                stats.textContent = _wlAnyFilterActive()
+                    ? `Showing ${filtered.length} of ${total} work log${total===1?'':'s'}`
+                    : `${total} work log${total===1?'':'s'} total`;
+            }
+
+            if (!filtered.length) {
+                el.innerHTML = `<div class="text-center py-16 text-gray-400"><div class="text-5xl mb-4">📋</div><p class="font-medium text-gray-500">${_wlAnyFilterActive()?'No work logs match the current filters.':'No work logs yet — field technicians add them via the Field App.'}</p></div>`;
+                return;
+            }
+
+            el.innerHTML = filtered.map(w => _wlRenderCard(w)).join('');
+        }
+
+        // ── Card renderer ──────────────────────────────────────────────
+        function _wlRenderCard(w) {
+            const ss = _wlStatusSty[w.status] || _wlStatusSty['Pending'];
+            const isExp = _wlExpanded.has(w.wlID);
+            const chevron = isExp ? '▼' : '▶';
+
+            // Technicians shown at project level — union of top-level w.technicians
+            // and staffName (legacy). Per-day tech list is shown on each entry.
+            const topLevelTechs = new Set();
+            (w.technicians || []).forEach(t => { if (t?.name) topLevelTechs.add(t.name); });
+            if (w.staffName) topLevelTechs.add(w.staffName);
+            const techNames = [...topLevelTechs].join(', ') || '—';
+
+            const days = (w.dailyEntries || []).length;
+            const dateRange = (w.workStartDate && w.workEndDate)
+                ? _wlFmtDate(w.workStartDate) + ' → ' + _wlFmtDate(w.workEndDate)
+                : (w.workStartDate ? _wlFmtDate(w.workStartDate)
+                   : (w.date ? _wlFmtDate(w.date) : '—'));
+
+            const hasFB = !!w.customerFeedback;
+            const hasKO = !!w.kickOffRecord;
+            const hasGW = !!w.growthOfWorkReport;
+
+            return `
+            <div class="bg-white border border-gray-200 rounded-xl shadow-sm mb-4 overflow-hidden" style="border-left:4px solid ${ss.dot}">
+                <!-- Header (click to toggle) -->
+                <div class="p-4 cursor-pointer hover:bg-gray-50 select-none" onclick="_wlToggleExpand('${w.wlID}')">
+                    <div class="flex justify-between items-start gap-3 flex-wrap">
+                        <div class="flex-1 min-w-0">
+                            <p class="font-bold text-gray-800 text-lg flex items-center gap-2">
+                                <span class="text-gray-400 text-sm w-3 inline-block">${chevron}</span>
+                                <span>${_wlEscape(w.project || '—')}</span>
+                            </p>
+                            <p class="text-xs text-gray-500 ml-5">
+                                ${w.ref ? _wlEscape(w.ref) + ' · ' : ''}${_wlEscape(w.location || w.vessel || '—')} · ${_wlEscape(dateRange)}
+                            </p>
+                            <p class="text-xs text-gray-500 ml-5 mt-0.5">👷 ${_wlEscape(techNames)}</p>
                         </div>
-                        <p class="text-xs text-gray-500 mt-0.5">${w.date} · ${w.staffName} ${w.location ? '· '+w.location : ''}</p>
+                        <div class="flex flex-col gap-1 items-end" onclick="event.stopPropagation()">
+                            <div class="flex gap-1.5">
+                                <span class="px-2 py-0.5 rounded-full text-xs font-semibold" style="background:${ss.bg};color:${ss.col}">${_wlEscape(w.status || '—')}</span>
+                                <span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-sky-50 text-sky-700">${days} day${days!==1?'s':''}</span>
+                            </div>
+                            <button onclick="event.stopPropagation(); wlPDF('${w.wlID}')" class="mt-1 px-3 py-1 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700" title="Download the full project work report PDF">📄 Report PDF</button>
+                        </div>
                     </div>
-                    <div class="flex gap-2">
-                        <button onclick="editWorkLog('${w.wlID}')" class="text-indigo-600 hover:text-indigo-800 text-xs font-medium">Edit</button>
-                        <button onclick="deleteWorkLog('${w.wlID}')" class="text-red-500 hover:text-red-700 text-xs">Del</button>
-                    </div>
+
+                    <!-- ITSPL form badges — click to view saved data + download PDF -->
+                    ${(hasFB || hasKO || hasGW) ? `
+                    <div class="flex gap-2 mt-3 flex-wrap ml-5" onclick="event.stopPropagation()">
+                        ${hasFB ? `<button onclick="_wlViewFeedback('${w.wlID}')"     class="px-3 py-1 rounded-lg text-xs font-semibold border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100" title="View captured Customer Feedback">📋 Feedback ✓</button>` : ''}
+                        ${hasKO ? `<button onclick="_wlViewKickOff('${w.wlID}')"       class="px-3 py-1 rounded-lg text-xs font-semibold border border-indigo-300 bg-indigo-50 text-indigo-800 hover:bg-indigo-100" title="View captured Kick-Off Record">📝 Kick-Off ✓</button>` : ''}
+                        ${hasGW ? `<button onclick="_wlViewGrowthOfWork('${w.wlID}')" class="px-3 py-1 rounded-lg text-xs font-semibold border border-rose-300 bg-rose-50 text-rose-800 hover:bg-rose-100" title="View captured Growth of Work / Re-Work Report">🔄 Growth/RW ✓</button>` : ''}
+                    </div>` : ''}
                 </div>
-                <p class="text-sm text-gray-700 mt-2">${w.description}</p>
-                ${w.observations ? `<p class="text-xs text-gray-500 mt-1"><strong>Findings:</strong> ${w.observations}</p>` : ''}
-                ${w.recommendations ? `<p class="text-xs text-gray-500 mt-1"><strong>Recommendations:</strong> ${w.recommendations}</p>` : ''}
-                ${(w.photos||[]).length ? `<div class="flex flex-wrap gap-2 mt-3">${w.photos.map((p,i) => `<img src="${p}" class="h-20 w-20 object-cover rounded-lg border cursor-pointer hover:opacity-80" onclick="viewWorkLogPhoto('${w.wlID}',${i})"/>`).join('')}</div>` : ''}
-            </div>`).join('');
+
+                <!-- Daily entries (hidden when collapsed) -->
+                ${isExp ? `<div class="border-t border-gray-200">${_wlRenderDailyEntries(w)}</div>` : ''}
+            </div>`;
         }
 
-        function openWorkLogModal(wl = null) {
-            currentWorkLog = wl;
-            document.getElementById('wlModalTitle').textContent = wl ? 'Edit Work Log' : 'New Work Log';
-            document.getElementById('workLogForm').reset();
-            document.getElementById('wlPhotoPreview').innerHTML = '';
-            document.getElementById('wlDate').value = wl?.date || new Date().toISOString().split('T')[0];
-            if (wl) {
-                document.getElementById('wlStaff').value         = wl.staffID||'';
-                document.getElementById('wlProject').value       = wl.project||'';
-                document.getElementById('wlLocation').value      = wl.location||'';
-                document.getElementById('wlCategory').value      = wl.category||'Other';
-                document.getElementById('wlStatus').value        = wl.status||'In Progress';
-                document.getElementById('wlDescription').value   = wl.description||'';
-                document.getElementById('wlObservations').value  = wl.observations||'';
-                document.getElementById('wlRecommendations').value = wl.recommendations||'';
-                // Show existing photos
-                const preview = document.getElementById('wlPhotoPreview');
-                (wl.photos||[]).forEach(p => { const img = document.createElement('img'); img.src=p; img.className='h-20 w-20 object-cover rounded-lg border'; preview.appendChild(img); });
+        // ── Daily entries block ─────────────────────────────────────────
+        function _wlRenderDailyEntries(w) {
+            // Handle two possible shapes:
+            //   1. New (field app): w.dailyEntries[] — multi-day
+            //   2. Legacy (single-day CRUD): w.description / w.photos on the log itself
+            const hasDaily = (w.dailyEntries || []).length > 0;
+            if (!hasDaily) {
+                // Legacy single-day view — mirror the old fields directly
+                if (w.description || (w.photos||[]).length) {
+                    return `
+                    <div class="p-4 bg-gray-50">
+                        <p class="text-xs text-gray-500 mb-2">Legacy single-day log</p>
+                        ${w.description ? `<p class="text-sm text-gray-800 mb-2">${_wlEscape(w.description)}</p>` : ''}
+                        ${w.observations   ? `<p class="text-xs text-gray-600 mb-1"><strong>Findings:</strong> ${_wlEscape(w.observations)}</p>` : ''}
+                        ${w.recommendations? `<p class="text-xs text-gray-600 mb-1"><strong>Recommendations:</strong> ${_wlEscape(w.recommendations)}</p>` : ''}
+                        ${_wlRenderPhotos(w.photos || [])}
+                    </div>`;
+                }
+                return `<div class="p-4 text-sm text-gray-400 italic">No daily entries recorded yet.</div>`;
             }
-            document.getElementById('workLogModal').classList.add('show');
-            // ── Level 2 concurrency: register the open-edit context ──
-            _concurBeginEdit('workLogs', wl?.wlID ? [{ id: wl.wlID, idKey: 'wlID' }] : []);
-        }
-        function closeWorkLogModal() {
-            document.getElementById('workLogModal').classList.remove('show');
-            currentWorkLog = null;
-            // ── Level 2 concurrency: clear open-edit context ──
-            _concurEndEdit();
-        }
-        function editWorkLog(id) { const w = workLogs.find(x => x.wlID === id); if (w) openWorkLogModal(w); }
 
-        async function saveWorkLog(e) {
-            e.preventDefault();
-            // ── Level 2 concurrency: pre-save staleness check (existing record only) ──
-            if (currentWorkLog?.wlID) {
-                const path = [{ id: currentWorkLog.wlID, idKey: 'wlID' }];
-                if (await _concurBlockIfStale('workLogs', path)) return;
-            }
-            const staffSel = document.getElementById('wlStaff');
-            const staffName = staffSel.options[staffSel.selectedIndex]?.dataset.name || '';
-            // Process new photos
-            let photos = currentWorkLog?.photos ? [...currentWorkLog.photos] : [];
-            const files = document.getElementById('wlPhotos').files;
-            for (const f of Array.from(files).slice(0,5)) {
-                if (f.size > 2*1024*1024) { alert(`"${f.name}" too large. Max 2MB.`); return; }
-                const data = await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=()=>rej(new Error('fail')); r.readAsDataURL(f); });
-                photos.push(data);
-            }
-            const obj = {
-                wlID:            currentWorkLog?.wlID || 'WL' + Date.now(),
-                date:            document.getElementById('wlDate').value,
-                staffID:         document.getElementById('wlStaff').value,
-                staffName,
-                project:         document.getElementById('wlProject').value,
-                location:        document.getElementById('wlLocation').value,
-                category:        document.getElementById('wlCategory').value,
-                status:          document.getElementById('wlStatus').value,
-                description:     document.getElementById('wlDescription').value,
-                observations:    document.getElementById('wlObservations').value,
-                recommendations: document.getElementById('wlRecommendations').value,
-                photos,
-                createdAt:       currentWorkLog?.createdAt || new Date().toISOString()
+            // Chronological day-number: newest = highest N
+            const totalDays = w.dailyEntries.length;
+            const sortedAscForNum = [...w.dailyEntries].sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+            const dayNumByID = {};
+            sortedAscForNum.forEach((e, i) => { if (e.entryID) dayNumByID[e.entryID] = i + 1; });
+
+            // Render newest first
+            const sortedDesc = [...w.dailyEntries].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+            return sortedDesc.map((d, idx) => {
+                const dayNum = dayNumByID[d.entryID] || (totalDays - idx);
+                const dur = _wlCalcDur(d.startTime, d.endTime);
+                const dayTechs = (d.technicians || []).map(t => t.name).filter(Boolean).join(', ')
+                              || (w.technicians || []).map(t => t.name).filter(Boolean).join(', ')
+                              || w.staffName || '—';
+                return `
+                <div class="p-4 ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} border-b border-gray-100">
+                    <div class="flex justify-between items-start mb-2 flex-wrap gap-2">
+                        <div>
+                            <span class="font-semibold text-sm text-gray-800">Day ${dayNum} — ${_wlEscape(d.date || '—')}</span>
+                            ${d.startTime ? `<span class="text-xs text-gray-500 ml-2">⏱ ${_wlEscape(d.startTime)}–${_wlEscape(d.endTime || '?')}${dur ? ' (' + dur + ')' : ''}</span>` : ''}
+                            ${d.category ? `<span class="ml-2 px-2 py-0.5 rounded bg-blue-50 text-blue-700 text-xs font-semibold">${_wlEscape(d.category)}</span>` : ''}
+                        </div>
+                        <div class="text-xs text-gray-500">👷 ${_wlEscape(dayTechs)}</div>
+                    </div>
+                    ${d.description ? `<p class="text-sm text-gray-800 mb-1">${_wlEscape(d.description)}</p>` : ''}
+                    ${d.observations   ? `<p class="text-xs text-gray-600 mt-1"><strong>Findings:</strong> ${_wlEscape(d.observations)}</p>` : ''}
+                    ${d.exclusions     ? `<p class="text-xs text-gray-600 mt-1"><strong>Exclusions:</strong> ${_wlEscape(d.exclusions)}</p>` : ''}
+                    ${d.recommendations? `<p class="text-xs text-gray-600 mt-1"><strong>Recommendations:</strong> ${_wlEscape(d.recommendations)}</p>` : ''}
+                    ${d.witnessName    ? `<p class="text-xs text-gray-500 mt-1"><strong>Witness:</strong> ${_wlEscape(d.witnessName)}${d.witnessDesig ? ' (' + _wlEscape(d.witnessDesig) + ')' : ''}${d.witnessRemarks ? ' — ' + _wlEscape(d.witnessRemarks) : ''}</p>` : ''}
+                    ${(d.calibrations || []).length ? `<p class="text-xs text-purple-700 mt-1"><strong>📐 Calibrations:</strong> ${d.calibrations.length}</p>` : ''}
+                    ${_wlRenderPhotos(d.photos || [])}
+                </div>`;
+            }).join('');
+        }
+
+        // Photos — handle both base64 data URLs and Drive-hosted objects.
+        // Drive photos need OAuth to load into an <img> tag directly, so we
+        // show a placeholder tile with a link to open the Drive file in a
+        // new tab (which uses the browser's own Google session).
+        function _wlRenderPhotos(photos) {
+            if (!photos || !photos.length) return '';
+            const tiles = photos.map((p, i) => {
+                if (typeof p === 'string' && p.startsWith('data:')) {
+                    // Legacy inline base64
+                    const safeSrc = p.replace(/'/g,'&#39;');
+                    return `<img src="${safeSrc}" onclick="event.stopPropagation();_wlPhotoLightbox('${safeSrc}')" class="h-24 w-24 object-cover rounded-lg border border-gray-200 cursor-pointer hover:opacity-80" title="Click to enlarge"/>`;
+                }
+                if (p && typeof p === 'object' && p.driveFileId) {
+                    // Drive-hosted — use thumbnailLink or open button
+                    const url = `https://drive.google.com/file/d/${_wlEscape(p.driveFileId)}/view`;
+                    const thumb = `https://drive.google.com/thumbnail?id=${_wlEscape(p.driveFileId)}&sz=w200`;
+                    const cap = _wlEscape(p.caption || p.name || 'photo ' + (i+1));
+                    return `<a href="${url}" target="_blank" onclick="event.stopPropagation()" title="${cap} — open in Drive" class="block h-24 w-24 rounded-lg border border-gray-200 overflow-hidden bg-gray-100 hover:opacity-80" style="text-decoration:none">
+                        <img src="${thumb}" class="h-full w-full object-cover" onerror="this.style.display='none';this.parentNode.innerHTML='<div style=&quot;height:100%;display:flex;align-items:center;justify-content:center;color:#6b7280;font-size:11px;text-align:center;padding:4px&quot;>📷 Open in Drive</div>'"/>
+                    </a>`;
+                }
+                if (typeof p === 'string') {
+                    // Some other URL string
+                    const safeSrc = p.replace(/'/g,'&#39;');
+                    return `<img src="${safeSrc}" onclick="event.stopPropagation();_wlPhotoLightbox('${safeSrc}')" class="h-24 w-24 object-cover rounded-lg border border-gray-200 cursor-pointer hover:opacity-80"/>`;
+                }
+                return '';
+            }).filter(Boolean).join('');
+            return `<div class="flex flex-wrap gap-2 mt-3">${tiles}</div>`;
+        }
+
+        // ── Photo lightbox ─────────────────────────────────────────────
+        function _wlPhotoLightbox(src) {
+            const box = document.getElementById('wlPhotoLightbox');
+            const img = document.getElementById('wlPhotoLightboxImg');
+            if (!box || !img) return;
+            img.src = src;
+            box.style.display = 'flex';
+        }
+        function _wlPhotoClose() {
+            const box = document.getElementById('wlPhotoLightbox');
+            const img = document.getElementById('wlPhotoLightboxImg');
+            if (box) box.style.display = 'none';
+            if (img) img.src = '';
+        }
+
+        // ── Viewer modals for the three ITSPL forms ────────────────────
+        function _wlCloseViewer() {
+            const m = document.getElementById('wlViewer');
+            if (m) m.classList.remove('show');
+        }
+        function _wlOpenViewer(title, headerBg, bodyHtml) {
+            const m   = document.getElementById('wlViewer');
+            const h   = document.getElementById('wlViewerHeader');
+            const t   = document.getElementById('wlViewerTitle');
+            const b   = document.getElementById('wlViewerBody');
+            if (!m || !h || !t || !b) return;
+            h.style.background = headerBg;
+            t.textContent = title;
+            b.innerHTML = bodyHtml;
+            m.classList.add('show');
+        }
+
+        function _wlViewFeedback(wlID) {
+            const w = (workLogs || []).find(x => x.wlID === wlID);
+            const fb = w?.customerFeedback;
+            if (!fb) { _showToast('No feedback captured yet', '#dc2626'); return; }
+            const row = (label, val) => `<div class="grid grid-cols-3 gap-2 py-1 border-b border-gray-100 text-sm"><div class="col-span-1 font-semibold text-gray-600">${label}</div><div class="col-span-2 text-gray-800">${_wlEscape(val || '—')}</div></div>`;
+            const rating = key => {
+                const sel = (fb.ratings || {})[key];
+                const v = _WL_FB_RATING_VALUES.find(x => x.key === sel);
+                if (!v) return '<span class="text-gray-400">—</span>';
+                return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold" style="background:${v.color};color:#fff">${v.label} (${v.score})</span>`;
             };
-            // ── Level 2 concurrency: stamp the record ──
-            _stampRecord(obj);
-            if (currentWorkLog) { const i = workLogs.findIndex(x => x.wlID === currentWorkLog.wlID); if (i>=0) workLogs[i] = obj; }
-            else workLogs.push(obj);
-            await saveData('workLogs', workLogs);
-            _concurEndEdit();
-            closeWorkLogModal();
-            renderView();
+            const html = `
+                <div class="mb-4 pb-3 border-b border-gray-200 flex justify-between items-center flex-wrap gap-2">
+                    <span class="text-sm text-gray-500">ITSPL/QR/CF · captured for ${_wlEscape(w.project || '')}</span>
+                    <button onclick="wlFeedbackPDF('${w.wlID}')" class="px-3 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700">📄 Download PDF</button>
+                </div>
+                <h3 class="font-bold text-gray-700 uppercase text-xs tracking-wide mb-2">Header</h3>
+                ${row('Customer Name',    fb.customerName)}
+                ${row('Project',          fb.vessel)}
+                ${row('Vessel',           fb.location)}
+                ${row('Order Number',     fb.orderNumber)}
+                ${row('Starting Date',    _wlFmtDate(fb.startDate))}
+                ${row('Completion Date',  _wlFmtDate(fb.completionDate))}
+
+                <h3 class="font-bold text-gray-700 uppercase text-xs tracking-wide mt-4 mb-2">Ratings (Total: ${_wlEscape(String(fb.totalScore || 0))})</h3>
+                ${_WL_FB_RATING_ITEMS.map(it => `<div class="grid grid-cols-3 gap-2 py-1 border-b border-gray-100 text-sm"><div class="col-span-2 text-gray-700">${_wlEscape(it.label)}</div><div class="col-span-1">${rating(it.key)}</div></div>`).join('')}
+
+                <h3 class="font-bold text-gray-700 uppercase text-xs tracking-wide mt-4 mb-2">Comments</h3>
+                ${row('Remarks',     fb.remarks)}
+                ${row('Suggestions', fb.suggestions)}
+                ${row('Incharge',    fb.inchargeName)}
+                ${row('Signed Date', _wlFmtDate(fb.signedDate))}
+
+                ${fb.signedAttachment ? `<div class="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm"><strong>📎 Signed copy:</strong> <a href="https://drive.google.com/file/d/${_wlEscape(fb.signedAttachment.driveFileId)}/view" target="_blank" class="text-blue-600 hover:underline">${_wlEscape(fb.signedAttachment.name || 'signed form')}</a></div>` : ''}
+                <p class="text-xs text-gray-400 mt-4">Captured ${_wlFmtDate((fb.createdAt||'').substring(0,10))} by ${_wlEscape(fb.createdBy || '—')}${fb.updatedAt && fb.updatedAt !== fb.createdAt ? ` · last edited ${_wlFmtDate(fb.updatedAt.substring(0,10))} by ${_wlEscape(fb.updatedBy || '—')}` : ''}</p>`;
+            _wlOpenViewer('📋 Customer Feedback', 'linear-gradient(135deg,#92400e,#f59e0b)', html);
         }
 
-        async function deleteWorkLog(id) {
-            if (!confirm('Delete this work log?')) return;
-            // ── Level 2 concurrency: pre-delete staleness check ──
-            const path = [{ id, idKey: 'wlID' }];
-            if (await _concurBlockIfStale('workLogs', path)) return;
-            workLogs = workLogs.filter(x => x.wlID !== id);
-            await saveData('workLogs', workLogs);
-            renderView();
+        function _wlViewKickOff(wlID) {
+            const w = (workLogs || []).find(x => x.wlID === wlID);
+            const ko = w?.kickOffRecord;
+            if (!ko) { _showToast('No kick-off record captured yet', '#dc2626'); return; }
+            const chip = (on, label) => on
+                ? `<span class="inline-block px-2 py-0.5 mr-1 mb-1 rounded-full text-xs bg-indigo-600 text-white">✓ ${_wlEscape(label)}</span>`
+                : `<span class="inline-block px-2 py-0.5 mr-1 mb-1 rounded-full text-xs bg-gray-100 text-gray-400 line-through">${_wlEscape(label)}</span>`;
+            const row = (label, val) => `<div class="grid grid-cols-3 gap-2 py-1 border-b border-gray-100 text-sm"><div class="col-span-1 font-semibold text-gray-600">${label}</div><div class="col-span-2 text-gray-800">${_wlEscape(val || '—')}</div></div>`;
+
+            const html = `
+                <div class="mb-4 pb-3 border-b border-gray-200 flex justify-between items-center flex-wrap gap-2">
+                    <span class="text-sm text-gray-500">ITSPL/QR/PKR · captured for ${_wlEscape(w.project || '')}</span>
+                    <button onclick="wlKickOffPDF('${w.wlID}')" class="px-3 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700">📄 Download PDF</button>
+                </div>
+                ${row('Project Detail',    ko.projectDetail)}
+                ${row('Expected Start',    _wlFmtDate(ko.expectedStartDate))}
+                ${row('Expected Completion', _wlFmtDate(ko.expectedCompletionDate))}
+                ${row('Team Details',      ko.teamDetails)}
+                ${row('Specific Details',  ko.specificDetails)}
+                <div class="mt-3 mb-1 text-xs font-bold text-gray-600 uppercase">Documents</div>
+                <div>${_WL_KO_DOCUMENTS.map(d => chip(!!(ko.documents||{})[d.key], d.label)).join('')}</div>
+                <div class="mt-3 mb-1 text-xs font-bold text-gray-600 uppercase">Location of Work</div>
+                <div>${_WL_KO_LOCATIONS.map(l => chip(ko.locationOfWork === l.key, l.label)).join('')}</div>
+                <div class="mt-3 mb-1 text-xs font-bold text-gray-600 uppercase">Manuals / Reference Documents</div>
+                <div>${_WL_KO_MANUALS.map(m => {
+                    const v = (ko.manualsRefDocs||{})[m.key];
+                    const badge = v === true ? '<span class="text-green-700 font-semibold">YES</span>' : v === false ? '<span class="text-red-600 font-semibold">NO</span>' : '<span class="text-gray-400">—</span>';
+                    return `<div class="flex justify-between py-1 border-b border-gray-100 text-sm"><span>${_wlEscape(m.label)}</span><span>${badge}</span></div>`;
+                }).join('')}</div>
+                <div class="mt-3 mb-1 text-xs font-bold text-gray-600 uppercase">PPE</div>
+                <div>${_WL_KO_PPE.map(p => chip(!!(ko.ppe||{})[p.key], p.label)).join('')}</div>
+                <div class="mt-2 text-sm">Donning verified: ${ko.ppeDonningVerified === true ? '<span class="text-green-700 font-semibold">YES</span>' : ko.ppeDonningVerified === false ? '<span class="text-red-600 font-semibold">NO</span>' : '<span class="text-gray-400">—</span>'}</div>
+                <div class="mt-3">
+                    ${row('Engineer / Technician', ko.engineerName)}
+                    ${row('General Manager',       ko.generalManagerName)}
+                </div>
+                ${ko.signedAttachment ? `<div class="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm"><strong>📎 Signed copy:</strong> <a href="https://drive.google.com/file/d/${_wlEscape(ko.signedAttachment.driveFileId)}/view" target="_blank" class="text-blue-600 hover:underline">${_wlEscape(ko.signedAttachment.name || 'signed form')}</a></div>` : ''}
+                <p class="text-xs text-gray-400 mt-4">Captured ${_wlFmtDate((ko.createdAt||'').substring(0,10))} by ${_wlEscape(ko.createdBy || '—')}${ko.updatedAt && ko.updatedAt !== ko.createdAt ? ` · last edited ${_wlFmtDate(ko.updatedAt.substring(0,10))} by ${_wlEscape(ko.updatedBy || '—')}` : ''}</p>`;
+            _wlOpenViewer('📝 Project Kick-Off Record', 'linear-gradient(135deg,#4338ca,#6366f1)', html);
         }
 
-        function viewWorkLogPhoto(wlID, idx) {
-            const w = workLogs.find(x => x.wlID === wlID);
-            if (!w?.photos?.[idx]) return;
-            const win = window.open();
-            win.document.write(`<html><body style="margin:0;background:#000;display:flex;align-items:center;justify-content:center;min-height:100vh"><img src="${w.photos[idx]}" style="max-width:100%;max-height:100vh;object-fit:contain"/></body></html>`);
+        function _wlViewGrowthOfWork(wlID) {
+            const w = (workLogs || []).find(x => x.wlID === wlID);
+            const gw = w?.growthOfWorkReport;
+            if (!gw) { _showToast('No growth of work report captured yet', '#dc2626'); return; }
+            const row = (label, val) => `<div class="grid grid-cols-3 gap-2 py-1 border-b border-gray-100 text-sm"><div class="col-span-1 font-semibold text-gray-600">${label}</div><div class="col-span-2 text-gray-800">${_wlEscape(val || '—')}</div></div>`;
+            const dateRange = (gw.dateFrom || gw.dateTo)
+                ? _wlFmtDate(gw.dateFrom) + (gw.dateTo ? ' → ' + _wlFmtDate(gw.dateTo) : '')
+                : '—';
+            const rows = (gw.workItems || []);
+
+            const html = `
+                <div class="mb-4 pb-3 border-b border-gray-200 flex justify-between items-center flex-wrap gap-2">
+                    <span class="text-sm text-gray-500">ITSPL/QR/GW-RW-R · captured for ${_wlEscape(w.project || '')}</span>
+                    <button onclick="wlGrowthOfWorkPDF('${w.wlID}')" class="px-3 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700">📄 Download PDF</button>
+                </div>
+                ${row('Project No', gw.projectNo)}
+                ${row('Customer',   gw.customer)}
+                ${row('Date',       dateRange)}
+
+                <h3 class="font-bold text-gray-700 uppercase text-xs tracking-wide mt-4 mb-2">Work Items (${rows.length})</h3>
+                <div class="overflow-x-auto">
+                <table class="w-full text-sm border border-gray-200">
+                    <thead class="bg-gray-50 text-gray-700">
+                        <tr>
+                            <th class="border border-gray-200 px-2 py-1 text-left w-10">S.No</th>
+                            <th class="border border-gray-200 px-2 py-1 text-left">Agreed Work Scope</th>
+                            <th class="border border-gray-200 px-2 py-1 text-left">Growth of Work</th>
+                            <th class="border border-gray-200 px-2 py-1 text-left">Re Work</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rows.length ? rows.map((r, i) => `<tr>
+                            <td class="border border-gray-200 px-2 py-1 text-center">${i+1}</td>
+                            <td class="border border-gray-200 px-2 py-1">${_wlEscape(r.agreedWorkScope || '—')}</td>
+                            <td class="border border-gray-200 px-2 py-1">${_wlEscape(r.growthOfWork || '—')}</td>
+                            <td class="border border-gray-200 px-2 py-1">${_wlEscape(r.reWork || '—')}</td>
+                        </tr>`).join('') : `<tr><td colspan="4" class="border border-gray-200 px-2 py-3 text-center text-gray-400 italic">(No work items)</td></tr>`}
+                    </tbody>
+                </table>
+                </div>
+
+                <h3 class="font-bold text-gray-700 uppercase text-xs tracking-wide mt-4 mb-2">Remarks</h3>
+                <p class="text-sm text-gray-800 whitespace-pre-wrap">${_wlEscape(gw.remarks || '—')}</p>
+
+                <div class="mt-3">
+                    ${row('Prepared By',   gw.preparedBy)}
+                    ${row('Prepared Date', _wlFmtDate(gw.preparedDate))}
+                </div>
+                ${gw.signedAttachment ? `<div class="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm"><strong>📎 Signed copy:</strong> <a href="https://drive.google.com/file/d/${_wlEscape(gw.signedAttachment.driveFileId)}/view" target="_blank" class="text-blue-600 hover:underline">${_wlEscape(gw.signedAttachment.name || 'signed form')}</a></div>` : ''}
+                <p class="text-xs text-gray-400 mt-4">Captured ${_wlFmtDate((gw.createdAt||'').substring(0,10))} by ${_wlEscape(gw.createdBy || '—')}${gw.updatedAt && gw.updatedAt !== gw.createdAt ? ` · last edited ${_wlFmtDate(gw.updatedAt.substring(0,10))} by ${_wlEscape(gw.updatedBy || '—')}` : ''}</p>`;
+            _wlOpenViewer('🔄 Growth of Work / Re-Work Report', 'linear-gradient(135deg,#9f1239,#e11d48)', html);
         }
 
-        function generateProjectReport() {
-            const sid = document.getElementById('wlFilterStaff')?.value || '';
-            const q   = (document.getElementById('wlSearch')?.value||'').toLowerCase();
-            const filtered = workLogs.filter(w => {
-                const mq = !q || (w.project||'').toLowerCase().includes(q) || (w.staffName||'').toLowerCase().includes(q);
-                const ms = !sid || w.staffID === sid;
-                return mq && ms;
-            }).sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+        // ═══════════════════════════════════════════════════════════════════
+        //  PDF GENERATORS — ported from field_app.html
+        // ───────────────────────────────────────────────────────────────────
+        //  Same visual output as the field app so the office and the field
+        //  produce identical documents. Two source differences vs field app:
+        //    • field app uses appSettings.logoData;   here we use settings.logoData
+        //    • field app uses showToast(...);          here we use _showToast(...)
+        // ═══════════════════════════════════════════════════════════════════
+        async function _wlEnsureJsPDF() {
+            if (window.jspdf?.jsPDF && typeof window.jspdf.jsPDF.API?.autoTable === 'function') return;
+            if (!window.jspdf) {
+                await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
+            }
+            if (typeof window.jspdf.jsPDF.API?.autoTable !== 'function') {
+                await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
+            }
+        }
 
-            if (!filtered.length) { alert('No work logs match the current filter. Please adjust filters first.'); return; }
+        // Fetch a Drive-hosted file as a data URL (needs accessToken from main app OAuth)
+        async function _wlDriveFileAsDataUrl(fileId) {
+            if (!accessToken) throw new Error('Not signed in to Google Drive');
+            const res = await fetch(
+                `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
+                { headers: { 'Authorization': `Bearer ${accessToken}` } }
+            );
+            if (!res.ok) throw new Error('Drive fetch HTTP ' + res.status);
+            const blob = await res.blob();
+            return await new Promise((resolve, reject) => {
+                const r = new FileReader();
+                r.onload = () => resolve(r.result);
+                r.onerror = () => reject(r.error || new Error('FileReader failed'));
+                r.readAsDataURL(blob);
+            });
+        }
+
+        // Acrobat-safe image normalization — re-encode through a canvas so
+        // Adobe Reader can decode it (mirrors field app).
+        function _wlPdfSafeImage(srcDataUrl) {
+            return new Promise(resolve => {
+                try {
+                    const img = new Image();
+                    img.onload = () => {
+                        try {
+                            const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+                            if (!w || !h) return resolve(null);
+                            const maxDim = 1000;
+                            const sc = Math.min(1, maxDim / Math.max(w, h));
+                            const c = document.createElement('canvas');
+                            c.width = Math.round(w * sc); c.height = Math.round(h * sc);
+                            const ctx = c.getContext('2d');
+                            ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, c.width, c.height);
+                            ctx.drawImage(img, 0, 0, c.width, c.height);
+                            resolve(c.toDataURL('image/jpeg', 0.75));
+                        } catch (e) { resolve(null); }
+                    };
+                    img.onerror = () => resolve(null);
+                    img.src = srcDataUrl;
+                } catch (e) { resolve(null); }
+            });
+        }
+
+        // ── FEEDBACK PDF (ITSPL/QR/CF) ─────────────────────────────────
+        async function wlFeedbackPDF(wlID) {
+            const wl = (workLogs || []).find(x => x.wlID === wlID);
+            if (!wl) { _showToast('Work log not found', '#dc2626'); return; }
+            const fb = wl.customerFeedback;
+            if (!fb) { _showToast('No feedback data on this work log', '#dc2626'); return; }
+            _showToast('⏳ Generating Feedback PDF…', '#0d7c66', 4000);
+            await _wlEnsureJsPDF();
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+            const PW = doc.internal.pageSize.width;
+            const ML = 15, MR = 15, CW = PW - ML - MR;
+            const logoData = settings?.logoData || '';
+            if (logoData) { try { doc.addImage(logoData, 'PNG', ML, 8, 22, 18); } catch (e) {} }
+            doc.setFontSize(13); doc.setFont('helvetica','bold'); doc.setTextColor(15,58,95);
+            doc.text('IMSE TECH - SERVICES PVT LTD', ML + (logoData ? 26 : 0), 14);
+            doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.setTextColor(80,80,80);
+            doc.text('ITSPL/QR/CF', ML + (logoData ? 26 : 0), 19);
+            const metaX = PW - MR - 60;
+            doc.setDrawColor(120,120,120); doc.setLineWidth(0.2);
+            doc.rect(metaX, 8, 60, 18);
+            doc.setFontSize(7);
+            doc.text('ISSUE NO:',metaX+2,12);doc.text('01',metaX+30,12);
+            doc.text('DATE:',metaX+2,15);doc.text('01.08.2018',metaX+30,15);
+            doc.text('REV:',metaX+2,18);doc.text('00',metaX+30,18);
+            doc.text('PAGE:',metaX+2,21);doc.text('1 of 1',metaX+30,21);
+            doc.setDrawColor(15,58,95); doc.setLineWidth(0.6); doc.line(ML, 29, PW-MR, 29);
+            doc.setFontSize(14); doc.setFont('helvetica','bold'); doc.setTextColor(15,58,95);
+            doc.text('CUSTOMER FEEDBACK', PW/2, 38, {align:'center'});
+            let y = 45;
+            const fmt = d => d ? d.split('-').reverse().join('.') : '';
+            doc.autoTable({
+                startY: y, margin: {left:ML,right:MR}, theme:'grid',
+                styles: {fontSize:9, cellPadding:2.8},
+                body: [
+                    [{content:'1.',styles:{cellWidth:8,halign:'center'}},{content:'Customer\u2019s Name',styles:{cellWidth:36,fontStyle:'bold',fillColor:[241,245,249]}},{content:fb.customerName||'',styles:{cellWidth:46}},{content:'4.',styles:{cellWidth:8,halign:'center'}},{content:'Vessel',styles:{cellWidth:30,fontStyle:'bold',fillColor:[241,245,249]}},{content:fb.location||'',styles:{cellWidth:CW-128}}],
+                    [{content:'2.',styles:{halign:'center'}},{content:'Project',styles:{fontStyle:'bold',fillColor:[241,245,249]}},{content:fb.vessel||''},{content:'5.',styles:{halign:'center'}},{content:'Starting Date',styles:{fontStyle:'bold',fillColor:[241,245,249]}},{content:fmt(fb.startDate)}],
+                    [{content:'3.',styles:{halign:'center'}},{content:'Customer\u2019s Order Number',styles:{fontStyle:'bold',fillColor:[241,245,249]}},{content:fb.orderNumber||''},{content:'6.',styles:{halign:'center'}},{content:'Completion Date',styles:{fontStyle:'bold',fillColor:[241,245,249]}},{content:fmt(fb.completionDate)}]
+                ]
+            });
+            y = doc.lastAutoTable.finalY + 6;
+            doc.autoTable({
+                startY: y, margin:{left:ML,right:MR}, theme:'grid',
+                styles:{fontSize:9,cellPadding:2.8},
+                headStyles:{fillColor:[30,58,138],textColor:[255,255,255],fontStyle:'bold',fontSize:9,halign:'center'},
+                head: [
+                    [{content:'EVALUATION BY THE INCHARGE OF THE VESSEL',colSpan:4,styles:{halign:'center'}}],
+                    [{content:'DESCRIPTION',styles:{cellWidth:CW-90}},{content:'Excellent (10)',styles:{cellWidth:30}},{content:'Good (7)',styles:{cellWidth:30}},{content:'Poor (4)',styles:{cellWidth:30}}]
+                ],
+                body: _WL_FB_RATING_ITEMS.map((item, i) => {
+                    const sel = fb.ratings?.[item.key];
+                    const mark = val => sel === val ? {content:'\u2713',styles:{halign:'center',fontStyle:'bold',textColor:[15,118,110],fontSize:14}} : {content:'',styles:{halign:'center'}};
+                    return [{content:(i+1)+'. '+item.label,styles:{cellWidth:CW-90}}, mark('excellent'), mark('good'), mark('poor')];
+                })
+            });
+            y = doc.lastAutoTable.finalY + 6;
+            doc.autoTable({
+                startY: y, margin:{left:ML,right:MR}, theme:'grid',
+                styles:{fontSize:9,cellPadding:4,minCellHeight:18},
+                headStyles:{fillColor:[30,58,138],textColor:[255,255,255],fontStyle:'bold',halign:'center'},
+                head:[[{content:'COMMENTS ON THE JOB AS EXECUTED',colSpan:1,styles:{halign:'center'}}]],
+                body:[
+                    [{content:'REMARKS (IF ANY):\n\n' + (fb.remarks||''), styles:{minCellHeight:28}}],
+                    [{content:'SUGGESTIONS (IF ANY):\n\n' + (fb.suggestions||''), styles:{minCellHeight:28}}]
+                ]
+            });
+            y = doc.lastAutoTable.finalY + 6;
+            doc.autoTable({
+                startY:y, margin:{left:ML,right:MR}, theme:'grid',
+                styles:{fontSize:9,cellPadding:3,minCellHeight:24},
+                body:[[
+                    {content:'DATE\n\n' + (fmt(fb.signedDate)||''), styles:{cellWidth:CW/2,valign:'top'}},
+                    {content:'SIGNATURE OF INCHARGE\n\n' + (fb.inchargeName||''), styles:{cellWidth:CW/2,valign:'top'}}
+                ]]
+            });
+            y = doc.lastAutoTable.finalY + 4;
+            doc.setFontSize(8); doc.setFont('helvetica','italic'); doc.setTextColor(80,80,80);
+            const projRef = (wl.ref ? wl.ref + ' - ' : '') + (wl.vessel || wl.project || '');
+            doc.text(projRef, ML, y + 3);
+            const safe = (wl.project || 'CustomerFeedback').replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_-]/g,'');
+            doc.save('CustomerFeedback_' + safe + '_' + (fb.completionDate || new Date().toISOString().substring(0,10)) + '.pdf');
+            _showToast('✅ Feedback PDF downloaded', '#16a34a');
+        }
+
+        // ── KICK-OFF PDF (ITSPL/QR/PKR) ─────────────────────────────────
+        async function wlKickOffPDF(wlID) {
+            const wl = (workLogs || []).find(x => x.wlID === wlID);
+            if (!wl) { _showToast('Work log not found', '#dc2626'); return; }
+            const ko = wl.kickOffRecord;
+            if (!ko) { _showToast('No kick-off data on this work log', '#dc2626'); return; }
+            _showToast('⏳ Generating Kick-Off PDF…', '#0d7c66', 4000);
+            await _wlEnsureJsPDF();
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+            const PW = doc.internal.pageSize.width;
+            const ML = 15, MR = 15, CW = PW - ML - MR;
+            const logoData = settings?.logoData || '';
+            if (logoData) { try { doc.addImage(logoData, 'PNG', ML, 8, 22, 18); } catch (e) {} }
+            doc.setFontSize(13); doc.setFont('helvetica','bold'); doc.setTextColor(15,58,95);
+            doc.text('IMSE TECH - SERVICES PVT LTD', ML + (logoData ? 26 : 0), 14);
+            doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.setTextColor(80,80,80);
+            doc.text('ITSPL/QR/PKR', ML + (logoData ? 26 : 0), 19);
+            const metaX = PW - MR - 60;
+            doc.setDrawColor(120,120,120); doc.setLineWidth(0.2);
+            doc.rect(metaX, 8, 60, 18);
+            doc.setFontSize(7);
+            doc.text('ISSUE NO:',metaX+2,12);doc.text('01',metaX+30,12);
+            doc.text('DATE:',metaX+2,15);doc.text('01.08.2018',metaX+30,15);
+            doc.text('REV:',metaX+2,18);doc.text('00',metaX+30,18);
+            doc.text('PAGE:',metaX+2,21);doc.text('1 of 1',metaX+30,21);
+            doc.setDrawColor(15,58,95); doc.setLineWidth(0.6); doc.line(ML, 29, PW-MR, 29);
+            doc.setFontSize(14); doc.setFont('helvetica','bold'); doc.setTextColor(15,58,95);
+            doc.text('PROJECT KICK-OFF RECORD', PW/2, 38, {align:'center'});
+            let y = 45;
+            const fmt = d => d ? d.split('-').reverse().join('.') : '';
+            const optList = (items, selFn) => items.map(it => (selFn(it) ? '[✓] ' : '[ ] ') + it.label).join('   ');
+            doc.autoTable({
+                startY: y, margin:{left:ML,right:MR}, theme:'grid',
+                styles:{fontSize:9,cellPadding:3,valign:'top'},
+                columnStyles:{ 0:{cellWidth:60,fontStyle:'bold',fillColor:[241,245,249]}, 1:{cellWidth:CW-60} },
+                body:[
+                    ['PROJECT NUMBER AND DETAIL', ko.projectDetail || ''],
+                    ['EXPECTED DATE STARTING',    fmt(ko.expectedStartDate)],
+                    ['TEAM DETAILS',              ko.teamDetails || ''],
+                    ['DOCUMENTS',                 optList(_WL_KO_DOCUMENTS, d => !!(ko.documents||{})[d.key])],
+                    ['LOCATION OF WORK',          optList(_WL_KO_LOCATIONS, l => ko.locationOfWork === l.key)],
+                    ['EXPECTED DATE OF COMPLETION', fmt(ko.expectedCompletionDate)],
+                    ['SPECIFIC DETAILS IF ANY',   ko.specificDetails || ''],
+                    ['MANUALS / REFERENCE\nDOCUMENTS',
+                        _WL_KO_MANUALS.map(m => {
+                            const v = (ko.manualsRefDocs||{})[m.key];
+                            return m.label + ' — ' + (v === true ? 'YES' : v === false ? 'NO' : '—');
+                        }).join('\n')
+                    ],
+                    ['PERSONAL PROTECTIVE\nEQUIPMENT FOR ALL\nTECHNICIANS',
+                        optList(_WL_KO_PPE, p => !!(ko.ppe||{})[p.key])
+                    ],
+                    ['PERSONAL PROTECTIVE\nEQUIPMENT — CORRECT\nDONNING INSTRUCTION /\nUSAGE DEMONSTRATED',
+                        ko.ppeDonningVerified === true ? 'YES' : ko.ppeDonningVerified === false ? 'NO' : '—'
+                    ]
+                ]
+            });
+            y = doc.lastAutoTable.finalY + 10;
+            doc.autoTable({
+                startY:y, margin:{left:ML,right:MR}, theme:'grid',
+                styles:{fontSize:9,cellPadding:4,minCellHeight:24,valign:'top'},
+                body:[[
+                    {content:'ENGINEER / TECHNICIAN\n\n' + (ko.engineerName||''), styles:{cellWidth:CW/2}},
+                    {content:'GENERAL MANAGER\n\n' + (ko.generalManagerName||''), styles:{cellWidth:CW/2}}
+                ]]
+            });
+            y = doc.lastAutoTable.finalY + 4;
+            doc.setFontSize(8); doc.setFont('helvetica','italic'); doc.setTextColor(80,80,80);
+            const projRef = (wl.ref ? wl.ref + ' - ' : '') + (wl.vessel || wl.project || '');
+            doc.text(projRef, ML, y + 3);
+            const safe = (wl.project || 'KickOffRecord').replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_-]/g,'');
+            doc.save('KickOffRecord_' + safe + '_' + (ko.expectedStartDate || new Date().toISOString().substring(0,10)) + '.pdf');
+            _showToast('✅ Kick-Off PDF downloaded', '#16a34a');
+        }
+
+        // ── GROWTH OF WORK PDF (ITSPL/QR/GW-RW-R) ───────────────────────
+        async function wlGrowthOfWorkPDF(wlID) {
+            const wl = (workLogs || []).find(x => x.wlID === wlID);
+            if (!wl) { _showToast('Work log not found', '#dc2626'); return; }
+            const gw = wl.growthOfWorkReport;
+            if (!gw) { _showToast('No growth-of-work data on this work log', '#dc2626'); return; }
+            _showToast('⏳ Generating Growth of Work PDF…', '#0d7c66', 4000);
+            await _wlEnsureJsPDF();
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+            const PW = doc.internal.pageSize.width;
+            const ML = 15, MR = 15, CW = PW - ML - MR;
+            const logoData = settings?.logoData || '';
+            if (logoData) { try { doc.addImage(logoData, 'PNG', ML, 8, 22, 18); } catch (e) {} }
+            doc.setFontSize(13); doc.setFont('helvetica','bold'); doc.setTextColor(15,58,95);
+            doc.text('IMSE TECH - SERVICES PVT LTD', ML + (logoData ? 26 : 0), 14);
+            doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.setTextColor(80,80,80);
+            doc.text('ITSPL/QR/GW-RW-R', ML + (logoData ? 26 : 0), 19);
+            const metaX = PW - MR - 60;
+            doc.setDrawColor(120,120,120); doc.setLineWidth(0.2);
+            doc.rect(metaX, 8, 60, 18);
+            doc.setFontSize(7);
+            doc.text('ISSUE NO:',metaX+2,12);doc.text('01',metaX+30,12);
+            doc.text('DATE:',metaX+2,15);doc.text('16.11.2019',metaX+30,15);
+            doc.text('REV:',metaX+2,18);doc.text('00',metaX+30,18);
+            doc.text('PAGE:',metaX+2,21);doc.text('1 of 1',metaX+30,21);
+            doc.setDrawColor(15,58,95); doc.setLineWidth(0.6); doc.line(ML, 29, PW-MR, 29);
+            doc.setFontSize(14); doc.setFont('helvetica','bold'); doc.setTextColor(15,58,95);
+            doc.text('GROWTH OF WORK / RE WORK - REPORT', PW/2, 38, {align:'center'});
+            let y = 45;
+            const fmt = d => d ? d.split('-').reverse().join('.') : '';
+            const dateRange = (gw.dateFrom || gw.dateTo)
+                ? fmt(gw.dateFrom) + (gw.dateTo ? ' TO ' + fmt(gw.dateTo) : '')
+                : '';
+            doc.setFontSize(10); doc.setFont('helvetica','bold'); doc.setTextColor(15,58,95);
+            doc.text('PROJECT NO : ' + (gw.projectNo||''), ML, y, {maxWidth:CW}); y += 6;
+            doc.setFont('helvetica','normal'); doc.setTextColor(30,30,30);
+            doc.text('CUSTOMER : ' + (gw.customer||''), ML, y, {maxWidth:CW}); y += 6;
+            if (dateRange) { doc.text('DATE : ' + dateRange, ML, y); y += 4; }
+            y += 2;
+            const rows = (gw.workItems || []);
+            doc.autoTable({
+                startY:y, margin:{left:ML,right:MR}, theme:'grid',
+                styles:{fontSize:9,cellPadding:3,valign:'top'},
+                headStyles:{fillColor:[30,58,138],textColor:[255,255,255],fontStyle:'bold',fontSize:9,halign:'center'},
+                head:[[
+                    {content:'S.NO',styles:{cellWidth:14,halign:'center'}},
+                    {content:'AGREED WORK SCOPE',styles:{cellWidth:(CW-14)*0.42}},
+                    {content:'GROWTH OF WORK',styles:{cellWidth:(CW-14)*0.29}},
+                    {content:'RE WORK',styles:{cellWidth:(CW-14)*0.29}}
+                ]],
+                body: rows.length
+                    ? rows.map((r,i) => [{content:String(i+1),styles:{halign:'center'}}, r.agreedWorkScope||'', r.growthOfWork||'', r.reWork||''])
+                    : [[{content:'(No work items entered)',colSpan:4,styles:{halign:'center',fontStyle:'italic',textColor:[120,120,120]}}]]
+            });
+            y = doc.lastAutoTable.finalY + 8;
+            doc.setFontSize(10); doc.setFont('helvetica','bold'); doc.setTextColor(15,58,95);
+            doc.text('REMARKS:', ML, y); y += 4;
+            doc.setFont('helvetica','normal'); doc.setTextColor(30,30,30); doc.setFontSize(9);
+            const remarksLines = doc.splitTextToSize(gw.remarks || '', CW);
+            doc.text(remarksLines, ML, y);
+            y += Math.max(10, remarksLines.length * 4) + 6;
+            doc.setFontSize(10); doc.setFont('helvetica','bold'); doc.setTextColor(15,58,95);
+            doc.text('PREPARED BY: ' + (gw.preparedBy||''), ML, y); y += 6;
+            doc.text('DATE: ' + fmt(gw.preparedDate), ML, y); y += 10;
+            doc.setFontSize(8); doc.setFont('helvetica','italic'); doc.setTextColor(80,80,80);
+            doc.text('Issued By: MR', ML, y); y += 4;
+            doc.text('Approved By: DIRECTOR', ML, y);
+            const safe = (wl.project || 'GrowthOfWork').replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_-]/g,'');
+            doc.save('GrowthOfWork_' + safe + '_' + (gw.preparedDate || new Date().toISOString().substring(0,10)) + '.pdf');
+            _showToast('✅ Growth of Work PDF downloaded', '#16a34a');
+        }
+
+        // ── MAIN WORK LOG REPORT PDF ────────────────────────────────────
+        // Simplified port of field app's wlPDF — same layout, but photos
+        // hosted on Drive are fetched via the main app's own accessToken.
+        async function wlPDF(wlID) {
+            const wl = (workLogs || []).find(x => x.wlID === wlID);
+            if (!wl) { _showToast('Work log not found', '#dc2626'); return; }
+            _showToast('⏳ Generating Work Report PDF…', '#0d7c66', 6000);
+            await _wlEnsureJsPDF();
+
+            // Prefetch any Drive-hosted photos so autoTable can embed them.
+            // (Failed fetches stay null; render loop shows a placeholder.)
+            const days = [...(wl.dailyEntries || [])].sort((a,b) => (a.date||'').localeCompare(b.date||''));
+            const driveIds = [];
+            for (const d of days) {
+                for (const ph of (d.photos || [])) {
+                    if (ph && typeof ph === 'object' && ph.driveFileId && !ph.data) driveIds.push(ph.driveFileId);
+                }
+            }
+            const drivePhotoData = new Map();
+            if (driveIds.length) {
+                const unique = [...new Set(driveIds)];
+                _showToast(`⏳ Fetching ${unique.length} photo${unique.length===1?'':'s'} from Drive…`, '#0369a1', 30000);
+                await Promise.all(unique.map(async fid => {
+                    try { drivePhotoData.set(fid, await _wlDriveFileAsDataUrl(fid)); }
+                    catch (e) { console.warn('Drive photo fetch failed:', fid, e.message); drivePhotoData.set(fid, null); }
+                }));
+            }
 
             const { jsPDF } = window.jspdf;
-            const doc = new jsPDF();
-            const projectName = filtered[0]?.project || 'Project';
+            const doc = new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+            const ML = 14, MR = 14, CW = 210 - ML - MR, PW = 210;
+            const logoData = settings?.logoData || '';
+            const co = settings?.companyName || 'IMSE TECH SERVICES PVT LTD';
+            const vessel = wl.vesselName || wl.vessel || wl.location || '—';
+            const projName = wl.project || '—';
+            const fmt = d => d ? d.split('-').reverse().join('.') : '';
+            const dateRange = wl.workStartDate && wl.workEndDate
+                ? fmt(wl.workStartDate) + ' to ' + fmt(wl.workEndDate)
+                : wl.workStartDate ? fmt(wl.workStartDate) : (wl.date ? fmt(wl.date) : '—');
 
             // Header
-            doc.setFillColor(124, 58, 237);
-            doc.rect(0, 0, 210, 35, 'F');
-            doc.setFontSize(16); doc.setFont('helvetica','bold'); doc.setTextColor(255,255,255);
-            doc.text(settings.companyName || 'EASY EMS', 105, 13, {align:'center'});
-            doc.setFontSize(11); doc.setFont('helvetica','normal');
-            doc.text('PROJECT WORK REPORT', 105, 23, {align:'center'});
-            doc.setFontSize(9);
-            doc.text('Generated: ' + new Date().toLocaleDateString('en-IN'), 105, 31, {align:'center'});
+            if (logoData) { try { doc.addImage(logoData, 'PNG', ML, 8, 22, 18); } catch (e) {} }
+            doc.setFontSize(13); doc.setFont('helvetica','bold'); doc.setTextColor(15,58,95);
+            doc.text(co, ML + (logoData ? 26 : 0), 14);
+            doc.setFontSize(9); doc.setFont('helvetica','normal'); doc.setTextColor(80,80,80);
+            doc.text('PROJECT WORK REPORT', ML + (logoData ? 26 : 0), 20);
+            const metaX = PW - MR - 60;
+            doc.setDrawColor(120,120,120); doc.setLineWidth(0.2);
+            doc.rect(metaX, 8, 60, 18);
+            doc.setFontSize(7);
+            doc.text('Generated:', metaX+2, 12); doc.text(new Date().toLocaleDateString('en-IN'), metaX+30, 12);
+            doc.text('Status:',    metaX+2, 15); doc.text(wl.status || '—', metaX+30, 15);
+            doc.text('Days:',      metaX+2, 18); doc.text(String(days.length), metaX+30, 18);
+            doc.setDrawColor(15,58,95); doc.setLineWidth(0.6); doc.line(ML, 29, PW-MR, 29);
 
-            let y = 42;
-            doc.setTextColor(0,0,0);
+            // Project meta block
+            let y = 34;
+            doc.autoTable({
+                startY: y, margin:{left:ML,right:MR}, theme:'grid',
+                styles:{fontSize:9,cellPadding:2.5,valign:'top'},
+                columnStyles:{ 0:{cellWidth:34,fontStyle:'bold',fillColor:[241,245,249]}, 1:{cellWidth:(CW/2)-34}, 2:{cellWidth:34,fontStyle:'bold',fillColor:[241,245,249]}, 3:{cellWidth:(CW/2)-34} },
+                body:[
+                    ['Project', projName, 'Location / Vessel', vessel],
+                    ['Ref', wl.ref || '—', 'Date Range', dateRange],
+                    ['Client', wl.client || '—', 'Technicians', (wl.technicians||[]).map(t=>t.name).filter(Boolean).join(', ') || wl.staffName || '—']
+                ]
+            });
+            y = doc.lastAutoTable.finalY + 4;
 
-            filtered.forEach((w, idx) => {
+            // Daily entries — one section per day
+            for (let i = 0; i < days.length; i++) {
+                const d = days[i];
+                const dur = _wlCalcDur(d.startTime, d.endTime);
+                const dayTechs = (d.technicians||[]).map(t=>t.name).filter(Boolean).join(', ')
+                              || (wl.technicians||[]).map(t=>t.name).filter(Boolean).join(', ')
+                              || wl.staffName || '—';
+                const headerLine = `Day ${i+1}  ·  ${fmt(d.date)}${d.startTime ? '  ·  ' + d.startTime + '–' + (d.endTime||'?') + (dur ? ' (' + dur + ')' : '') : ''}${d.category ? '  ·  ' + d.category : ''}`;
+
+                // Force page break if near bottom
                 if (y > 250) { doc.addPage(); y = 15; }
 
-                // Entry header
                 doc.setFillColor(237, 233, 254);
-                doc.rect(14, y-4, 182, 8, 'F');
-                doc.setFontSize(9); doc.setFont('helvetica','bold'); doc.setTextColor(109, 40, 217);
-                doc.text(`${idx+1}. ${w.project} — ${w.date}`, 16, y+1);
-                doc.setTextColor(0,0,0); doc.setFont('helvetica','normal');
-                y += 7;
-
-                doc.setFontSize(8);
-                doc.text(`Staff: ${w.staffName}  |  Category: ${w.category}  |  Status: ${w.status}${w.location ? '  |  Location: '+w.location : ''}`, 16, y+2);
+                doc.rect(ML, y-4, CW, 8, 'F');
+                doc.setFontSize(10); doc.setFont('helvetica','bold'); doc.setTextColor(76, 29, 149);
+                doc.text(headerLine, ML + 2, y + 1);
                 y += 8;
 
-                // Description
-                const descLines = doc.splitTextToSize(w.description, 178);
-                doc.text(descLines, 16, y);
-                y += descLines.length * 4.5 + 2;
+                doc.setTextColor(0,0,0); doc.setFont('helvetica','normal'); doc.setFontSize(9);
+                doc.text('Technicians: ' + dayTechs, ML, y + 1); y += 5;
 
-                if (w.observations) {
-                    doc.setFont('helvetica','bold'); doc.text('Findings:', 16, y); doc.setFont('helvetica','normal');
-                    const obsLines = doc.splitTextToSize(w.observations, 170);
-                    doc.text(obsLines, 30, y); y += obsLines.length * 4.5 + 2;
-                }
-                if (w.recommendations) {
-                    doc.setFont('helvetica','bold'); doc.text('Recommendations:', 16, y); doc.setFont('helvetica','normal');
-                    const recLines = doc.splitTextToSize(w.recommendations, 165);
-                    doc.text(recLines, 48, y); y += recLines.length * 4.5 + 2;
+                const paragraphs = [
+                    d.description   ? {label:'Description',      text:d.description}   : null,
+                    d.observations   ? {label:'Findings',        text:d.observations}   : null,
+                    d.exclusions     ? {label:'Exclusions',      text:d.exclusions}     : null,
+                    d.recommendations? {label:'Recommendations', text:d.recommendations}: null
+                ].filter(Boolean);
+
+                paragraphs.forEach(p => {
+                    doc.setFont('helvetica','bold'); doc.text(p.label + ':', ML, y);
+                    doc.setFont('helvetica','normal');
+                    const lines = doc.splitTextToSize(p.text, CW - 6);
+                    doc.text(lines, ML + 2, y + 4);
+                    y += 4 + lines.length * 4 + 2;
+                    if (y > 265) { doc.addPage(); y = 15; }
+                });
+
+                if (d.witnessName) {
+                    doc.setFont('helvetica','bold'); doc.text('Witness:', ML, y);
+                    doc.setFont('helvetica','normal');
+                    const wl2 = d.witnessName + (d.witnessDesig ? ' (' + d.witnessDesig + ')' : '') + (d.witnessRemarks ? ' — ' + d.witnessRemarks : '');
+                    const lines = doc.splitTextToSize(wl2, CW - 6);
+                    doc.text(lines, ML + 2, y + 4);
+                    y += 4 + lines.length * 4 + 2;
                 }
 
-                // Photos
-                if ((w.photos||[]).length) {
-                    let px = 16, py = y;
-                    let photoCount = 0;
-                    w.photos.forEach(photo => {
-                        if (photoCount >= 3) return; // max 3 photos per entry in report
+                // Photos — 3 per row, embed after safe re-encoding
+                const photos = (d.photos || []);
+                if (photos.length) {
+                    y += 1;
+                    let px = ML, py = y;
+                    for (const ph of photos) {
+                        let src = null;
+                        if (typeof ph === 'string' && ph.startsWith('data:')) src = ph;
+                        else if (ph && typeof ph === 'object') {
+                            if (ph.data) src = ph.data;
+                            else if (ph.driveFileId) src = drivePhotoData.get(ph.driveFileId) || null;
+                        }
+                        if (!src) continue;
                         try {
-                            if (px + 55 > 196) { px = 16; py += 45; }
-                            if (py > 255) { doc.addPage(); py = 15; px = 16; }
-                            doc.addImage(photo, 'JPEG', px, py, 50, 40);
-                            px += 55; photoCount++;
-                        } catch(err) { /* skip bad image */ }
-                    });
+                            const safe = await _wlPdfSafeImage(src);
+                            if (!safe) continue;
+                            if (px + 58 > PW - MR) { px = ML; py += 45; }
+                            if (py > 250) { doc.addPage(); py = 15; px = ML; }
+                            doc.addImage(safe, 'JPEG', px, py, 55, 40);
+                            px += 58;
+                        } catch (e) { /* skip failed */ }
+                    }
                     y = py + 45;
                 }
-                y += 6;
-            });
+                y += 3;
+            }
 
-            // Footer
+            // Page footer
             const total = doc.internal.getNumberOfPages();
             for (let p = 1; p <= total; p++) {
                 doc.setPage(p);
-                doc.setFontSize(7); doc.setTextColor(150,150,150);
-                doc.text(`Page ${p} of ${total}  ·  EASY EMS — ${settings.companyName||''}`, 105, 292, {align:'center'});
+                doc.setFontSize(7); doc.setFont('helvetica','italic'); doc.setTextColor(120,120,120);
+                doc.text(`Page ${p} of ${total} · ${co}`, PW/2, 292, {align:'center'});
             }
-
-            doc.save(`WorkReport_${projectName.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.pdf`);
+            const safe = (projName || 'WorkReport').replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_-]/g,'');
+            doc.save('WorkReport_' + safe + '_' + (wl.workStartDate || new Date().toISOString().slice(0,10)) + '.pdf');
+            _showToast('✅ Work Report PDF downloaded', '#16a34a');
         }
 
         // ════════════════════════════════════════════════════════════════════
