@@ -36530,17 +36530,22 @@ Automated WFH alert — ${company} Attendance System.`;
 
             // 1b) AR Dashboard historical invoices — money IN when tagged to
             //     this bank via the "Deposit to Bank Account" field on the
-            //     historical entry modal. Only entries with an actual
-            //     `received > 0` and matching bank are shown; the receivedDate
-            //     is used if present, else invoice date as fallback.
+            //     historical entry modal. `received` is computed dynamically
+            //     from the paymentsReceived array (cash only) to match the
+            //     AR dashboard display. Stored ar.received values on legacy
+            //     records had TDS double-counted (bug fixed earlier today);
+            //     computing from the array rescues those without needing to
+            //     re-save each invoice.
             (arInvoices||[]).forEach(ar => {
                 if (ar.bankAccountId !== bankId) return;
-                const received = +ar.received || 0;
-                if (received <= 0) return;
+                const cashReceived = Array.isArray(ar.paymentsReceived) && ar.paymentsReceived.length
+                    ? ar.paymentsReceived.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0)
+                    : (+ar.received || 0);
+                if (cashReceived <= 0) return;
                 rows.push({
                     date: ar.receivedDate || ar.invoiceDate || '',
                     desc: `${ar.invoiceNo||'AR'} — ${ar.client||''} (historical payment received)`,
-                    credit: received, debit: 0, src: 'AR Historical'
+                    credit: cashReceived, debit: 0, src: 'AR Historical'
                 });
             });
 
