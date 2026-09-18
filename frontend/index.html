@@ -8630,6 +8630,71 @@
             renderView();
         }
 
+        // ── Shared pagination helpers ──
+        // Each list section uses a short key (e.g. 'exp', 'de', 'fe', 'pc', 'sf').
+        // Page size persists to localStorage; page number is memory-only.
+        window._pgState = window._pgState || {};
+        function _pgInit(key, defaultLimit) {
+            if (!window._pgState[key]) {
+                let limit = defaultLimit;
+                try {
+                    const v = localStorage.getItem('ems_pg_' + key);
+                    const n = v ? parseInt(v, 10) : NaN;
+                    if (!isNaN(n) && [10, 20, 100].includes(n)) limit = n;
+                } catch {}
+                window._pgState[key] = { limit, page: 0 };
+            }
+            return window._pgState[key];
+        }
+        function _pgSetLimit(key, n) {
+            window._pgState[key] = { limit: n, page: 0 };
+            try { localStorage.setItem('ems_pg_' + key, String(n)); } catch {}
+            renderView();
+        }
+        function _pgSetPage(key, n) {
+            if (!window._pgState[key]) return;
+            window._pgState[key].page = n;
+            renderView();
+            try { window.scrollTo({ top: 0, behavior: 'instant' }); } catch { window.scrollTo(0, 0); }
+        }
+        function _pgResetPage(key) {
+            if (window._pgState[key]) window._pgState[key].page = 0;
+        }
+        function _pgPills(key) {
+            const s = window._pgState[key] || { limit: 10 };
+            return [10, 20, 100].map(n => {
+                const active = n === s.limit;
+                return `<button onclick="_pgSetLimit('${key}',${n})" style="padding:6px 12px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid ${active?'#0d7c66':'#e5e7eb'};background:${active?'#0d7c66':'#fff'};color:${active?'#fff':'#6b7280'};min-width:44px">${n}</button>`;
+            }).join('');
+        }
+        function _pgControlsHtml(key) {
+            return `<div style="display:flex;justify-content:flex-end;align-items:center;gap:6px;margin-bottom:12px;font-size:12px;color:#6b7280">
+                <span>Show:</span>${_pgPills(key)}<span>per page</span>
+            </div>`;
+        }
+        function _pgHtml(key, total) {
+            const s = window._pgState[key] || { limit: 10, page: 0 };
+            const totalPages = Math.max(1, Math.ceil(total / s.limit));
+            const page = Math.min(s.page, totalPages - 1);
+            if (total <= s.limit) return '';
+            const prevDis = page === 0;
+            const nextDis = page >= totalPages - 1;
+            return `<div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;padding:8px 4px;font-size:13px;color:#6b7280;gap:8px;flex-wrap:wrap">
+                <button onclick="_pgSetPage('${key}',${page-1})" ${prevDis?'disabled':''} style="padding:6px 12px;border-radius:8px;border:1px solid #e5e7eb;background:${prevDis?'#f1f5f9':'#fff'};color:${prevDis?'#cbd5e1':'#1e3a5f'};cursor:${prevDis?'not-allowed':'pointer'};font-weight:600">← Prev</button>
+                <span style="text-align:center">Page ${page+1} of ${totalPages} <span style="color:#94a3b8">· ${total} total</span></span>
+                <button onclick="_pgSetPage('${key}',${page+1})" ${nextDis?'disabled':''} style="padding:6px 12px;border-radius:8px;border:1px solid #e5e7eb;background:${nextDis?'#f1f5f9':'#fff'};color:${nextDis?'#cbd5e1':'#1e3a5f'};cursor:${nextDis?'not-allowed':'pointer'};font-weight:600">Next →</button>
+            </div>`;
+        }
+        function _pgSlice(key, arr) {
+            const s = window._pgState[key] || { limit: 10, page: 0 };
+            const totalPages = Math.max(1, Math.ceil(arr.length / s.limit));
+            // Persistently clamp — after a filter change reduces the list,
+            // this rolls state.page back into range so no stale page number
+            // survives across renders.
+            if (s.page >= totalPages) s.page = Math.max(0, totalPages - 1);
+            return arr.slice(s.page * s.limit, (s.page + 1) * s.limit);
+        }
+
         function renderView() {
             const content = document.getElementById('mainContent');
             if (!content) { console.error('mainContent element not found'); return; }
@@ -11790,7 +11855,10 @@
                              });
             if (!list || list.length === 0)
                 return '<p class="text-gray-400 text-center py-12">No expenses yet. Add your first bill!</p>';
-            return `<div class="overflow-x-auto">
+            _pgInit('exp', 10);
+            const paged = _pgSlice('exp', list);
+            return `${_pgControlsHtml('exp')}
+            <div class="overflow-x-auto">
                 <table class="w-full text-sm">
                     <thead class="bg-orange-50 text-xs text-gray-500 uppercase">
                         <tr>
@@ -11806,10 +11874,11 @@
                         </tr>
                     </thead>
                     <tbody>
-                        ${list.map(e => expRow(e)).join('')}
+                        ${paged.map(e => expRow(e)).join('')}
                     </tbody>
                 </table>
-            </div>`;
+            </div>
+            ${_pgHtml('exp', list.length)}`;
         }
 
         function expRow(e) {
@@ -12038,6 +12107,7 @@
             const tally = document.getElementById('expFilterTally')?.value||'';
             // Persist for next render
             window._expFilterState = { q, st, mo, tally };
+            _pgResetPage('exp');   // filter changed → back to page 1
             const filtered = expenses.filter(e => {
                 // Search: include tally voucher number in search
                 const mq = !q || (e.billNo||'').toLowerCase().includes(q) ||
@@ -22350,7 +22420,8 @@
                 ${q ? `<span class="text-xs text-gray-400 ml-2">${filtered.length} of ${staff.length} shown</span>` : ''}
             </div>`;
             if (!filtered.length) return searchBar + `<p class="text-center text-gray-400 py-12 text-sm">No staff match "${window._staffListSearch}".</p>`;
-            return searchBar + `<div class="overflow-x-auto"><table class="w-full text-sm">
+            _pgInit('sf', 10);
+            return searchBar + _pgControlsHtml('sf') + `<div class="overflow-x-auto"><table class="w-full text-sm">
                 <thead class="bg-teal-50 text-xs text-gray-500 uppercase">
                     <tr>
                         <th class="px-3 py-2 text-left">Name</th>
@@ -22364,7 +22435,7 @@
                     </tr>
                 </thead>
                 <tbody>
-                    ${filtered.map(s => `<tr class="border-b hover:bg-teal-50">
+                    ${_pgSlice('sf', filtered).map(s => `<tr class="border-b hover:bg-teal-50">
                         <td class="px-3 py-2 font-medium text-teal-800">${s.name}</td>
                         <td class="px-3 py-2"><span class="px-2 py-0.5 rounded-full text-xs ${s.staffType==='Technician' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}">${s.staffType}</span></td>
                         <td class="px-3 py-2">${s.designation||'—'}</td>
@@ -22381,7 +22452,7 @@
                         </td>
                     </tr>`).join('')}
                 </tbody>
-            </table></div>`;
+            </table></div>` + _pgHtml('sf', filtered.length);
         }
 
         const ATT_STATUS_COLORS = {
@@ -30569,6 +30640,8 @@ Automated WFH alert — ${company} Attendance System.`;
                 </div>
             </div>
 
+            ${(() => { _pgInit('de', 10); return _pgControlsHtml('de'); })()}
+
             <!-- Table -->
             <div class="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
                 <table class="w-full text-sm">
@@ -30589,7 +30662,7 @@ Automated WFH alert — ${company} Attendance System.`;
                     </thead>
                     <tbody>
                         ${filtered.length === 0 ? `<tr><td colspan="11" class="px-4 py-12 text-center text-gray-400">No entries found. Click + New Entry to add.</td></tr>` :
-                            filtered.map(d => {
+                            (() => { _pgInit('de', 10); return _pgSlice('de', filtered); })().map(d => {
                                 const safeId = d.deID.replace(/'/g,"\'");
                                 const dirIdx = d.director === 'dir1' ? 0 : 1;
                                 const dirName = dirs[dirIdx] || d.director;
@@ -30690,7 +30763,8 @@ Automated WFH alert — ${company} Attendance System.`;
                             }).join('')}
                     </tbody>
                 </table>
-            </div>`;
+            </div>
+            ${_pgHtml('de', filtered.length)}`;
         }
 
         function toggleDirExpDetail(id) {
@@ -33668,6 +33742,7 @@ Automated WFH alert — ${company} Attendance System.`;
                             <span>Field Expense Entries (${entryQ ? displayItems.length + ' of ' + (p.items||[]).length : (p.items||[]).length})</span>
                             ${entryQ && displayItems.length < (p.items||[]).length ? `<span class="text-yellow-600 font-normal normal-case">🔍 filtered</span>` : ''}
                         </div>
+                        ${(() => { _pgInit('fe_' + p.projExpID, 20); return _pgControlsHtml('fe_' + p.projExpID); })()}
                         <table class="w-full text-xs">
                             <thead class="bg-yellow-50"><tr>
                                 <th class="px-3 py-1.5 text-left">Date</th>
@@ -33680,7 +33755,7 @@ Automated WFH alert — ${company} Attendance System.`;
                                 <th class="px-3 py-1.5 text-center">Bills</th>
                                 <th class="px-3 py-1.5 text-center">Tally / Del</th>
                             </tr></thead>
-                            <tbody>${displayItems.map(item=>{
+                            <tbody>${_pgSlice('fe_' + p.projExpID, displayItems).map(item=>{
                                 const techs=(item.technicians||[]).map(t=>t.name).join(', ')||item.staffName||'—';
                                 const attCount=(item.billAttachments||[]).length+(item.billData?1:0);
                                 return `<tr class="border-t hover:bg-yellow-50">
@@ -33719,6 +33794,7 @@ Automated WFH alert — ${company} Attendance System.`;
                                 </tr>`;
                             }).join('')}</tbody>
                         </table>
+                        ${_pgHtml('fe_' + p.projExpID, displayItems.length)}
                     </div>` : '<p class="text-xs text-gray-400 px-4 py-2 border-t">No field expense entries yet.</p>'}
                 </div>`;
             }).join('');
@@ -37236,6 +37312,8 @@ Automated WFH alert — ${company} Attendance System.`;
                 <span class="text-xs text-gray-500 ml-auto">${txns.length} transaction${txns.length===1?'':'s'}</span>
             </div>
 
+            ${(() => { _pgInit('pc', 10); return _pgControlsHtml('pc'); })()}
+
             <div class="bg-white rounded-2xl shadow-sm overflow-hidden mb-6">
                 <div class="overflow-x-auto">
                     <table class="w-full text-sm">
@@ -37255,7 +37333,7 @@ Automated WFH alert — ${company} Attendance System.`;
                         </thead>
                         <tbody>
                             ${txns.length === 0 ? `
-                            <tr><td colspan="10" class="px-3 py-8 text-center text-gray-400 italic">No transactions match the current filters</td></tr>` : txns.map(t => {
+                            <tr><td colspan="10" class="px-3 py-8 text-center text-gray-400 italic">No transactions match the current filters</td></tr>` : (() => { _pgInit('pc', 10); return _pgSlice('pc', txns); })().map(t => {
                                 const office = offices.find(o => o.officeID === t.officeID) || {officeName: t.officeID};
                                 const isExp = t.txnType === 'EXPENSE';
                                 const typeLabel = ({EXPENSE:'💸 Expense', REPLENISHMENT:'💰 Replenish', OPENING_BALANCE:'🏁 Opening', ADJUSTMENT:'⚙ Adjust', STAFF_LOAN_RECOVERY:'💵 Loan Recovery'})[t.txnType] || t.txnType;
@@ -37299,6 +37377,7 @@ Automated WFH alert — ${company} Attendance System.`;
                         </tbody>
                     </table>
                 </div>
+                ${_pgHtml('pc', txns.length)}
             </div>
 
             ${recentStatements.length > 0 ? `
