@@ -27752,6 +27752,13 @@ Automated WFH alert — ${company} Attendance System.`;
                 });
             }
             window._arWorkingPayments = payments;
+            // Credit notes issued against this historical invoice — stored on
+            // the record, with an applyCreditNote flag that toggles whether
+            // they reduce Balance Due / Bank credit. Same calculation shape
+            // as the linked-CN feature on TXN invoices, but data is entered
+            // inline here since HIST invoices have no linked CN transaction.
+            window._arWorkingCreditNotes = Array.isArray(ex?.creditNotes) ? JSON.parse(JSON.stringify(ex.creditNotes)) : [];
+            window._arApplyCreditNote    = !!ex?.applyCreditNote;
             const currCode = ex?.currency || 'INR';
             const currSym = (CURRENCY_SYMBOLS && CURRENCY_SYMBOLS[currCode]) || '₹';
 
@@ -27878,14 +27885,54 @@ Automated WFH alert — ${company} Attendance System.`;
                         </div>
                     </div>
 
+                    <!-- Credit Notes issued against this historical invoice.
+                         Inline editable — HIST records have no separate CN
+                         transactions to link to, so details are entered here.
+                         Same calc as TXN case: when the checkbox is on,
+                         Balance = Grand Total − Received − TDS − CN Total. -->
+                    <div class="bg-purple-50 border border-purple-200 rounded-xl p-4 mb-3">
+                        <div class="flex items-center justify-between flex-wrap gap-2 mb-2">
+                            <div class="flex items-center gap-2">
+                                <span class="text-lg">🔗</span>
+                                <h3 class="text-sm font-bold text-purple-800">Credit Notes</h3>
+                                <span id="arCnCount" class="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-semibold"></span>
+                            </div>
+                            <div class="flex items-center gap-3 flex-wrap">
+                                <label class="flex items-center gap-2 cursor-pointer bg-white px-3 py-1.5 rounded-lg border border-purple-300 hover:bg-purple-100">
+                                    <input type="checkbox" id="arApplyCreditNote" ${window._arApplyCreditNote?'checked':''} onchange="_arToggleApplyCN(this.checked)"/>
+                                    <span class="text-xs font-semibold text-purple-800">Apply to Balance Due</span>
+                                </label>
+                                <button onclick="_arAddCreditNote()" class="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-xs font-semibold hover:bg-purple-700">+ Add Credit Note</button>
+                            </div>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-xs">
+                                <thead class="bg-purple-100 text-purple-800">
+                                    <tr>
+                                        <th class="px-2 py-1.5 text-left">CN No / Ref</th>
+                                        <th class="px-2 py-1.5 text-left">Date</th>
+                                        <th class="px-2 py-1.5 text-right">Amount</th>
+                                        <th class="px-2 py-1.5 text-left">Remarks</th>
+                                        <th class="px-2 py-1.5"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="arCreditNoteRows"></tbody>
+                            </table>
+                        </div>
+                        <p class="text-[11px] text-purple-600 mt-2" id="arCnHint">
+                            No credit notes yet. Tap "+ Add Credit Note" to record one against this invoice.
+                        </p>
+                    </div>
+
                     <div class="flex justify-end gap-3 pt-2 border-t sticky bottom-0 bg-white">
-                        <button onclick="document.getElementById('arInvModal').remove();delete window._arWorkingPayments;" class="px-4 py-2 border border-gray-300 text-gray-600 rounded-lg text-sm">Cancel</button>
+                        <button onclick="document.getElementById('arInvModal').remove();delete window._arWorkingPayments;delete window._arWorkingCreditNotes;delete window._arApplyCreditNote;" class="px-4 py-2 border border-gray-300 text-gray-600 rounded-lg text-sm">Cancel</button>
                         <button onclick="saveARInvoice('${arID||''}')" class="px-5 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700">💾 Save Invoice</button>
                     </div>
                 </div>
             </div>`;
             document.body.appendChild(modal);
             _arRenderPaymentRows();
+            _arRenderCreditNoteRows();
             _arRecomputeSummary();
         }
 
@@ -28045,31 +28092,80 @@ Automated WFH alert — ${company} Attendance System.`;
                 const brokendown = (+p.itTdsAmt || 0) + (+p.gstTdsAmt || 0);
                 return s + Math.max(combined, brokendown);
             }, 0);
-            const balance = Math.max(0, +(invAmt - received - tdsTotal).toFixed(2));
+            // Credit note deduction — only applied when the "Apply to Balance
+            // Due" checkbox in the CN section is ticked. Otherwise CNs are
+            // recorded on the invoice but stay informational.
+            const cnRows = window._arWorkingCreditNotes || [];
+            const cnTotal = cnRows.reduce((s, cn) => s + (+cn.amount || 0), 0);
+            const cnApplied = !!window._arApplyCreditNote && cnTotal > 0;
+            const cnDeducted = cnApplied ? cnTotal : 0;
+            const balance = Math.max(0, +(invAmt - received - tdsTotal - cnDeducted).toFixed(2));
             const { sym } = _arCurrentCurrency();
             const fmt = n => sym + (+n || 0).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2});
             const g = document.getElementById('arSumGrand');    if (g) g.textContent = fmt(invAmt);
-            // "Amount Receivable" tile — Grand Total minus total TDS. This
-            // is the NET amount that should hit the bank after the client
-            // deducts TDS at source. Useful for cross-checking against the
-            // bank statement: what actually credited should equal this
-            // figure (± any rounding). Never negative — clamp at 0 for the
-            // edge case of over-declared TDS.
-            const receivable = Math.max(0, +(invAmt - tdsTotal).toFixed(2));
+            // "Amount Receivable" tile — Grand Total minus total TDS (and CN
+            // when applied). This is the NET amount that should hit the bank
+            // after the client deducts TDS/CN at source. Useful for cross-
+            // checking against the bank statement: what actually credited
+            // should equal this figure (± any rounding). Never negative.
+            const receivable = Math.max(0, +(invAmt - tdsTotal - cnDeducted).toFixed(2));
             const rcv = document.getElementById('arSumReceivable'); if (rcv) rcv.textContent = fmt(receivable);
-            // "Received" tile shows total INVOICE VALUE settled = actual
-            // bank credits + TDS deducted at source (both count toward
-            // settling the invoice, since TDS is claimable back at ITR
-            // filing). When received + tdsTotal ≈ grandTotal, the invoice
-            // is fully settled and Balance Due is ~zero.
-            const r = document.getElementById('arSumReceived'); if (r) r.textContent = fmt(received + tdsTotal);
+            // "Received" tile shows total INVOICE VALUE settled = actual bank
+            // credits + TDS deducted at source + CN when applied (all count
+            // toward settling the invoice). When received + tdsTotal + cnDeducted
+            // ≈ grandTotal, the invoice is fully settled and Balance Due is ~0.
+            const r = document.getElementById('arSumReceived'); if (r) r.textContent = fmt(received + tdsTotal + cnDeducted);
             const b = document.getElementById('arSumBalance');  if (b) b.textContent = fmt(balance);
+            // Refresh CN section count/hint if it's showing.
+            const countEl = document.getElementById('arCnCount');
+            if (countEl) countEl.textContent = cnRows.length ? `${cnRows.length} · ${fmt(cnTotal)}` : '';
+            const hint = document.getElementById('arCnHint');
+            if (hint) hint.classList.toggle('hidden', cnRows.length > 0);
             // Every row's Amt Receivable + Difference cells depend on invAmt
             // (they read it fresh each render). When the top-level invoice
             // amount changes, refresh every row surgically — no focus loss,
             // no innerHTML regen. Cheap: O(rows) DOM ops, no re-parsing.
             for (let i = 0; i < rows.length; i++) _arUpdateRowSurgical(i);
         }
+
+        // ── Credit Note helpers (mirror the payments-row pattern) ──
+        function _arAddCreditNote() {
+            window._arWorkingCreditNotes = window._arWorkingCreditNotes || [];
+            window._arWorkingCreditNotes.push({ cnNo: '', date: new Date().toISOString().slice(0, 10), amount: 0, remarks: '' });
+            _arRenderCreditNoteRows();
+            _arRecomputeSummary();
+        }
+        function _arRemoveCreditNote(idx) {
+            (window._arWorkingCreditNotes || []).splice(idx, 1);
+            _arRenderCreditNoteRows();
+            _arRecomputeSummary();
+        }
+        function _arUpdateCreditNoteField(idx, field, val) {
+            const cn = (window._arWorkingCreditNotes || [])[idx];
+            if (!cn) return;
+            cn[field] = (field === 'amount') ? (parseFloat(val) || 0) : val;
+            // Amount change affects the summary; other fields are pure data.
+            if (field === 'amount') _arRecomputeSummary();
+        }
+        function _arToggleApplyCN(checked) {
+            window._arApplyCreditNote = !!checked;
+            _arRecomputeSummary();
+        }
+        function _arRenderCreditNoteRows() {
+            const body = document.getElementById('arCreditNoteRows');
+            if (!body) return;
+            const rows = window._arWorkingCreditNotes || [];
+            if (!rows.length) { body.innerHTML = ''; return; }
+            body.innerHTML = rows.map((cn, i) => `
+                <tr class="border-t border-purple-100" data-cn-idx="${i}">
+                    <td class="px-1 py-1"><input type="text" value="${(cn.cnNo || '').replace(/"/g,'&quot;')}" oninput="_arUpdateCreditNoteField(${i},'cnNo',this.value)" class="w-full text-right px-1.5 py-1 border border-purple-200 rounded text-[11px]" placeholder="CN-###"/></td>
+                    <td class="px-1 py-1"><input type="date" value="${cn.date || ''}" oninput="_arUpdateCreditNoteField(${i},'date',this.value)" class="w-full px-1.5 py-1 border border-purple-200 rounded text-[11px]"/></td>
+                    <td class="px-1 py-1"><input type="number" step="0.01" min="0" value="${+cn.amount || 0}" oninput="_arUpdateCreditNoteField(${i},'amount',this.value)" class="w-full text-right px-1.5 py-1 border border-purple-200 rounded text-[11px]"/></td>
+                    <td class="px-1 py-1"><input type="text" value="${(cn.remarks || '').replace(/"/g,'&quot;')}" oninput="_arUpdateCreditNoteField(${i},'remarks',this.value)" class="w-full px-1.5 py-1 border border-purple-200 rounded text-[11px]" placeholder="Reason / reference"/></td>
+                    <td class="px-1 py-1 text-center"><button onclick="_arRemoveCreditNote(${i})" class="text-red-600 hover:text-red-800 text-[11px] font-medium">✕</button></td>
+                </tr>`).join('');
+        }
+
         function _arOnCurrencyChange() {
             const { code, sym } = _arCurrentCurrency();
             const lbl = document.getElementById('arAmtCurrLabel'); if (lbl) lbl.textContent = `(${sym})`;
@@ -28103,7 +28199,13 @@ Automated WFH alert — ${company} Attendance System.`;
                 const brokendownTDS = (+p.itTdsAmt || 0) + (+p.gstTdsAmt || 0);
                 return s + Math.max(combinedTDS, brokendownTDS);
             }, 0);
-            const balance = Math.max(0, +(invAmt - received - tdsDeducted).toFixed(2));
+            // Credit notes recorded against this HIST invoice + the flag that
+            // toggles whether they reduce Balance. Same shape as TXN invoices.
+            const creditNotes = (window._arWorkingCreditNotes || []).filter(cn => (+cn.amount||0) > 0 || (cn.cnNo||'').trim() || (cn.remarks||'').trim());
+            const applyCreditNote = !!window._arApplyCreditNote;
+            const cnTotal = creditNotes.reduce((s, cn) => s + (+cn.amount || 0), 0);
+            const cnDeducted = applyCreditNote ? cnTotal : 0;
+            const balance = Math.max(0, +(invAmt - received - tdsDeducted - cnDeducted).toFixed(2));
             // Store `received` as the cash amount only (not TDS credit),
             // matching how TXN-sourced invoices compute their received value.
             // Previously stored `received + tdsDeducted` which showed as an
@@ -28112,9 +28214,9 @@ Automated WFH alert — ${company} Attendance System.`;
             const lastPaymentDate = paymentsReceived.length ? paymentsReceived.map(p => p.date).filter(Boolean).sort().slice(-1)[0] || '' : '';
             if (arID) {
                 const idx=arInvoices.findIndex(a=>a.arID===arID);
-                if (idx>=0) Object.assign(arInvoices[idx],{client,invoiceNo:invNo,invoiceDate:invDate,dueDate,invoiceAmt:invAmt,currency,paymentsReceived,received:legacyReceived,receivedDate:lastPaymentDate,bankAccountId,balance,description:desc,poRef});
+                if (idx>=0) Object.assign(arInvoices[idx],{client,invoiceNo:invNo,invoiceDate:invDate,dueDate,invoiceAmt:invAmt,currency,paymentsReceived,received:legacyReceived,receivedDate:lastPaymentDate,bankAccountId,balance,description:desc,poRef,creditNotes,applyCreditNote});
             } else {
-                arInvoices.push({arID:'AR-'+Date.now(),source:'historical',client,invoiceNo:invNo,invoiceDate:invDate,dueDate,invoiceAmt:invAmt,currency,paymentsReceived,received:legacyReceived,receivedDate:lastPaymentDate,bankAccountId,balance,description:desc,poRef,followUps:[],createdAt:new Date().toISOString()});
+                arInvoices.push({arID:'AR-'+Date.now(),source:'historical',client,invoiceNo:invNo,invoiceDate:invDate,dueDate,invoiceAmt:invAmt,currency,paymentsReceived,received:legacyReceived,receivedDate:lastPaymentDate,bankAccountId,balance,description:desc,poRef,creditNotes,applyCreditNote,followUps:[],createdAt:new Date().toISOString()});
             }
             try {
                 await saveData('arInvoices',arInvoices);
@@ -36542,10 +36644,18 @@ Automated WFH alert — ${company} Attendance System.`;
                     ? ar.paymentsReceived.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0)
                     : (+ar.received || 0);
                 if (cashReceived <= 0) return;
+                // Subtract linked credit notes when the flag is on — this
+                // reflects the actual net cash that hit the bank when the
+                // client applied a credit note against this invoice.
+                const cnDeducted = (ar.applyCreditNote && Array.isArray(ar.creditNotes))
+                    ? ar.creditNotes.reduce((s, cn) => s + (parseFloat(cn.amount) || 0), 0)
+                    : 0;
+                const netCredit = Math.max(0, cashReceived - cnDeducted);
+                if (netCredit <= 0) return;
                 rows.push({
                     date: ar.receivedDate || ar.invoiceDate || '',
-                    desc: `${ar.invoiceNo||'AR'} — ${ar.client||''} (historical payment received)`,
-                    credit: cashReceived, debit: 0, src: 'AR Historical'
+                    desc: `${ar.invoiceNo||'AR'} — ${ar.client||''} (historical payment received${cnDeducted>0?' · net of CN ₹'+cnDeducted.toFixed(2):''})`,
+                    credit: netCredit, debit: 0, src: 'AR Historical'
                 });
             });
 
