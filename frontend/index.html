@@ -1660,6 +1660,31 @@
                     <p id="txnPaymentsEmpty" class="text-xs text-gray-400 text-center py-2">No payments recorded yet.</p>
                 </div>
 
+                <!-- Linked Credit Notes (Invoice category only; hidden until a linked CN exists).
+                     Populated by refreshLinkedCreditNotesUI() whenever the modal opens on an
+                     Invoice. The checkbox persists on the invoice as applyCreditNote and, when
+                     ticked, reduces Balance Due here and in AR / bank views. -->
+                <div id="linkedCreditNotesSection" class="mb-4 hidden">
+                    <div class="bg-purple-50 border border-purple-200 rounded-xl p-4">
+                        <div class="flex items-center justify-between flex-wrap gap-2 mb-2">
+                            <div class="flex items-center gap-2">
+                                <span class="text-lg">🔗</span>
+                                <h3 class="text-sm font-bold text-purple-800">Linked Credit Notes</h3>
+                                <span id="linkedCNCount" class="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-semibold"></span>
+                            </div>
+                            <label class="flex items-center gap-2 cursor-pointer bg-white px-3 py-1.5 rounded-lg border border-purple-300 hover:bg-purple-100">
+                                <input type="checkbox" id="txnApplyCreditNote"/>
+                                <span class="text-xs font-semibold text-purple-800">Apply to Balance Due</span>
+                            </label>
+                        </div>
+                        <div id="linkedCNList" class="text-xs text-gray-700 space-y-1"></div>
+                        <p class="text-[11px] text-purple-600 mt-2">
+                            When ticked, Balance Due = Grand Total − Received − TDS − Credit Notes total.
+                            The same adjustment flows through to the AR dashboard and Bank ledger.
+                        </p>
+                    </div>
+                </div>
+
                 <div class="flex gap-3 justify-end pt-4 border-t">
                     <button type="button" onclick="closeTransactionModal()" class="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
                     <button type="submit" id="txnSaveBtn" class="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Save</button>
@@ -20003,6 +20028,10 @@
             }
             toggleTxnPaymentsSection();   // show/hide based on category
             recomputeInvoicePaymentBalance();
+            // Populate the "Linked Credit Notes" section if this is an Invoice
+            // with one or more Credit Notes referencing its txnID. No-op for
+            // non-Invoice categories and Invoices with no linked CNs.
+            refreshLinkedCreditNotesUI(txn);
 
             toggleSupportingDocs();
             updateTxnBankSection();  // Show/hide and populate bank dropdown
@@ -20722,14 +20751,29 @@
                              + (parseFloat(tr.querySelector('.pay-ittds-amt')?.value) || 0)
                              + (parseFloat(tr.querySelector('.pay-gsttds-amt')?.value) || 0);
             });
-            const balance = +(grandTotal - received - tdsDeducted).toFixed(2);
+            // If the Apply Credit Note checkbox is on and there are linked CNs,
+            // include their sum in the Balance Due calculation. Mirrors the
+            // AR-dashboard and bank-ledger logic so the tile matches what
+            // the user will see downstream after save.
+            const applyCN = !!document.getElementById('txnApplyCreditNote')?.checked;
+            let cnDeducted = 0;
+            if (applyCN && currentTransaction?.txnID) {
+                cnDeducted = (transactions||[]).filter(t =>
+                    t.txnCategory === 'CREDIT_NOTE' &&
+                    t.refInvoiceTxnID === currentTransaction.txnID &&
+                    !['Draft','Cancelled'].includes(t.status)
+                ).reduce((s, cn) => s + (calculateTotals(cn.items||[]).total || 0), 0);
+            }
+            const balance = +(grandTotal - received - tdsDeducted - cnDeducted).toFixed(2);
             const fmt = n => '₹' + (typeof formatNumber === 'function' ? formatNumber(n) : Number(n).toFixed(2));
             const elTot = document.getElementById('balGrandTotal');
             const elRcv = document.getElementById('balReceived');
             const elDue = document.getElementById('balDue');
             const tile  = document.getElementById('balanceDueTile');
             if (elTot) elTot.textContent = fmt(grandTotal);
-            if (elRcv) elRcv.textContent = fmt(received) + (tdsDeducted > 0.005 ? ` (+ ${fmt(tdsDeducted)} TDS)` : '');
+            if (elRcv) elRcv.textContent = fmt(received)
+                + (tdsDeducted > 0.005 ? ` (+ ${fmt(tdsDeducted)} TDS)` : '')
+                + (cnDeducted > 0.005 ? ` (+ ${fmt(cnDeducted)} CN)` : '');
             if (elDue) elDue.textContent = fmt(balance);
             // Recolour the Balance Due tile: red for outstanding, green for settled,
             // amber for over-paid (which is a data-entry warning, not a real state).
@@ -20903,6 +20947,11 @@
                     refInvoiceTxnID: document.getElementById('txnCategory')?.value === 'CREDIT_NOTE'
                         ? (document.getElementById('txnRefInvoiceTxnID')?.value || '')
                         : '',
+                    // For Invoice only — persist the "apply linked CN to Balance"
+                    // checkbox from the modal. Read as boolean; unchecked = false.
+                    applyCreditNote: document.getElementById('txnCategory')?.value === 'INVOICE'
+                        ? !!document.getElementById('txnApplyCreditNote')?.checked
+                        : undefined,
                     clientPIC: document.getElementById('txnClientPIC')?.value || '',
                     clientEmail: document.getElementById('txnClientEmail')?.value || '',
                     signatoryName: document.getElementById('txnSignatoryName')?.value || '',
@@ -27598,13 +27647,9 @@ Automated WFH alert — ${company} Attendance System.`;
                                     ${lastF?`<div class="text-[10px] text-gray-500">${(lastF.date||'').substring(0,10)}</div><div class="text-[10px] font-semibold text-blue-600">${lastF.mode||''}</div>${nextF?`<div class="text-[9px] text-orange-500">Next: ${(nextF.nextDate||'').substring(0,10)}</div>`:''}`:'<span class="text-[10px] text-red-400">None</span>'}
                                 </td>
                                 <td class="px-4 py-2.5 text-center">
-                                    <div class="flex gap-1 justify-center flex-wrap items-center">
+                                    <div class="flex gap-1 justify-center flex-wrap">
                                         <button onclick="openARFollowUpModal('${a.arID}','${a.source}')" class="px-2 py-1 bg-blue-100 text-blue-700 rounded text-[10px] font-semibold hover:bg-blue-200">+ Follow-up</button>
                                         ${a.source==='historical'?`<button onclick="openARInvoiceModal('${a.arID}')" class="px-2 py-1 bg-gray-100 text-gray-600 rounded text-[10px] hover:bg-gray-200">Edit</button><button onclick="deleteARInvoice('${a.arID}')" class="px-2 py-1 bg-red-100 text-red-600 rounded text-[10px] font-semibold hover:bg-red-200" title="Delete this historical invoice">🗑</button>`:''}
-                                        ${a.source==='app' && (a.creditNotesTotal||0) > 0 ? `<label class="flex items-center gap-1 px-2 py-1 bg-purple-50 border border-purple-200 rounded text-[10px] font-semibold text-purple-700 cursor-pointer hover:bg-purple-100" title="${(a.creditNotesList||[]).map(cn=>cn.txnID+' · ₹'+cn.amount.toFixed(2)).join(', ')}">
-                                            <input type="checkbox" ${a.applyCreditNote?'checked':''} onchange="toggleApplyCreditNote('${a.txnID}')" style="margin:0"/>
-                                            🔗 CN ₹${(a.creditNotesTotal||0).toLocaleString('en-IN',{minimumFractionDigits:2})}
-                                        </label>` : ''}
                                     </div>
                                 </td>
                             </tr>`;
@@ -28093,6 +28138,54 @@ Automated WFH alert — ${company} Attendance System.`;
             } catch(err) {
                 t.applyCreditNote = !t.applyCreditNote;   // revert on failure
                 alert('Save failed: ' + err.message);
+            }
+        }
+
+        // Populates the "Linked Credit Notes" section inside the Invoice edit
+        // modal. Called whenever the modal opens on an Invoice. Reads the
+        // Credit Note transactions referencing this invoice's txnID and
+        // renders their summary + a checkbox that binds to applyCreditNote.
+        // The checkbox is stored on the invoice at save time in saveTxnModal.
+        function refreshLinkedCreditNotesUI(txn) {
+            const section = document.getElementById('linkedCreditNotesSection');
+            if (!section) return;
+            // Only invoice transactions can have linked credit notes.
+            if (!txn || txn.txnCategory !== 'INVOICE') {
+                section.classList.add('hidden');
+                return;
+            }
+            const linked = (transactions||[]).filter(t =>
+                t.txnCategory === 'CREDIT_NOTE' &&
+                t.refInvoiceTxnID === txn.txnID &&
+                !['Draft','Cancelled'].includes(t.status)
+            );
+            if (!linked.length) {
+                section.classList.add('hidden');
+                return;
+            }
+            section.classList.remove('hidden');
+            const cnTotal = linked.reduce((s, cn) => s + (calculateTotals(cn.items||[]).total || 0), 0);
+            const fmt = n => '₹' + (+n||0).toLocaleString('en-IN', {minimumFractionDigits: 2});
+            const countBadge = document.getElementById('linkedCNCount');
+            if (countBadge) countBadge.textContent = `${linked.length} · ${fmt(cnTotal)}`;
+            const list = document.getElementById('linkedCNList');
+            if (list) {
+                list.innerHTML = linked.map(cn => {
+                    const amt = calculateTotals(cn.items||[]).total || 0;
+                    return `<div class="flex justify-between items-center bg-white rounded px-2 py-1 border border-purple-100">
+                        <span><span class="font-mono font-semibold text-purple-700">${cn.txnID}</span> · ${cn.txnDate || '—'} · <span class="text-gray-500">${cn.status}</span></span>
+                        <span class="font-semibold text-purple-800">${fmt(amt)}</span>
+                    </div>`;
+                }).join('');
+            }
+            const cb = document.getElementById('txnApplyCreditNote');
+            if (cb) {
+                cb.checked = !!txn.applyCreditNote;
+                cb.onchange = () => {
+                    // Live-recompute the Balance Due tile so the effect is
+                    // visible immediately (persists to record on Save).
+                    if (typeof recomputeInvoicePaymentBalance === 'function') recomputeInvoicePaymentBalance();
+                };
             }
         }
 
