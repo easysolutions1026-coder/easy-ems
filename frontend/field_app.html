@@ -825,6 +825,189 @@
     </div>
 </div>
 
+<!-- ═══════════════════════════════════════════════════════════════
+     Kick-Off Record Modal — mirrors ITSPL/QR/PKR paper form.
+     Captured at project start; stored as wl.kickOffRecord.
+     ─────────────────────────────────────────────────────────────── -->
+<div id="kickOffModal" class="modal">
+    <div class="modal-box" style="max-width:720px">
+        <div class="modal-hdr" style="background:linear-gradient(135deg,#4338ca,#6366f1)">
+            <span class="font-bold text-white text-lg">📝 Project Kick-Off Record</span>
+            <button type="button" onclick="closeKickOffModal()" style="background:none;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1">✕</button>
+        </div>
+        <form id="kickOffForm" onsubmit="saveKickOff(event)" class="p-5 space-y-3">
+            <input type="hidden" id="koWlID"/>
+
+            <!-- Project / date block -->
+            <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:10px;display:grid;grid-template-columns:1fr;gap:8px">
+                <div>
+                    <label style="font-size:11px;font-weight:600;color:#4338ca">Project Number and Detail</label>
+                    <input type="text" id="koProjectDetail" class="field-input" required style="font-size:13px" placeholder="e.g. PJT - 376 - HALDI - Aux Engine 3 inspection work at Visakhapatnam"/>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                    <div>
+                        <label style="font-size:11px;font-weight:600;color:#4338ca">Expected Date Starting</label>
+                        <input type="date" id="koExpectedStart" class="field-input" style="font-size:13px"/>
+                    </div>
+                    <div>
+                        <label style="font-size:11px;font-weight:600;color:#4338ca">Expected Date of Completion</label>
+                        <input type="date" id="koExpectedCompletion" class="field-input" style="font-size:13px"/>
+                    </div>
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:600;color:#4338ca">Team Details (technicians)</label>
+                    <textarea id="koTeamDetails" rows="2" class="field-input" style="font-size:12px" placeholder="e.g. MR. SANTHOSHKUMAR, MR. PRABAKARAN"></textarea>
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:600;color:#4338ca">Specific Details if any</label>
+                    <textarea id="koSpecificDetails" rows="2" class="field-input" style="font-size:12px" placeholder="Any project-specific notes"></textarea>
+                </div>
+            </div>
+
+            <!-- Documents -->
+            <div style="background:#fafaf9;border:1px solid var(--border);border-radius:8px;padding:10px">
+                <p style="font-size:12px;font-weight:700;color:#1f2937;margin-bottom:6px">DOCUMENTS CARRIED / VERIFIED</p>
+                <p style="font-size:10px;color:var(--muted);margin-bottom:8px">Tap each document you have with you. Leave un-selected if not applicable.</p>
+                <div id="koDocsContainer" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+            </div>
+
+            <!-- Location of work -->
+            <div style="background:#fafaf9;border:1px solid var(--border);border-radius:8px;padding:10px">
+                <p style="font-size:12px;font-weight:700;color:#1f2937;margin-bottom:6px">LOCATION OF WORK</p>
+                <p style="font-size:10px;color:var(--muted);margin-bottom:8px">Select one.</p>
+                <div id="koLocationContainer" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+            </div>
+
+            <!-- Manuals / Reference Documents -->
+            <div style="background:#fafaf9;border:1px solid var(--border);border-radius:8px;padding:10px">
+                <p style="font-size:12px;font-weight:700;color:#1f2937;margin-bottom:6px">MANUALS / REFERENCE DOCUMENTS</p>
+                <p style="font-size:10px;color:var(--muted);margin-bottom:8px">For each item, tap YES if it's available for this project.</p>
+                <div id="koManualsContainer"></div>
+            </div>
+
+            <!-- Personal Protective Equipment -->
+            <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:8px;padding:10px">
+                <p style="font-size:12px;font-weight:700;color:#854d0e;margin-bottom:6px">PERSONAL PROTECTIVE EQUIPMENT — for all technicians</p>
+                <p style="font-size:10px;color:#a16207;margin-bottom:8px">Tap each PPE item confirmed available for every technician on this project.</p>
+                <div id="koPPEContainer" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px"></div>
+                <div style="border-top:1px solid #fde68a;padding-top:8px">
+                    <p style="font-size:11px;font-weight:600;color:#854d0e;margin-bottom:4px">PPE — correct donning instruction / usage demonstrated?</p>
+                    <div style="display:flex;gap:6px">
+                        <button type="button" onclick="_koSetPPEDonning(true)"  id="koPPEDonYes" style="font-size:12px;padding:5px 14px;border-radius:6px;border:1.5px solid #d1d5db;background:#fff;color:#15803d;font-weight:600;cursor:pointer">YES</button>
+                        <button type="button" onclick="_koSetPPEDonning(false)" id="koPPEDonNo"  style="font-size:12px;padding:5px 14px;border-radius:6px;border:1.5px solid #d1d5db;background:#fff;color:#dc2626;font-weight:600;cursor:pointer">NO</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Signature info -->
+            <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px;display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <div>
+                    <label style="font-size:11px;font-weight:600;color:#1e40af">Engineer / Technician (name)</label>
+                    <input type="text" id="koEngineerName" class="field-input" style="font-size:13px" placeholder="Name of the signing engineer / technician"/>
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:600;color:#1e40af">General Manager (name)</label>
+                    <input type="text" id="koGMName" class="field-input" style="font-size:13px" placeholder="Name of the approving GM"/>
+                </div>
+            </div>
+
+            <!-- Signed copy attachment -->
+            <div style="background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:10px">
+                <label style="font-size:11px;font-weight:600;color:#854d0e;display:block;margin-bottom:4px">📎 Scanned / photographed signed record (after both parties sign)</label>
+                <input type="file" id="koSignedFile" accept="image/*,application/pdf" class="field-input" style="font-size:11px"/>
+                <div id="koSignedFilePreview" style="font-size:10px;color:#854d0e;margin-top:4px"></div>
+            </div>
+
+            <div class="flex justify-between gap-2 pt-2 flex-wrap">
+                <button type="button" onclick="printKickOffFromForm()" style="padding:8px 14px;border-radius:10px;background:#1e3a5f;color:#fff;border:none;cursor:pointer;font-size:13px;font-weight:600" title="Generate a printable PDF using current form values — print, sign, then scan back and upload above">🖨 Print Form</button>
+                <span style="flex:1"></span>
+                <button type="button" onclick="closeKickOffModal()" style="padding:8px 14px;border-radius:10px;border:1.5px solid var(--border);background:#fff;cursor:pointer;font-size:13px">Cancel</button>
+                <button type="submit" class="btn-primary" style="font-size:13px;padding:8px 16px;background:linear-gradient(135deg,#4338ca,#6366f1)">💾 Save Kick-Off</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     Growth of Work / Re-Work Report Modal — mirrors ITSPL/QR/GW-RW-R.
+     Captured at project close; stored as wl.growthOfWorkReport.
+     ─────────────────────────────────────────────────────────────── -->
+<div id="growthOfWorkModal" class="modal">
+    <div class="modal-box" style="max-width:760px">
+        <div class="modal-hdr" style="background:linear-gradient(135deg,#9f1239,#e11d48)">
+            <span class="font-bold text-white text-lg">🔄 Growth of Work / Re-Work Report</span>
+            <button type="button" onclick="closeGrowthOfWorkModal()" style="background:none;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1">✕</button>
+        </div>
+        <form id="growthOfWorkForm" onsubmit="saveGrowthOfWork(event)" class="p-5 space-y-3">
+            <input type="hidden" id="gwWlID"/>
+
+            <!-- Project / customer / date range -->
+            <div style="background:#fff1f2;border:1px solid #fecdd3;border-radius:8px;padding:10px;display:grid;grid-template-columns:1fr;gap:8px">
+                <div>
+                    <label style="font-size:11px;font-weight:600;color:#9f1239">Project No.</label>
+                    <input type="text" id="gwProjectNo" class="field-input" required style="font-size:13px" placeholder="e.g. PJT - 369 - DESH VAIBHAV - MAIN ENGINE FUEL PUMP WORK AT VISAKHAPATNAM"/>
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:600;color:#9f1239">Customer</label>
+                    <input type="text" id="gwCustomer" class="field-input" style="font-size:13px" placeholder="e.g. THE SHIPPING CORPORATION OF INDIA LTD"/>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                    <div>
+                        <label style="font-size:11px;font-weight:600;color:#9f1239">Date From</label>
+                        <input type="date" id="gwDateFrom" class="field-input" style="font-size:13px"/>
+                    </div>
+                    <div>
+                        <label style="font-size:11px;font-weight:600;color:#9f1239">Date To</label>
+                        <input type="date" id="gwDateTo" class="field-input" style="font-size:13px"/>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Work items table (dynamic rows) -->
+            <div style="background:#fafaf9;border:1px solid var(--border);border-radius:8px;padding:10px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                    <p style="font-size:12px;font-weight:700;color:#1f2937">WORK ITEMS</p>
+                    <button type="button" onclick="_gwAddRow()" style="font-size:11px;padding:4px 10px;border-radius:6px;border:1.5px solid #9f1239;background:#fff;color:#9f1239;font-weight:600;cursor:pointer">+ Add row</button>
+                </div>
+                <p style="font-size:10px;color:var(--muted);margin-bottom:8px">One row per agreed work item. Enter "Nil" in Growth / Re-Work columns if none.</p>
+                <div id="gwRowsContainer"></div>
+            </div>
+
+            <!-- Remarks -->
+            <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px">
+                <label style="font-size:11px;font-weight:600;color:#065f46;display:block;margin-bottom:2px">Remarks</label>
+                <textarea id="gwRemarks" rows="3" class="field-input" style="font-size:12px" placeholder="Overall remarks on growth / re-work scope"></textarea>
+            </div>
+
+            <!-- Prepared by / date -->
+            <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px;display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <div>
+                    <label style="font-size:11px;font-weight:600;color:#1e40af">Prepared By</label>
+                    <input type="text" id="gwPreparedBy" class="field-input" style="font-size:13px" placeholder="Name of the preparer"/>
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:600;color:#1e40af">Prepared Date</label>
+                    <input type="date" id="gwPreparedDate" class="field-input" style="font-size:13px"/>
+                </div>
+            </div>
+
+            <!-- Signed copy attachment -->
+            <div style="background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:10px">
+                <label style="font-size:11px;font-weight:600;color:#854d0e;display:block;margin-bottom:4px">📎 Scanned / photographed signed report</label>
+                <input type="file" id="gwSignedFile" accept="image/*,application/pdf" class="field-input" style="font-size:11px"/>
+                <div id="gwSignedFilePreview" style="font-size:10px;color:#854d0e;margin-top:4px"></div>
+            </div>
+
+            <div class="flex justify-between gap-2 pt-2 flex-wrap">
+                <button type="button" onclick="printGrowthOfWorkFromForm()" style="padding:8px 14px;border-radius:10px;background:#1e3a5f;color:#fff;border:none;cursor:pointer;font-size:13px;font-weight:600" title="Generate a printable PDF using current form values — print, sign, then scan back and upload above">🖨 Print Form</button>
+                <span style="flex:1"></span>
+                <button type="button" onclick="closeGrowthOfWorkModal()" style="padding:8px 14px;border-radius:10px;border:1.5px solid var(--border);background:#fff;cursor:pointer;font-size:13px">Cancel</button>
+                <button type="submit" class="btn-primary" style="font-size:13px;padding:8px 16px;background:linear-gradient(135deg,#9f1239,#e11d48)">💾 Save Report</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <!-- Daily Entry Modal -->
 <div id="dayModal" class="modal">
     <div class="modal-box" style="max-width:640px">
@@ -5599,6 +5782,8 @@
                     </button>
                     <button onclick="wlPDF('${w.wlID}')" style="padding:8px 12px;border-radius:10px;background:#1e3a5f;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:600">📄 Report</button>
                     <button onclick="openFeedbackModal('${w.wlID}')" style="padding:8px 12px;border-radius:10px;background:${w.customerFeedback ? '#f59e0b' : '#fff'};color:${w.customerFeedback ? '#fff' : '#92400e'};border:1.5px solid #f59e0b;cursor:pointer;font-size:12px;font-weight:600" title="${w.customerFeedback ? 'View / re-print customer feedback (already captured)' : 'Capture customer feedback at project completion'}">📋 Feedback${w.customerFeedback ? ' ✓' : ''}</button>
+                    <button onclick="openKickOffModal('${w.wlID}')" style="padding:8px 12px;border-radius:10px;background:${w.kickOffRecord ? '#6366f1' : '#fff'};color:${w.kickOffRecord ? '#fff' : '#4338ca'};border:1.5px solid #6366f1;cursor:pointer;font-size:12px;font-weight:600" title="${w.kickOffRecord ? 'View / re-print Project Kick-Off Record (already captured)' : 'Capture Project Kick-Off Record (ITSPL/QR/PKR)'}">📝 Kick-Off${w.kickOffRecord ? ' ✓' : ''}</button>
+                    <button onclick="openGrowthOfWorkModal('${w.wlID}')" style="padding:8px 12px;border-radius:10px;background:${w.growthOfWorkReport ? '#e11d48' : '#fff'};color:${w.growthOfWorkReport ? '#fff' : '#9f1239'};border:1.5px solid #e11d48;cursor:pointer;font-size:12px;font-weight:600" title="${w.growthOfWorkReport ? 'View / re-print Growth of Work / Re-Work Report (already captured)' : 'Capture Growth of Work / Re-Work Report (ITSPL/QR/GW-RW-R)'}">🔄 Growth/RW${w.growthOfWorkReport ? ' ✓' : ''}</button>
                     <button onclick="editWorkLog('${w.wlID}')" style="padding:8px 10px;border-radius:10px;border:1.5px solid var(--border);background:#fff;cursor:pointer;font-size:12px;color:var(--muted)">✏️</button>
                     <button onclick="deleteWorkLog('${w.wlID}')" style="padding:8px 10px;border-radius:10px;border:1.5px solid #fecaca;background:#fff;cursor:pointer;font-size:12px;color:#dc2626">✕</button>
                 </div>
@@ -6595,6 +6780,646 @@
         const safe = (wl.project || 'CustomerFeedback').replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_-]/g,'');
         doc.save('CustomerFeedback_' + safe + '_' + (fb.completionDate || new Date().toISOString().substring(0,10)) + '.pdf');
         showToast('✅ Feedback PDF downloaded');
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // PROJECT KICK-OFF RECORD — ITSPL/QR/PKR
+    // ────────────────────────────────────────────────────────────────
+    // Project-start record mirroring the paper template
+    // (Issue 01, dated 01.08.2018). Captured per work log; stored as
+    // wl.kickOffRecord. PDF can be printed for physical signature,
+    // or the signed paper form can be photographed and attached.
+    // ════════════════════════════════════════════════════════════════
+    const KO_DOCUMENTS = [
+        { key: 'passport',          label: 'Passport' },
+        { key: 'aadhaar',           label: 'Aadhaar' },
+        { key: 'safetyTraining',    label: 'Safety Training' },
+        { key: 'medicalCert',       label: 'Medical Certificate' },
+        { key: 'cdc',               label: 'CDC' },
+        { key: 'articleAgreement',  label: 'Article of Agreement' }
+    ];
+    const KO_LOCATIONS = [
+        { key: 'at-site',   label: 'At Site' },
+        { key: 'port',      label: 'Port' },
+        { key: 'anchorage', label: 'Anchorage' },
+        { key: 'sailing',   label: 'Sailing' },
+        { key: 'workshop',  label: 'Workshop' },
+        { key: 'drydock',   label: 'Drydock' }
+    ];
+    const KO_MANUALS = [
+        { key: 'manual',           label: 'Manual' },
+        { key: 'clearanceTable',   label: 'Clearance Table' },
+        { key: 'importantNotes',   label: 'Important Notes' },
+        { key: 'reportingForms',   label: 'Reporting Forms' },
+        { key: 'dailyReport',      label: 'Daily Report' },
+        { key: 'workInstruction',  label: 'Work Instruction (Read & Understood)' }
+    ];
+    const KO_PPE = [
+        { key: 'safetyShoe',  label: 'Safety Shoe' },
+        { key: 'helmet',      label: 'Helmet' },
+        { key: 'earPlug',     label: 'Ear Plug' },
+        { key: 'goggle',      label: 'Goggle' },
+        { key: 'boilerSuit',  label: 'Boiler Suits' },
+        { key: 'handGlove',   label: 'Hand Glove' },
+        { key: 'mask',        label: 'Mask' }
+    ];
+
+    // Working state — reset every time the modal opens.
+    let _koDocs = {};              // { key: true } — checked docs
+    let _koLocation = '';          // one of KO_LOCATIONS[].key
+    let _koManuals = {};           // { key: true/false } — yes/no per manual
+    let _koPPE = {};               // { key: true } — checked PPE items
+    let _koPPEDonning = null;      // true | false | null
+    let _koSignedAttachment = null;
+
+    function _renderKickOffChips() {
+        // Documents: multi-select chip row
+        const dEl = document.getElementById('koDocsContainer');
+        if (dEl) dEl.innerHTML = KO_DOCUMENTS.map(d => `
+            <button type="button" onclick="_koToggleDoc('${d.key}')"
+                style="font-size:11px;padding:5px 10px;border-radius:16px;border:1.5px solid ${_koDocs[d.key]?'#4338ca':'#d1d5db'};background:${_koDocs[d.key]?'#4338ca':'#fff'};color:${_koDocs[d.key]?'#fff':'#4338ca'};font-weight:600;cursor:pointer">
+                ${_koDocs[d.key]?'✓ ':''}${d.label}
+            </button>
+        `).join('');
+
+        // Location: single-select chip row
+        const lEl = document.getElementById('koLocationContainer');
+        if (lEl) lEl.innerHTML = KO_LOCATIONS.map(l => `
+            <button type="button" onclick="_koSetLocation('${l.key}')"
+                style="font-size:11px;padding:5px 10px;border-radius:16px;border:1.5px solid ${_koLocation===l.key?'#4338ca':'#d1d5db'};background:${_koLocation===l.key?'#4338ca':'#fff'};color:${_koLocation===l.key?'#fff':'#4338ca'};font-weight:600;cursor:pointer">
+                ${_koLocation===l.key?'● ':'○ '}${l.label}
+            </button>
+        `).join('');
+
+        // Manuals: yes/no pair per row
+        const mEl = document.getElementById('koManualsContainer');
+        if (mEl) mEl.innerHTML = KO_MANUALS.map(m => {
+            const v = _koManuals[m.key];
+            return `
+            <div style="display:grid;grid-template-columns:1fr auto auto;gap:6px;align-items:center;padding:4px 0;border-bottom:1px solid #e5e7eb">
+                <div style="font-size:12px;color:#1f2937;font-weight:500">${m.label}</div>
+                <button type="button" onclick="_koSetManual('${m.key}',true)"  style="font-size:11px;padding:3px 12px;border-radius:6px;border:1.5px solid ${v===true?'#15803d':'#d1d5db'};background:${v===true?'#15803d':'#fff'};color:${v===true?'#fff':'#15803d'};font-weight:600;cursor:pointer">YES</button>
+                <button type="button" onclick="_koSetManual('${m.key}',false)" style="font-size:11px;padding:3px 12px;border-radius:6px;border:1.5px solid ${v===false?'#dc2626':'#d1d5db'};background:${v===false?'#dc2626':'#fff'};color:${v===false?'#fff':'#dc2626'};font-weight:600;cursor:pointer">NO</button>
+            </div>`;
+        }).join('');
+
+        // PPE: multi-select chip row
+        const pEl = document.getElementById('koPPEContainer');
+        if (pEl) pEl.innerHTML = KO_PPE.map(p => `
+            <button type="button" onclick="_koTogglePPE('${p.key}')"
+                style="font-size:11px;padding:5px 10px;border-radius:16px;border:1.5px solid ${_koPPE[p.key]?'#b45309':'#d1d5db'};background:${_koPPE[p.key]?'#b45309':'#fff'};color:${_koPPE[p.key]?'#fff':'#b45309'};font-weight:600;cursor:pointer">
+                ${_koPPE[p.key]?'✓ ':''}${p.label}
+            </button>
+        `).join('');
+
+        // PPE donning yes/no buttons — repaint colors
+        const y = document.getElementById('koPPEDonYes');
+        const n = document.getElementById('koPPEDonNo');
+        if (y && n) {
+            y.style.background = _koPPEDonning === true  ? '#15803d' : '#fff';
+            y.style.color      = _koPPEDonning === true  ? '#fff'    : '#15803d';
+            y.style.borderColor= _koPPEDonning === true  ? '#15803d' : '#d1d5db';
+            n.style.background = _koPPEDonning === false ? '#dc2626' : '#fff';
+            n.style.color      = _koPPEDonning === false ? '#fff'    : '#dc2626';
+            n.style.borderColor= _koPPEDonning === false ? '#dc2626' : '#d1d5db';
+        }
+    }
+
+    function _koToggleDoc(key)    { _koDocs[key] = !_koDocs[key]; _renderKickOffChips(); }
+    function _koSetLocation(key)  { _koLocation = (_koLocation === key ? '' : key); _renderKickOffChips(); }
+    function _koSetManual(key, v) { _koManuals[key] = (_koManuals[key] === v ? undefined : v); _renderKickOffChips(); }
+    function _koTogglePPE(key)    { _koPPE[key] = !_koPPE[key]; _renderKickOffChips(); }
+    function _koSetPPEDonning(v)  { _koPPEDonning = (_koPPEDonning === v ? null : v); _renderKickOffChips(); }
+    function _koClearAttachment() { _koSignedAttachment = null; document.getElementById('koSignedFilePreview').innerHTML = ''; }
+
+    async function openKickOffModal(wlID) {
+        const wl = workLogs.find(x => x.wlID === wlID);
+        if (!wl) { showToast('Work log not found'); return; }
+
+        document.getElementById('koWlID').value = wlID;
+        const ko = wl.kickOffRecord || {};
+
+        // Auto-fill from project where possible; existing record overrides
+        const teamAuto = (wl.technicians || []).map(t => t.name).filter(Boolean).join(', ');
+        const projAuto = (wl.ref ? wl.ref + ' - ' : '') + (wl.project || wl.vessel || '');
+
+        document.getElementById('koProjectDetail').value       = ko.projectDetail       || projAuto || '';
+        document.getElementById('koExpectedStart').value       = ko.expectedStartDate   || wl.workStartDate || '';
+        document.getElementById('koExpectedCompletion').value  = ko.expectedCompletionDate || wl.workEndDate || '';
+        document.getElementById('koTeamDetails').value         = ko.teamDetails         || teamAuto || '';
+        document.getElementById('koSpecificDetails').value     = ko.specificDetails     || '';
+        document.getElementById('koEngineerName').value        = ko.engineerName        || '';
+        document.getElementById('koGMName').value              = ko.generalManagerName  || '';
+
+        _koDocs        = { ...(ko.documents     || {}) };
+        _koLocation    =   ko.locationOfWork    || '';
+        _koManuals     = { ...(ko.manualsRefDocs|| {}) };
+        _koPPE         = { ...(ko.ppe           || {}) };
+        _koPPEDonning  = (typeof ko.ppeDonningVerified === 'boolean') ? ko.ppeDonningVerified : null;
+        _koSignedAttachment = ko.signedAttachment || null;
+
+        const filePreview = document.getElementById('koSignedFilePreview');
+        filePreview.innerHTML = _koSignedAttachment
+            ? `Attached: <a href="https://drive.google.com/file/d/${_koSignedAttachment.driveFileId}/view" target="_blank" style="color:#1d4ed8;text-decoration:underline">${_koSignedAttachment.name || 'signed-form'}</a> <button type="button" onclick="_koClearAttachment()" style="color:#dc2626;background:none;border:none;cursor:pointer;font-size:11px;margin-left:6px">[remove]</button>`
+            : '';
+        document.getElementById('koSignedFile').value = '';
+
+        _renderKickOffChips();
+        document.getElementById('kickOffModal').classList.add('show');
+    }
+
+    function closeKickOffModal() {
+        document.getElementById('kickOffModal').classList.remove('show');
+        _koDocs = {}; _koLocation = ''; _koManuals = {}; _koPPE = {}; _koPPEDonning = null; _koSignedAttachment = null;
+    }
+
+    // Reads current form state into a plain object. Used both by save and print.
+    function _collectKickOffFromForm() {
+        return {
+            projectDetail:          document.getElementById('koProjectDetail').value.trim(),
+            expectedStartDate:      document.getElementById('koExpectedStart').value,
+            expectedCompletionDate: document.getElementById('koExpectedCompletion').value,
+            teamDetails:            document.getElementById('koTeamDetails').value.trim(),
+            specificDetails:        document.getElementById('koSpecificDetails').value.trim(),
+            documents:              { ..._koDocs },
+            locationOfWork:         _koLocation,
+            manualsRefDocs:         { ..._koManuals },
+            ppe:                    { ..._koPPE },
+            ppeDonningVerified:     _koPPEDonning,
+            engineerName:           document.getElementById('koEngineerName').value.trim(),
+            generalManagerName:     document.getElementById('koGMName').value.trim(),
+            signedAttachment:       _koSignedAttachment
+        };
+    }
+
+    async function saveKickOff(ev) {
+        ev.preventDefault();
+        const wlID = document.getElementById('koWlID').value;
+        const wlIdx = workLogs.findIndex(x => x.wlID === wlID);
+        if (wlIdx < 0) { showToast('Work log not found'); return; }
+
+        // Upload the signed-copy file if a fresh one was picked
+        const fileInput = document.getElementById('koSignedFile');
+        if (fileInput.files && fileInput.files[0]) {
+            try {
+                showToast('⏳ Uploading signed copy…');
+                const f = fileInput.files[0];
+                const folder = await getOrCreateSubFolder('KickOffRecords');
+                const uploaded = await uploadFileToDriveFolder(folder, f);
+                _koSignedAttachment = {
+                    driveFileId: uploaded.id,
+                    name: f.name,
+                    mime: f.type,
+                    size: f.size,
+                    uploadedAt: new Date().toISOString(),
+                    uploadedBy: (currentUser?.name) || 'Field'
+                };
+            } catch (err) {
+                showToast('⚠ Attachment upload failed — saving record without it');
+                console.error(err);
+            }
+        }
+
+        const stamp = new Date().toISOString();
+        const user = (currentUser?.name) || 'Field';
+        const prev = workLogs[wlIdx].kickOffRecord;
+
+        workLogs[wlIdx].kickOffRecord = {
+            ..._collectKickOffFromForm(),
+            createdAt: prev?.createdAt || stamp,
+            createdBy: prev?.createdBy || user,
+            updatedAt: stamp,
+            updatedBy: user
+        };
+        _stampRecord(workLogs[wlIdx]);
+
+        try {
+            await saveData('workLogs', workLogs);
+            closeKickOffModal();
+            renderView();
+            showToast('✅ Kick-Off record saved');
+        } catch (err) {
+            showToast('⚠ Save failed: ' + (err.message || 'try again'));
+        }
+    }
+
+    async function printKickOffFromForm() {
+        const wlID = document.getElementById('koWlID').value;
+        if (!wlID) { showToast('Open a work log first'); return; }
+        await kickOffPDF(wlID, _collectKickOffFromForm());
+    }
+
+    // ── Kick-Off PDF — mirrors the ITSPL/QR/PKR paper form ─────────────
+    async function kickOffPDF(wlID, koOverride) {
+        const wl = workLogs.find(x => x.wlID === wlID);
+        if (!wl) { showToast('Work log not found'); return; }
+        const ko = koOverride || wl.kickOffRecord;
+        if (!ko) { showToast('No kick-off data — fill in the form first'); return; }
+
+        showToast('⏳ Generating PDF…', 4000);
+
+        if (!window.jspdf) {
+            await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
+            await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
+        }
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+        const PW = doc.internal.pageSize.width;
+        const ML = 15, MR = 15, CW = PW - ML - MR;
+
+        // Header (logo + company + form code)
+        const logoData = (typeof appSettings !== 'undefined' && appSettings?.logoData) ? appSettings.logoData : '';
+        if (logoData) { try { doc.addImage(logoData, 'PNG', ML, 8, 22, 18); } catch (e) {} }
+        doc.setFontSize(13); doc.setFont('helvetica','bold'); doc.setTextColor(15,58,95);
+        doc.text('IMSE TECH - SERVICES PVT LTD', ML + (logoData ? 26 : 0), 14);
+        doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.setTextColor(80,80,80);
+        doc.text('ITSPL/QR/PKR', ML + (logoData ? 26 : 0), 19);
+
+        // Top-right metadata box
+        const metaX = PW - MR - 60;
+        doc.setDrawColor(120,120,120); doc.setLineWidth(0.2);
+        doc.rect(metaX, 8, 60, 18);
+        doc.setFontSize(7);
+        doc.text('ISSUE NO:',  metaX + 2, 12); doc.text('01',           metaX + 30, 12);
+        doc.text('DATE:',      metaX + 2, 15); doc.text('01.08.2018',   metaX + 30, 15);
+        doc.text('REV:',       metaX + 2, 18); doc.text('00',           metaX + 30, 18);
+        doc.text('PAGE:',      metaX + 2, 21); doc.text('1 of 1',       metaX + 30, 21);
+
+        doc.setDrawColor(15,58,95); doc.setLineWidth(0.6); doc.line(ML, 29, PW-MR, 29);
+
+        // Title
+        doc.setFontSize(14); doc.setFont('helvetica','bold'); doc.setTextColor(15,58,95);
+        doc.text('PROJECT KICK-OFF RECORD', PW/2, 38, {align:'center'});
+
+        let y = 45;
+        const fmtDate = d => d ? d.split('-').reverse().join('.') : '';
+
+        // Strike helper — renders un-selected options with a strike-through
+        // to mimic the paper form's crossed-out choices.
+        const strikeList = (items, selectedFn) => items.map(it => {
+            const isOn = selectedFn(it);
+            return isOn ? it.label : `~${it.label}~`;   // will convert to actual strike below
+        }).join(' / ');
+
+        // For jsPDF we can't inline strike-through inside a single string,
+        // so we render options as plain text with un-selected ones in
+        // parentheses (matches paper form's crossed-out semantics).
+        const optList = (items, selectedFn) => items.map(it => {
+            const isOn = selectedFn(it);
+            return isOn ? '[✓] ' + it.label : '[ ] ' + it.label;
+        }).join('   ');
+
+        // ── Main body table ──
+        doc.autoTable({
+            startY: y,
+            margin: { left: ML, right: MR },
+            theme: 'grid',
+            styles: { fontSize: 9, cellPadding: 3, valign: 'top' },
+            columnStyles: {
+                0: { cellWidth: 60, fontStyle:'bold', fillColor:[241,245,249] },
+                1: { cellWidth: CW - 60 }
+            },
+            body: [
+                ['PROJECT NUMBER AND DETAIL', ko.projectDetail || ''],
+                ['EXPECTED DATE STARTING',    fmtDate(ko.expectedStartDate)],
+                ['TEAM DETAILS',              ko.teamDetails || ''],
+                ['DOCUMENTS',                 optList(KO_DOCUMENTS, d => !!(ko.documents||{})[d.key])],
+                ['LOCATION OF WORK',          optList(KO_LOCATIONS, l => ko.locationOfWork === l.key)],
+                ['EXPECTED DATE OF COMPLETION', fmtDate(ko.expectedCompletionDate)],
+                ['SPECIFIC DETAILS IF ANY',   ko.specificDetails || ''],
+                ['MANUALS / REFERENCE\nDOCUMENTS',
+                    KO_MANUALS.map(m => {
+                        const v = (ko.manualsRefDocs||{})[m.key];
+                        const mark = v === true ? 'YES' : v === false ? 'NO' : '—';
+                        return m.label + ' — ' + mark;
+                    }).join('\n')
+                ],
+                ['PERSONAL PROTECTIVE\nEQUIPMENT FOR ALL\nTECHNICIANS',
+                    optList(KO_PPE, p => !!(ko.ppe||{})[p.key])
+                ],
+                ['PERSONAL PROTECTIVE\nEQUIPMENT — CORRECT\nDONNING INSTRUCTION /\nUSAGE DEMONSTRATED',
+                    ko.ppeDonningVerified === true ? 'YES' : ko.ppeDonningVerified === false ? 'NO' : '—'
+                ]
+            ]
+        });
+        y = doc.lastAutoTable.finalY + 10;
+
+        // Signatures (two side-by-side blocks)
+        doc.autoTable({
+            startY: y,
+            margin: { left: ML, right: MR },
+            theme: 'grid',
+            styles: { fontSize: 9, cellPadding: 4, minCellHeight: 24, valign: 'top' },
+            body: [[
+                {content: 'ENGINEER / TECHNICIAN\n\n' + (ko.engineerName || ''), styles:{cellWidth:CW/2}},
+                {content: 'GENERAL MANAGER\n\n' + (ko.generalManagerName || ''), styles:{cellWidth:CW/2}}
+            ]]
+        });
+        y = doc.lastAutoTable.finalY + 4;
+
+        // Footer
+        doc.setFontSize(8); doc.setFont('helvetica','italic'); doc.setTextColor(80,80,80);
+        const projRef = (wl.ref ? wl.ref + ' - ' : '') + (wl.vessel || wl.project || '');
+        doc.text(projRef, ML, y + 3);
+
+        const safe = (wl.project || 'KickOffRecord').replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_-]/g,'');
+        doc.save('KickOffRecord_' + safe + '_' + (ko.expectedStartDate || new Date().toISOString().substring(0,10)) + '.pdf');
+        showToast('✅ Kick-Off PDF downloaded');
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // GROWTH OF WORK / RE-WORK REPORT — ITSPL/QR/GW-RW-R
+    // ────────────────────────────────────────────────────────────────
+    // Project-close report mirroring the paper template
+    // (Issue 01, dated 16.11.2019). Captured per work log; stored as
+    // wl.growthOfWorkReport.
+    // ════════════════════════════════════════════════════════════════
+    let _gwRows = [];                  // [{ agreedWorkScope, growthOfWork, reWork }]
+    let _gwSignedAttachment = null;
+
+    function _renderGwRows() {
+        const el = document.getElementById('gwRowsContainer');
+        if (!el) return;
+        if (!_gwRows.length) {
+            el.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:8px;text-align:center;border:1px dashed #d1d5db;border-radius:6px">No rows yet — tap "+ Add row" above.</div>';
+            return;
+        }
+        el.innerHTML = _gwRows.map((r, i) => `
+            <div style="border:1px solid #e5e7eb;border-radius:6px;padding:8px;margin-bottom:8px;background:#fff">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                    <span style="font-size:11px;font-weight:700;color:#9f1239">S.NO ${i+1}</span>
+                    <button type="button" onclick="_gwDeleteRow(${i})" style="font-size:11px;padding:3px 8px;border-radius:6px;border:1.5px solid #fecaca;background:#fff;color:#dc2626;cursor:pointer">✕ Remove</button>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr;gap:6px">
+                    <div>
+                        <label style="font-size:10px;font-weight:600;color:#6b7280">Agreed Work Scope</label>
+                        <textarea rows="2" oninput="_gwUpdateRow(${i},'agreedWorkScope',this.value)" class="field-input" style="font-size:12px" placeholder="e.g. Main Engine fuel pump work Unit 5">${_gwEscape(r.agreedWorkScope)}</textarea>
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+                        <div>
+                            <label style="font-size:10px;font-weight:600;color:#6b7280">Growth of Work</label>
+                            <textarea rows="2" oninput="_gwUpdateRow(${i},'growthOfWork',this.value)" class="field-input" style="font-size:12px" placeholder="Nil or details">${_gwEscape(r.growthOfWork)}</textarea>
+                        </div>
+                        <div>
+                            <label style="font-size:10px;font-weight:600;color:#6b7280">Re Work</label>
+                            <textarea rows="2" oninput="_gwUpdateRow(${i},'reWork',this.value)" class="field-input" style="font-size:12px" placeholder="Nil or details">${_gwEscape(r.reWork)}</textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+    function _gwEscape(s) {
+        return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+    function _gwAddRow() {
+        _gwRows.push({ agreedWorkScope: '', growthOfWork: 'Nil', reWork: 'Nil' });
+        _renderGwRows();
+    }
+    function _gwDeleteRow(i) {
+        _gwRows.splice(i, 1);
+        _renderGwRows();
+    }
+    function _gwUpdateRow(i, field, val) {
+        if (!_gwRows[i]) return;
+        _gwRows[i][field] = val;
+        // no re-render — this fires on every keystroke and would kill focus
+    }
+    function _gwClearAttachment() {
+        _gwSignedAttachment = null;
+        document.getElementById('gwSignedFilePreview').innerHTML = '';
+    }
+
+    async function openGrowthOfWorkModal(wlID) {
+        const wl = workLogs.find(x => x.wlID === wlID);
+        if (!wl) { showToast('Work log not found'); return; }
+
+        document.getElementById('gwWlID').value = wlID;
+        const gw = wl.growthOfWorkReport || {};
+        const projAuto = (wl.ref ? wl.ref + ' - ' : '') + (wl.project || wl.vessel || '');
+
+        document.getElementById('gwProjectNo').value    = gw.projectNo    || projAuto || '';
+        document.getElementById('gwCustomer').value     = gw.customer     || wl.client || '';
+        document.getElementById('gwDateFrom').value     = gw.dateFrom     || wl.workStartDate || '';
+        document.getElementById('gwDateTo').value       = gw.dateTo       || wl.workEndDate || '';
+        document.getElementById('gwRemarks').value      = gw.remarks      || '';
+        document.getElementById('gwPreparedBy').value   = gw.preparedBy   || (currentUser?.name) || '';
+        document.getElementById('gwPreparedDate').value = gw.preparedDate || new Date().toISOString().substring(0,10);
+
+        // Seed rows: existing report's rows, or one blank row auto-filled from
+        // the work log's `project` string as a reasonable starting scope.
+        if (gw.workItems && gw.workItems.length) {
+            _gwRows = gw.workItems.map(r => ({
+                agreedWorkScope: r.agreedWorkScope || '',
+                growthOfWork:    r.growthOfWork    || '',
+                reWork:          r.reWork          || ''
+            }));
+        } else {
+            _gwRows = [{ agreedWorkScope: wl.project || '', growthOfWork: 'Nil', reWork: 'Nil' }];
+        }
+        _gwSignedAttachment = gw.signedAttachment || null;
+
+        const filePreview = document.getElementById('gwSignedFilePreview');
+        filePreview.innerHTML = _gwSignedAttachment
+            ? `Attached: <a href="https://drive.google.com/file/d/${_gwSignedAttachment.driveFileId}/view" target="_blank" style="color:#1d4ed8;text-decoration:underline">${_gwSignedAttachment.name || 'signed-form'}</a> <button type="button" onclick="_gwClearAttachment()" style="color:#dc2626;background:none;border:none;cursor:pointer;font-size:11px;margin-left:6px">[remove]</button>`
+            : '';
+        document.getElementById('gwSignedFile').value = '';
+
+        _renderGwRows();
+        document.getElementById('growthOfWorkModal').classList.add('show');
+    }
+
+    function closeGrowthOfWorkModal() {
+        document.getElementById('growthOfWorkModal').classList.remove('show');
+        _gwRows = []; _gwSignedAttachment = null;
+    }
+
+    function _collectGrowthOfWorkFromForm() {
+        return {
+            projectNo:    document.getElementById('gwProjectNo').value.trim(),
+            customer:     document.getElementById('gwCustomer').value.trim(),
+            dateFrom:     document.getElementById('gwDateFrom').value,
+            dateTo:       document.getElementById('gwDateTo').value,
+            workItems:    _gwRows.map(r => ({
+                agreedWorkScope: (r.agreedWorkScope || '').trim(),
+                growthOfWork:    (r.growthOfWork    || '').trim(),
+                reWork:          (r.reWork          || '').trim()
+            })).filter(r => r.agreedWorkScope || r.growthOfWork || r.reWork),
+            remarks:      document.getElementById('gwRemarks').value.trim(),
+            preparedBy:   document.getElementById('gwPreparedBy').value.trim(),
+            preparedDate: document.getElementById('gwPreparedDate').value,
+            signedAttachment: _gwSignedAttachment
+        };
+    }
+
+    async function saveGrowthOfWork(ev) {
+        ev.preventDefault();
+        const wlID = document.getElementById('gwWlID').value;
+        const wlIdx = workLogs.findIndex(x => x.wlID === wlID);
+        if (wlIdx < 0) { showToast('Work log not found'); return; }
+
+        // Upload the signed-copy file if a fresh one was picked
+        const fileInput = document.getElementById('gwSignedFile');
+        if (fileInput.files && fileInput.files[0]) {
+            try {
+                showToast('⏳ Uploading signed copy…');
+                const f = fileInput.files[0];
+                const folder = await getOrCreateSubFolder('GrowthOfWorkReports');
+                const uploaded = await uploadFileToDriveFolder(folder, f);
+                _gwSignedAttachment = {
+                    driveFileId: uploaded.id,
+                    name: f.name,
+                    mime: f.type,
+                    size: f.size,
+                    uploadedAt: new Date().toISOString(),
+                    uploadedBy: (currentUser?.name) || 'Field'
+                };
+            } catch (err) {
+                showToast('⚠ Attachment upload failed — saving report without it');
+                console.error(err);
+            }
+        }
+
+        const stamp = new Date().toISOString();
+        const user = (currentUser?.name) || 'Field';
+        const prev = workLogs[wlIdx].growthOfWorkReport;
+
+        workLogs[wlIdx].growthOfWorkReport = {
+            ..._collectGrowthOfWorkFromForm(),
+            createdAt: prev?.createdAt || stamp,
+            createdBy: prev?.createdBy || user,
+            updatedAt: stamp,
+            updatedBy: user
+        };
+        _stampRecord(workLogs[wlIdx]);
+
+        try {
+            await saveData('workLogs', workLogs);
+            closeGrowthOfWorkModal();
+            renderView();
+            showToast('✅ Growth of Work / Re-Work report saved');
+        } catch (err) {
+            showToast('⚠ Save failed: ' + (err.message || 'try again'));
+        }
+    }
+
+    async function printGrowthOfWorkFromForm() {
+        const wlID = document.getElementById('gwWlID').value;
+        if (!wlID) { showToast('Open a work log first'); return; }
+        await growthOfWorkPDF(wlID, _collectGrowthOfWorkFromForm());
+    }
+
+    // ── Growth of Work PDF — mirrors the ITSPL/QR/GW-RW-R paper form ───
+    async function growthOfWorkPDF(wlID, gwOverride) {
+        const wl = workLogs.find(x => x.wlID === wlID);
+        if (!wl) { showToast('Work log not found'); return; }
+        const gw = gwOverride || wl.growthOfWorkReport;
+        if (!gw) { showToast('No report data — fill in the form first'); return; }
+
+        showToast('⏳ Generating PDF…', 4000);
+
+        if (!window.jspdf) {
+            await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
+            await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
+        }
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+        const PW = doc.internal.pageSize.width;
+        const ML = 15, MR = 15, CW = PW - ML - MR;
+
+        // Header
+        const logoData = (typeof appSettings !== 'undefined' && appSettings?.logoData) ? appSettings.logoData : '';
+        if (logoData) { try { doc.addImage(logoData, 'PNG', ML, 8, 22, 18); } catch (e) {} }
+        doc.setFontSize(13); doc.setFont('helvetica','bold'); doc.setTextColor(15,58,95);
+        doc.text('IMSE TECH - SERVICES PVT LTD', ML + (logoData ? 26 : 0), 14);
+        doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.setTextColor(80,80,80);
+        doc.text('ITSPL/QR/GW-RW-R', ML + (logoData ? 26 : 0), 19);
+
+        // Top-right metadata box
+        const metaX = PW - MR - 60;
+        doc.setDrawColor(120,120,120); doc.setLineWidth(0.2);
+        doc.rect(metaX, 8, 60, 18);
+        doc.setFontSize(7);
+        doc.text('ISSUE NO:',  metaX + 2, 12); doc.text('01',           metaX + 30, 12);
+        doc.text('DATE:',      metaX + 2, 15); doc.text('16.11.2019',   metaX + 30, 15);
+        doc.text('REV:',       metaX + 2, 18); doc.text('00',           metaX + 30, 18);
+        doc.text('PAGE:',      metaX + 2, 21); doc.text('1 of 1',       metaX + 30, 21);
+
+        doc.setDrawColor(15,58,95); doc.setLineWidth(0.6); doc.line(ML, 29, PW-MR, 29);
+
+        // Title
+        doc.setFontSize(14); doc.setFont('helvetica','bold'); doc.setTextColor(15,58,95);
+        doc.text('GROWTH OF WORK / RE WORK - REPORT', PW/2, 38, {align:'center'});
+
+        let y = 45;
+        const fmtDate = d => d ? d.split('-').reverse().join('.') : '';
+        const dateRange = (gw.dateFrom || gw.dateTo)
+            ? (fmtDate(gw.dateFrom) + (gw.dateTo ? ' TO ' + fmtDate(gw.dateTo) : ''))
+            : '';
+
+        // Project / customer / date meta lines (as in paper form)
+        doc.setFontSize(10); doc.setFont('helvetica','bold'); doc.setTextColor(15,58,95);
+        doc.text('PROJECT NO : ' + (gw.projectNo || ''), ML, y, { maxWidth: CW });
+        y += 6;
+        doc.setFont('helvetica','normal'); doc.setTextColor(30,30,30);
+        doc.text('CUSTOMER : ' + (gw.customer || ''), ML, y, { maxWidth: CW });
+        y += 6;
+        if (dateRange) {
+            doc.text('DATE : ' + dateRange, ML, y);
+            y += 4;
+        }
+        y += 2;
+
+        // Work items table
+        const rows = (gw.workItems || []);
+        doc.autoTable({
+            startY: y,
+            margin: { left: ML, right: MR },
+            theme: 'grid',
+            styles: { fontSize: 9, cellPadding: 3, valign: 'top' },
+            headStyles: { fillColor: [30,58,138], textColor: [255,255,255], fontStyle:'bold', fontSize:9, halign:'center' },
+            head: [[
+                {content:'S.NO',              styles:{cellWidth:14, halign:'center'}},
+                {content:'AGREED WORK SCOPE', styles:{cellWidth:(CW-14)*0.42}},
+                {content:'GROWTH OF WORK',    styles:{cellWidth:(CW-14)*0.29}},
+                {content:'RE WORK',           styles:{cellWidth:(CW-14)*0.29}}
+            ]],
+            body: rows.length
+                ? rows.map((r, i) => [
+                    {content: String(i+1), styles:{halign:'center'}},
+                    r.agreedWorkScope || '',
+                    r.growthOfWork    || '',
+                    r.reWork          || ''
+                ])
+                : [[{content:'(No work items entered)', colSpan:4, styles:{halign:'center',fontStyle:'italic',textColor:[120,120,120]}}]]
+        });
+        y = doc.lastAutoTable.finalY + 8;
+
+        // Remarks
+        doc.setFontSize(10); doc.setFont('helvetica','bold'); doc.setTextColor(15,58,95);
+        doc.text('REMARKS:', ML, y);
+        y += 4;
+        doc.setFont('helvetica','normal'); doc.setTextColor(30,30,30); doc.setFontSize(9);
+        const remarksLines = doc.splitTextToSize(gw.remarks || '', CW);
+        doc.text(remarksLines, ML, y);
+        y += Math.max(10, remarksLines.length * 4) + 6;
+
+        // Prepared by / date
+        doc.setFontSize(10); doc.setFont('helvetica','bold'); doc.setTextColor(15,58,95);
+        doc.text('PREPARED BY: ' + (gw.preparedBy || ''), ML, y);
+        y += 6;
+        doc.text('DATE: ' + fmtDate(gw.preparedDate), ML, y);
+        y += 10;
+
+        // Footer notes (matches paper form)
+        doc.setFontSize(8); doc.setFont('helvetica','italic'); doc.setTextColor(80,80,80);
+        doc.text('Issued By: MR', ML, y);
+        y += 4;
+        doc.text('Approved By: DIRECTOR', ML, y);
+
+        const safe = (wl.project || 'GrowthOfWork').replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_-]/g,'');
+        doc.save('GrowthOfWork_' + safe + '_' + (gw.preparedDate || new Date().toISOString().substring(0,10)) + '.pdf');
+        showToast('✅ Growth of Work PDF downloaded');
     }
 
     const _PDF_BUILD = 'v2.2-acrosafe';
