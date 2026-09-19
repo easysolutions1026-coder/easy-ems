@@ -6534,25 +6534,38 @@
             if (!confirm('No ratings selected. Save feedback anyway?')) return;
         }
 
-        // Upload the signed-copy file if a fresh one was picked
+        // Upload the signed-copy file if a fresh one was picked. Blocking
+        // failure handling — see saveKickOff() for rationale.
         const fileInput = document.getElementById('fbSignedFile');
         if (fileInput.files && fileInput.files[0]) {
+            const f = fileInput.files[0];
+            const kb = Math.max(1, Math.round(f.size / 1024));
             try {
-                showToast('⏳ Uploading signed copy…');
-                const f = fileInput.files[0];
-                const folder = await getOrCreateSubFolder('CustomerFeedback');
-                const uploaded = await uploadFileToDriveFolder(folder, f);
+                showToast(`⏳ Uploading "${f.name}" (${kb} KB) to Drive…`, 15000);
+                const uploaded = await uploadFieldAttach(f, 'CustomerFeedback');
+                if (!uploaded?.driveFileId) throw new Error('Drive returned no file id');
                 _fbSignedAttachment = {
-                    driveFileId: uploaded.id,
-                    name: f.name,
-                    mime: f.type,
+                    driveFileId: uploaded.driveFileId,
+                    name: uploaded.name || f.name,
+                    mime: uploaded.mimeType || f.type,
                     size: f.size,
-                    uploadedAt: new Date().toISOString(),
+                    uploadedAt: uploaded.uploadedAt || new Date().toISOString(),
                     uploadedBy: (currentUser?.name) || 'Field'
                 };
+                showToast(`✅ "${f.name}" uploaded — saving feedback…`, 2000);
             } catch (err) {
-                showToast('⚠ Attachment upload failed — saving feedback without it');
-                console.error(err);
+                console.error('Signed copy upload failed:', err);
+                const proceed = confirm(
+                    '❌ Signed copy upload FAILED.\n\n' +
+                    'Reason: ' + (err?.message || String(err)) + '\n\n' +
+                    'Save the feedback WITHOUT the signed copy anyway?\n\n' +
+                    '• Click OK to save without the attachment.\n' +
+                    '• Click Cancel to abort — refresh the page (renews the Google Drive sign-in) and try again.'
+                );
+                if (!proceed) {
+                    showToast('❌ Save cancelled — refresh the page and try again', 3500);
+                    return;
+                }
             }
         }
 
@@ -6958,25 +6971,41 @@
         const wlIdx = workLogs.findIndex(x => x.wlID === wlID);
         if (wlIdx < 0) { showToast('Work log not found'); return; }
 
-        // Upload the signed-copy file if a fresh one was picked
+        // Upload the signed-copy file if a fresh one was picked. We block on
+        // upload errors instead of silently saving-without: previous behaviour
+        // stored the record with `signedAttachment: null` when the Drive
+        // token expired or upload failed, and the user had no clear way to
+        // know the file didn't land.
         const fileInput = document.getElementById('koSignedFile');
         if (fileInput.files && fileInput.files[0]) {
+            const f = fileInput.files[0];
+            const kb = Math.max(1, Math.round(f.size / 1024));
             try {
-                showToast('⏳ Uploading signed copy…');
-                const f = fileInput.files[0];
-                const folder = await getOrCreateSubFolder('KickOffRecords');
-                const uploaded = await uploadFileToDriveFolder(folder, f);
+                showToast(`⏳ Uploading "${f.name}" (${kb} KB) to Drive…`, 15000);
+                const uploaded = await uploadFieldAttach(f, 'KickOffRecords');
+                if (!uploaded?.driveFileId) throw new Error('Drive returned no file id');
                 _koSignedAttachment = {
-                    driveFileId: uploaded.id,
-                    name: f.name,
-                    mime: f.type,
+                    driveFileId: uploaded.driveFileId,
+                    name: uploaded.name || f.name,
+                    mime: uploaded.mimeType || f.type,
                     size: f.size,
-                    uploadedAt: new Date().toISOString(),
+                    uploadedAt: uploaded.uploadedAt || new Date().toISOString(),
                     uploadedBy: (currentUser?.name) || 'Field'
                 };
+                showToast(`✅ "${f.name}" uploaded — saving record…`, 2000);
             } catch (err) {
-                showToast('⚠ Attachment upload failed — saving record without it');
-                console.error(err);
+                console.error('Signed copy upload failed:', err);
+                const proceed = confirm(
+                    '❌ Signed copy upload FAILED.\n\n' +
+                    'Reason: ' + (err?.message || String(err)) + '\n\n' +
+                    'Save the form WITHOUT the signed copy anyway?\n\n' +
+                    '• Click OK to save without the attachment.\n' +
+                    '• Click Cancel to abort — refresh the page (renews the Google Drive sign-in) and try again.'
+                );
+                if (!proceed) {
+                    showToast('❌ Save cancelled — refresh the page and try again', 3500);
+                    return;
+                }
             }
         }
 
@@ -7258,25 +7287,38 @@
         const wlIdx = workLogs.findIndex(x => x.wlID === wlID);
         if (wlIdx < 0) { showToast('Work log not found'); return; }
 
-        // Upload the signed-copy file if a fresh one was picked
+        // Upload the signed-copy file if a fresh one was picked. Blocking
+        // failure handling — see saveKickOff() for rationale.
         const fileInput = document.getElementById('gwSignedFile');
         if (fileInput.files && fileInput.files[0]) {
+            const f = fileInput.files[0];
+            const kb = Math.max(1, Math.round(f.size / 1024));
             try {
-                showToast('⏳ Uploading signed copy…');
-                const f = fileInput.files[0];
-                const folder = await getOrCreateSubFolder('GrowthOfWorkReports');
-                const uploaded = await uploadFileToDriveFolder(folder, f);
+                showToast(`⏳ Uploading "${f.name}" (${kb} KB) to Drive…`, 15000);
+                const uploaded = await uploadFieldAttach(f, 'GrowthOfWorkReports');
+                if (!uploaded?.driveFileId) throw new Error('Drive returned no file id');
                 _gwSignedAttachment = {
-                    driveFileId: uploaded.id,
-                    name: f.name,
-                    mime: f.type,
+                    driveFileId: uploaded.driveFileId,
+                    name: uploaded.name || f.name,
+                    mime: uploaded.mimeType || f.type,
                     size: f.size,
-                    uploadedAt: new Date().toISOString(),
+                    uploadedAt: uploaded.uploadedAt || new Date().toISOString(),
                     uploadedBy: (currentUser?.name) || 'Field'
                 };
+                showToast(`✅ "${f.name}" uploaded — saving report…`, 2000);
             } catch (err) {
-                showToast('⚠ Attachment upload failed — saving report without it');
-                console.error(err);
+                console.error('Signed copy upload failed:', err);
+                const proceed = confirm(
+                    '❌ Signed copy upload FAILED.\n\n' +
+                    'Reason: ' + (err?.message || String(err)) + '\n\n' +
+                    'Save the report WITHOUT the signed copy anyway?\n\n' +
+                    '• Click OK to save without the attachment.\n' +
+                    '• Click Cancel to abort — refresh the page (renews the Google Drive sign-in) and try again.'
+                );
+                if (!proceed) {
+                    showToast('❌ Save cancelled — refresh the page and try again', 3500);
+                    return;
+                }
             }
         }
 
