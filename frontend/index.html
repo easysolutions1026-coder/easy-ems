@@ -35444,13 +35444,23 @@ Automated WFH alert — ${company} Attendance System.`;
                         </div>
                     </div>
 
-                    <!-- ITSPL form badges — click to view saved data + download PDF -->
-                    ${(hasFB || hasKO || hasGW) ? `
+                    <!-- ITSPL form buttons — always visible on the header,
+                         matching the field-app layout. Solid fill when the
+                         record has been captured, outlined when not. Clicking
+                         an "empty" one opens its viewer, which shows a
+                         "not yet captured" toast (main app is read-only —
+                         field techs create these via field_app.html). -->
                     <div class="flex gap-2 mt-3 flex-wrap ml-5" onclick="event.stopPropagation()">
-                        ${hasFB ? `<button onclick="_wlViewFeedback('${w.wlID}')"     class="px-3 py-1 rounded-lg text-xs font-semibold border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100" title="View captured Customer Feedback">📋 Feedback ✓</button>` : ''}
-                        ${hasKO ? `<button onclick="_wlViewKickOff('${w.wlID}')"       class="px-3 py-1 rounded-lg text-xs font-semibold border border-indigo-300 bg-indigo-50 text-indigo-800 hover:bg-indigo-100" title="View captured Kick-Off Record">📝 Kick-Off ✓</button>` : ''}
-                        ${hasGW ? `<button onclick="_wlViewGrowthOfWork('${w.wlID}')" class="px-3 py-1 rounded-lg text-xs font-semibold border border-rose-300 bg-rose-50 text-rose-800 hover:bg-rose-100" title="View captured Growth of Work / Re-Work Report">🔄 Growth/RW ✓</button>` : ''}
-                    </div>` : ''}
+                        <button onclick="_wlViewFeedback('${w.wlID}')"
+                            style="padding:6px 12px;border-radius:10px;background:${hasFB?'#f59e0b':'#fff'};color:${hasFB?'#fff':'#92400e'};border:1.5px solid #f59e0b;font-weight:600;font-size:12px;cursor:pointer"
+                            title="${hasFB?'View captured Customer Feedback':'Not yet captured on the Field App'}">📋 Feedback${hasFB?' ✓':''}</button>
+                        <button onclick="_wlViewKickOff('${w.wlID}')"
+                            style="padding:6px 12px;border-radius:10px;background:${hasKO?'#6366f1':'#fff'};color:${hasKO?'#fff':'#4338ca'};border:1.5px solid #6366f1;font-weight:600;font-size:12px;cursor:pointer"
+                            title="${hasKO?'View captured Kick-Off Record':'Not yet captured on the Field App'}">📝 Kick-Off${hasKO?' ✓':''}</button>
+                        <button onclick="_wlViewGrowthOfWork('${w.wlID}')"
+                            style="padding:6px 12px;border-radius:10px;background:${hasGW?'#e11d48':'#fff'};color:${hasGW?'#fff':'#9f1239'};border:1.5px solid #e11d48;font-weight:600;font-size:12px;cursor:pointer"
+                            title="${hasGW?'View captured Growth of Work / Re-Work Report':'Not yet captured on the Field App'}">🔄 Growth/RW${hasGW?' ✓':''}</button>
+                    </div>
                 </div>
 
                 <!-- Daily entries (hidden when collapsed) -->
@@ -35609,7 +35619,7 @@ Automated WFH alert — ${company} Attendance System.`;
         function _wlViewFeedback(wlID) {
             const w = (workLogs || []).find(x => x.wlID === wlID);
             const fb = w?.customerFeedback;
-            if (!fb) { _showToast('No feedback captured yet', '#dc2626'); return; }
+            if (!fb) { _showToast('📋 Customer Feedback not yet captured on the Field App', '#b45309', 3500); return; }
             const row = (label, val) => `<div class="grid grid-cols-3 gap-2 py-1 border-b border-gray-100 text-sm"><div class="col-span-1 font-semibold text-gray-600">${label}</div><div class="col-span-2 text-gray-800">${_wlEscape(val || '—')}</div></div>`;
             const rating = key => {
                 const sel = (fb.ratings || {})[key];
@@ -35647,7 +35657,7 @@ Automated WFH alert — ${company} Attendance System.`;
         function _wlViewKickOff(wlID) {
             const w = (workLogs || []).find(x => x.wlID === wlID);
             const ko = w?.kickOffRecord;
-            if (!ko) { _showToast('No kick-off record captured yet', '#dc2626'); return; }
+            if (!ko) { _showToast('📝 Kick-Off Record not yet captured on the Field App', '#4338ca', 3500); return; }
             const chip = (on, label) => on
                 ? `<span class="inline-block px-2 py-0.5 mr-1 mb-1 rounded-full text-xs bg-indigo-600 text-white">✓ ${_wlEscape(label)}</span>`
                 : `<span class="inline-block px-2 py-0.5 mr-1 mb-1 rounded-full text-xs bg-gray-100 text-gray-400 line-through">${_wlEscape(label)}</span>`;
@@ -35688,7 +35698,7 @@ Automated WFH alert — ${company} Attendance System.`;
         function _wlViewGrowthOfWork(wlID) {
             const w = (workLogs || []).find(x => x.wlID === wlID);
             const gw = w?.growthOfWorkReport;
-            if (!gw) { _showToast('No growth of work report captured yet', '#dc2626'); return; }
+            if (!gw) { _showToast('🔄 Growth of Work Report not yet captured on the Field App', '#9f1239', 3500); return; }
             const row = (label, val) => `<div class="grid grid-cols-3 gap-2 py-1 border-b border-gray-100 text-sm"><div class="col-span-1 font-semibold text-gray-600">${label}</div><div class="col-span-2 text-gray-800">${_wlEscape(val || '—')}</div></div>`;
             const dateRange = (gw.dateFrom || gw.dateTo)
                 ? _wlFmtDate(gw.dateFrom) + (gw.dateTo ? ' → ' + _wlFmtDate(gw.dateTo) : '')
