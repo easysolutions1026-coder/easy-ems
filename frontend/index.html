@@ -35656,8 +35656,28 @@ Automated WFH alert — ${company} Attendance System.`;
             const mime = attachment.mime || '';
             const name = attachment.name || '';
             const isPDF = mime === 'application/pdf' || name.toLowerCase().endsWith('.pdf');
-            const driveViewUrl = `https://drive.google.com/file/d/${fid}/view`;
+            const driveViewUrl    = `https://drive.google.com/file/d/${fid}/view`;
+            const drivePreviewUrl = `https://drive.google.com/file/d/${fid}/preview`;
 
+            // ── PDFs: use Drive's official embeddable /preview iframe ────
+            // The /thumbnail endpoint is unreliable for PDFs (delayed
+            // processing, private-file 401s), whereas /preview is the URL
+            // Drive is designed to be iframed from. It renders PDFs with
+            // built-in page navigation and uses the user's existing Google
+            // browser session (same account they OAuthed with).
+            if (isPDF) {
+                el.style.padding = '0';
+                el.innerHTML = `
+                    <iframe src="${drivePreviewUrl}"
+                        style="width:100%;height:min(70vh,600px);border:none;border-radius:4px;background:#f9fafb;display:block"
+                        allow="autoplay"
+                        title="Signed PDF preview"></iframe>
+                    <p class="text-xs text-gray-500 mt-2 mb-2 text-center w-full">📄 Embedded from Google Drive · not showing? <a href="${driveViewUrl}" target="_blank" class="text-blue-600 hover:underline">open in Drive ↗</a></p>
+                `;
+                return;
+            }
+
+            // ── Images: thumbnail first, then OAuth fetch on failure ─────
             // Kick off the thumbnail load — succeeds most of the time for
             // company Drive files while the user is signed in via OAuth.
             const img = document.createElement('img');
@@ -35667,24 +35687,9 @@ Automated WFH alert — ${company} Attendance System.`;
                 el.innerHTML = '';
                 el.appendChild(img);
                 img.onclick = () => _wlPhotoLightbox(img.src);
-                if (isPDF) {
-                    const note = document.createElement('p');
-                    note.className = 'text-xs text-gray-500 mt-2 text-center w-full';
-                    note.innerHTML = `📄 First page shown · <a href="${driveViewUrl}" target="_blank" class="text-blue-600 hover:underline">open full PDF ↗</a>`;
-                    el.appendChild(note);
-                }
             };
             img.onerror = async () => {
-                // PDFs: fetching whole file as data URL is heavy; send to Drive viewer.
-                if (isPDF) {
-                    el.innerHTML = `
-                        <div class="text-center py-6 w-full">
-                            <p class="text-sm text-gray-600 mb-3">📄 PDF preview couldn't load in this browser session.</p>
-                            <a href="${driveViewUrl}" target="_blank" class="inline-block px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">Open PDF in Drive ↗</a>
-                        </div>`;
-                    return;
-                }
-                // Images: try the OAuth-authenticated download.
+                // Fall back to OAuth-authenticated download for images.
                 el.innerHTML = `<div class="text-xs text-yellow-700 italic py-2">⏳ Fetching from Drive…</div>`;
                 try {
                     const dataUrl = await _wlDriveFileAsDataUrl(fid);
