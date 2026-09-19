@@ -35616,6 +35616,96 @@ Automated WFH alert — ${company} Attendance System.`;
             m.classList.add('show');
         }
 
+        // ── Signed-copy attachment preview ─────────────────────────────
+        // Renders the "signed copy" panel that appears at the bottom of each
+        // ITSPL form viewer (Feedback / Kick-Off / Growth-of-Work). Returns
+        // an empty placeholder HTML string; the actual image/PDF preview is
+        // loaded lazily by _wlLoadAttachmentPreview() after the modal is
+        // shown. Two-tier fetch strategy:
+        //   1. Drive's public /thumbnail?id=X endpoint — fast, no OAuth,
+        //      works whenever the file is shared or the user is signed
+        //      into Google in this browser. Returns the image itself for
+        //      images and a first-page render for PDFs.
+        //   2. On failure, /drive/v3/files/X?alt=media with the app's own
+        //      accessToken — always works for images, skipped for PDFs
+        //      (fetching the whole PDF as data URL is heavy; we send them
+        //      to Drive's own viewer instead).
+        function _wlAttachmentPanelHtml(attachment) {
+            if (!attachment || !attachment.driveFileId) return '';
+            const fid  = _wlEscape(attachment.driveFileId);
+            const name = _wlEscape(attachment.name || 'signed form');
+            const upBy = attachment.uploadedBy ? ` by ${_wlEscape(attachment.uploadedBy)}` : '';
+            const upOn = attachment.uploadedAt ? ` on ${_wlFmtDate((attachment.uploadedAt||'').substring(0,10))}` : '';
+            return `
+                <div class="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                    <div class="flex items-center justify-between mb-2 flex-wrap gap-2">
+                        <strong class="text-sm text-yellow-800">📎 Signed copy: ${name}</strong>
+                        <a href="https://drive.google.com/file/d/${fid}/view" target="_blank" class="text-blue-600 text-xs hover:underline">Open in Drive ↗</a>
+                    </div>
+                    <div id="wl-attach-preview" class="bg-white border border-yellow-100 rounded flex items-center justify-center overflow-hidden" style="min-height:180px;padding:8px">
+                        <div class="text-xs text-yellow-700 italic">⏳ Loading preview…</div>
+                    </div>
+                    ${upBy || upOn ? `<p class="text-xs text-yellow-700 mt-2">Uploaded${upBy}${upOn}</p>` : ''}
+                </div>`;
+        }
+        function _wlLoadAttachmentPreview(attachment) {
+            if (!attachment || !attachment.driveFileId) return;
+            const el = document.getElementById('wl-attach-preview');
+            if (!el) return;
+            const fid  = attachment.driveFileId;
+            const mime = attachment.mime || '';
+            const name = attachment.name || '';
+            const isPDF = mime === 'application/pdf' || name.toLowerCase().endsWith('.pdf');
+            const driveViewUrl = `https://drive.google.com/file/d/${fid}/view`;
+
+            // Kick off the thumbnail load — succeeds most of the time for
+            // company Drive files while the user is signed in via OAuth.
+            const img = document.createElement('img');
+            img.style.cssText = 'max-width:100%;max-height:70vh;cursor:zoom-in;border-radius:4px;display:block;margin:0 auto';
+            img.title = 'Click to view full-size';
+            img.onload = () => {
+                el.innerHTML = '';
+                el.appendChild(img);
+                img.onclick = () => _wlPhotoLightbox(img.src);
+                if (isPDF) {
+                    const note = document.createElement('p');
+                    note.className = 'text-xs text-gray-500 mt-2 text-center w-full';
+                    note.innerHTML = `📄 First page shown · <a href="${driveViewUrl}" target="_blank" class="text-blue-600 hover:underline">open full PDF ↗</a>`;
+                    el.appendChild(note);
+                }
+            };
+            img.onerror = async () => {
+                // PDFs: fetching whole file as data URL is heavy; send to Drive viewer.
+                if (isPDF) {
+                    el.innerHTML = `
+                        <div class="text-center py-6 w-full">
+                            <p class="text-sm text-gray-600 mb-3">📄 PDF preview couldn't load in this browser session.</p>
+                            <a href="${driveViewUrl}" target="_blank" class="inline-block px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">Open PDF in Drive ↗</a>
+                        </div>`;
+                    return;
+                }
+                // Images: try the OAuth-authenticated download.
+                el.innerHTML = `<div class="text-xs text-yellow-700 italic py-2">⏳ Fetching from Drive…</div>`;
+                try {
+                    const dataUrl = await _wlDriveFileAsDataUrl(fid);
+                    const authImg = document.createElement('img');
+                    authImg.src = dataUrl;
+                    authImg.style.cssText = 'max-width:100%;max-height:70vh;cursor:zoom-in;border-radius:4px;display:block;margin:0 auto';
+                    authImg.title = 'Click to view full-size';
+                    authImg.onclick = () => _wlPhotoLightbox(dataUrl);
+                    el.innerHTML = '';
+                    el.appendChild(authImg);
+                } catch (e) {
+                    el.innerHTML = `
+                        <div class="text-center py-6 w-full">
+                            <p class="text-sm text-gray-500 mb-2">⚠ Preview unavailable.</p>
+                            <a href="${driveViewUrl}" target="_blank" class="inline-block px-3 py-1 bg-blue-600 text-white text-xs rounded-lg hover:bg-blue-700">Open in Drive ↗</a>
+                        </div>`;
+                }
+            };
+            img.src = `https://drive.google.com/thumbnail?id=${fid}&sz=w1600`;
+        }
+
         function _wlViewFeedback(wlID) {
             const w = (workLogs || []).find(x => x.wlID === wlID);
             const fb = w?.customerFeedback;
@@ -35649,9 +35739,10 @@ Automated WFH alert — ${company} Attendance System.`;
                 ${row('Incharge',    fb.inchargeName)}
                 ${row('Signed Date', _wlFmtDate(fb.signedDate))}
 
-                ${fb.signedAttachment ? `<div class="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm"><strong>📎 Signed copy:</strong> <a href="https://drive.google.com/file/d/${_wlEscape(fb.signedAttachment.driveFileId)}/view" target="_blank" class="text-blue-600 hover:underline">${_wlEscape(fb.signedAttachment.name || 'signed form')}</a></div>` : ''}
+                ${_wlAttachmentPanelHtml(fb.signedAttachment)}
                 <p class="text-xs text-gray-400 mt-4">Captured ${_wlFmtDate((fb.createdAt||'').substring(0,10))} by ${_wlEscape(fb.createdBy || '—')}${fb.updatedAt && fb.updatedAt !== fb.createdAt ? ` · last edited ${_wlFmtDate(fb.updatedAt.substring(0,10))} by ${_wlEscape(fb.updatedBy || '—')}` : ''}</p>`;
             _wlOpenViewer('📋 Customer Feedback', 'linear-gradient(135deg,#92400e,#f59e0b)', html);
+            _wlLoadAttachmentPreview(fb.signedAttachment);
         }
 
         function _wlViewKickOff(wlID) {
@@ -35690,9 +35781,10 @@ Automated WFH alert — ${company} Attendance System.`;
                     ${row('Engineer / Technician', ko.engineerName)}
                     ${row('General Manager',       ko.generalManagerName)}
                 </div>
-                ${ko.signedAttachment ? `<div class="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm"><strong>📎 Signed copy:</strong> <a href="https://drive.google.com/file/d/${_wlEscape(ko.signedAttachment.driveFileId)}/view" target="_blank" class="text-blue-600 hover:underline">${_wlEscape(ko.signedAttachment.name || 'signed form')}</a></div>` : ''}
+                ${_wlAttachmentPanelHtml(ko.signedAttachment)}
                 <p class="text-xs text-gray-400 mt-4">Captured ${_wlFmtDate((ko.createdAt||'').substring(0,10))} by ${_wlEscape(ko.createdBy || '—')}${ko.updatedAt && ko.updatedAt !== ko.createdAt ? ` · last edited ${_wlFmtDate(ko.updatedAt.substring(0,10))} by ${_wlEscape(ko.updatedBy || '—')}` : ''}</p>`;
             _wlOpenViewer('📝 Project Kick-Off Record', 'linear-gradient(135deg,#4338ca,#6366f1)', html);
+            _wlLoadAttachmentPreview(ko.signedAttachment);
         }
 
         function _wlViewGrowthOfWork(wlID) {
@@ -35743,9 +35835,10 @@ Automated WFH alert — ${company} Attendance System.`;
                     ${row('Prepared By',   gw.preparedBy)}
                     ${row('Prepared Date', _wlFmtDate(gw.preparedDate))}
                 </div>
-                ${gw.signedAttachment ? `<div class="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm"><strong>📎 Signed copy:</strong> <a href="https://drive.google.com/file/d/${_wlEscape(gw.signedAttachment.driveFileId)}/view" target="_blank" class="text-blue-600 hover:underline">${_wlEscape(gw.signedAttachment.name || 'signed form')}</a></div>` : ''}
+                ${_wlAttachmentPanelHtml(gw.signedAttachment)}
                 <p class="text-xs text-gray-400 mt-4">Captured ${_wlFmtDate((gw.createdAt||'').substring(0,10))} by ${_wlEscape(gw.createdBy || '—')}${gw.updatedAt && gw.updatedAt !== gw.createdAt ? ` · last edited ${_wlFmtDate(gw.updatedAt.substring(0,10))} by ${_wlEscape(gw.updatedBy || '—')}` : ''}</p>`;
             _wlOpenViewer('🔄 Growth of Work / Re-Work Report', 'linear-gradient(135deg,#9f1239,#e11d48)', html);
+            _wlLoadAttachmentPreview(gw.signedAttachment);
         }
 
         // ═══════════════════════════════════════════════════════════════════
