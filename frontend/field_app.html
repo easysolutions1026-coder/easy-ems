@@ -2103,6 +2103,47 @@
         renderView();
     }
 
+    // ── Daily-entry collapse state on the Work Logs detail view ──
+    // Each work log's daily entries default to collapsed so a long project
+    // with many days stays scannable. Click the day header to expand /
+    // collapse. State survives sync/re-render because it lives on the
+    // module. Clearing on log switch would surprise users, so it persists.
+    let _wlDayExpanded = new Set();
+    function _toggleWlDayExpanded(entryID, ev) {
+        if (ev) { ev.stopPropagation(); }
+        if (_wlDayExpanded.has(entryID)) _wlDayExpanded.delete(entryID);
+        else _wlDayExpanded.add(entryID);
+        renderView();
+    }
+    function _wlDayExpandAll(wlID) {
+        const w = workLogs.find(x => x.wlID === wlID);
+        if (!w) return;
+        (w.dailyEntries || []).forEach(d => { if (d.entryID) _wlDayExpanded.add(d.entryID); });
+        renderView();
+    }
+    function _wlDayCollapseAll(wlID) {
+        const w = workLogs.find(x => x.wlID === wlID);
+        if (!w) return;
+        (w.dailyEntries || []).forEach(d => { if (d.entryID) _wlDayExpanded.delete(d.entryID); });
+        renderView();
+    }
+    // Strips HTML for a compact single-line preview shown in the collapsed
+    // header — Gmail-pasted descriptions carry <p style=...> markup that
+    // would otherwise leak into the summary.
+    function _wlPreviewLine(html, max = 90) {
+        if (!html) return '';
+        let s = String(html)
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/&nbsp;/g, ' ')
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"')
+            .replace(/\s+/g, ' ')
+            .trim();
+        return s.length > max ? s.slice(0, max - 1) + '…' : s;
+    }
+
     // ── Freshness check before saving — prevents silent overwrites ──
     // When User A saves a whole-collection POST, it replaces the entire
     // collection on the server. If User B had just added a record that
@@ -5791,6 +5832,14 @@
             <!-- Daily entries -->
             ${!_visibleEntries.length ? `<div style="padding:10px 16px;border-top:1px solid var(--border);font-size:12px;color:var(--muted)">No daily entries yet — tap "+ Add Daily Update" to begin.</div>` : `
             <div style="border-top:1px solid var(--border)">
+                ${_visibleEntries.length > 1 ? `
+                <div style="padding:8px 16px;background:#f8fafc;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+                    <span style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.04em;text-transform:uppercase">${_visibleEntries.length} Daily Entries</span>
+                    <div style="display:flex;gap:4px">
+                        <button onclick="_wlDayExpandAll('${w.wlID}')"  style="padding:4px 10px;border-radius:6px;border:1px solid #c7d2fe;background:#eef2ff;color:#4338ca;font-size:11px;font-weight:600;cursor:pointer">▼ Expand all</button>
+                        <button onclick="_wlDayCollapseAll('${w.wlID}')" style="padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:#fff;color:var(--muted);font-size:11px;font-weight:600;cursor:pointer">▶ Collapse all</button>
+                    </div>
+                </div>` : ''}
                 ${(() => {
                     // Pre-compute the original chronological day number for every entry
                     // so filtered views still show "Day N" with the correct N relative to
@@ -5802,22 +5851,29 @@
                         const dayNum = dayNumByID[d.entryID] || '?';
                         const dur = (d.startTime && d.endTime) ? calcDuration(d.startTime, d.endTime) : '';
                         const dayTechs = (d.technicians || []).map(t => t.name).join(', ') || (w.technicians || []).map(t => t.name).join(', ') || '—';
+                        const _isDayExpanded = _wlDayExpanded.has(d.entryID);
+                        const _dayPreview   = _wlPreviewLine(d.description || d.observations || d.recommendations || '');
                     return `
                     <div style="padding:12px 16px;border-bottom:1px solid var(--border);background:${idx % 2 === 0 ? '#fff' : '#f8fafc'}">
-                        <!-- Header row: day number, date, time, category, actions -->
+                        <!-- Header row: day number, date, time, category, actions (click title area to expand/collapse) -->
                         <div class="flex justify-between items-start mb-2">
-                            <div>
-                                <span class="font-semibold" style="font-size:13px;color:var(--navy)">Day ${dayNum} — ${d.date || '—'}</span>
-                                ${d.startTime ? `<span style="font-size:11px;color:var(--muted);margin-left:8px">⏱ ${d.startTime}–${d.endTime || '?'}${dur ? ' (' + dur + ')' : ''}</span>` : ''}
-                                ${d.category ? `<span class="badge" style="margin-left:6px;background:#eff6ff;color:#1d4ed8;font-size:10px">${d.category}</span>` : ''}
+                            <div onclick="_toggleWlDayExpanded('${d.entryID}')" style="cursor:pointer;flex:1;min-width:0;user-select:none">
+                                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                                    <span style="display:inline-block;transition:transform .15s;transform:rotate(${_isDayExpanded ? '90' : '0'}deg);color:var(--muted);font-size:11px">▶</span>
+                                    <span class="font-semibold" style="font-size:13px;color:var(--navy)">Day ${dayNum} — ${d.date || '—'}</span>
+                                    ${d.startTime ? `<span style="font-size:11px;color:var(--muted)">⏱ ${d.startTime}–${d.endTime || '?'}${dur ? ' (' + dur + ')' : ''}</span>` : ''}
+                                    ${d.category ? `<span class="badge" style="background:#eff6ff;color:#1d4ed8;font-size:10px">${d.category}</span>` : ''}
+                                </div>
+                                ${!_isDayExpanded && _dayPreview ? `<p style="font-size:11px;color:var(--muted);margin-top:4px;line-height:1.4;overflow:hidden;text-overflow:ellipsis">${_dayPreview}</p>` : ''}
                             </div>
-                            <div class="flex gap-1.5 flex-wrap">
+                            <div class="flex gap-1.5 flex-wrap" onclick="event.stopPropagation()">
                                 <button onclick="editDayEntry('${w.wlID}','${d.entryID}')" style="padding:4px 8px;border-radius:6px;border:1.5px solid var(--border);background:#fff;cursor:pointer;font-size:11px;color:var(--muted)" title="Edit entry">✏️</button>
                                 <button onclick="openCalibModal('${w.wlID}','${d.entryID}')" style="padding:4px 8px;border-radius:6px;border:1.5px solid #e9d5ff;background:#faf5ff;cursor:pointer;font-size:11px;color:#7c3aed;font-weight:600" title="Add/edit calibration">📐 ${(d.calibrations || []).length ? d.calibrations.length + ' Cal' : '+ Cal'}</button>
                                 <button onclick="dayEntryPDF('${w.wlID}','${d.entryID}')" style="padding:4px 8px;border-radius:6px;border:1.5px solid #bfdbfe;background:#eff6ff;cursor:pointer;font-size:11px;color:#1d4ed8;font-weight:600" title="Download this day's activity as PDF">📄 PDF</button>
                                 <button onclick="deleteDayEntry('${w.wlID}','${d.entryID}')" style="padding:4px 8px;border-radius:6px;border:1.5px solid #fecaca;background:#fff;cursor:pointer;font-size:11px;color:#dc2626" title="Delete entry">✕</button>
                             </div>
                         </div>
+                        ${_isDayExpanded ? `
                         <!-- Technicians -->
                         <p style="font-size:11px;color:#7c3aed;margin-bottom:4px">👷 <strong>On Site:</strong> ${dayTechs}</p>
                         <!-- Work done -->
@@ -5892,6 +5948,7 @@
                                         </div>`;
                                     }).join('')}</div>
                         </div>` : ''}
+                        ` : ''}
                     </div>`;
                 }).join('');
                 })()}
