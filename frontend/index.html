@@ -8430,6 +8430,7 @@
             { view:'parties',      label:'Parties' },
             { view:'docs',         label:'Documents' },
             { view:'letters',      label:'Letters' },
+            { view:'worklogs',     label:'Project Work Logs' },
             { view:'settings',     label:'Settings' },
             { view:'auditlog',     label:'Audit Log' },
         ];
@@ -8458,8 +8459,8 @@
             // Existing installs with custom rolePermissions saved to
             // settings won't auto-update; re-set from Settings if needed.
             'Accounts': ['dashboard','transactions','ar','expenses','projexp','payreq','direxp','pettycash','bank','tax','tax.verify','mis','parties','docs','worklogs','auditlog','settings'],
-            'HR':       ['dashboard','staff','staff.list','staff.attendance','staff.documents','staff.payslip','mis','docs','auditlog'],
-            'Field':    ['dashboard','docs','auditlog'],
+            'HR':       ['dashboard','staff','staff.list','staff.attendance','staff.documents','staff.payslip','mis','docs','worklogs','auditlog'],
+            'Field':    ['dashboard','docs','worklogs','auditlog'],
             'View Only':['dashboard','transactions','ar','expenses','projexp','funds','payreq','direxp','pettycash','bank','tax','tax.certify','mis','staff','staff.list','staff.attendance','staff.documents','staff.payslip','parties','docs','worklogs','auditlog'],
             'CA':       ['dashboard','transactions','ar','expenses','projexp','payreq','direxp','pettycash','bank','tax','tax.certify','mis','parties','docs','worklogs','auditlog']
         };
@@ -18814,6 +18815,7 @@
                                         <th class="px-3 py-1.5 text-center text-teal-700">HR</th>
                                         <th class="px-3 py-1.5 text-center text-orange-700">Field</th>
                                         <th class="px-3 py-1.5 text-center text-gray-600">View Only</th>
+                                        <th class="px-3 py-1.5 text-center text-green-700">CA</th>
                                     </tr>
                                 </thead>
                                 <tbody>
