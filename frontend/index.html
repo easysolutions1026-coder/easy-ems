@@ -35421,6 +35421,12 @@ Automated WFH alert — ${company} Attendance System.`;
             const hasFB = !!w.customerFeedback;
             const hasKO = !!w.kickOffRecord;
             const hasGW = !!w.growthOfWorkReport;
+            // Signed & scanned attachment flags — power the little 📎 badge
+            // next to each form button. Click on that badge opens the
+            // signed copy directly (no form-data detour).
+            const fbAttach = !!(w.customerFeedback?.signedAttachment?.driveFileId);
+            const koAttach = !!(w.kickOffRecord?.signedAttachment?.driveFileId);
+            const gwAttach = !!(w.growthOfWorkReport?.signedAttachment?.driveFileId);
 
             return `
             <div class="bg-white border border-gray-200 rounded-xl shadow-sm mb-4 overflow-hidden" style="border-left:4px solid ${ss.dot}">
@@ -35451,17 +35457,36 @@ Automated WFH alert — ${company} Attendance System.`;
                          record has been captured, outlined when not. Clicking
                          an "empty" one opens its viewer, which shows a
                          "not yet captured" toast (main app is read-only —
-                         field techs create these via field_app.html). -->
-                    <div class="flex gap-2 mt-3 flex-wrap ml-5" onclick="event.stopPropagation()">
-                        <button onclick="_wlViewFeedback('${w.wlID}')"
-                            style="padding:6px 12px;border-radius:10px;background:${hasFB?'#f59e0b':'#fff'};color:${hasFB?'#fff':'#92400e'};border:1.5px solid #f59e0b;font-weight:600;font-size:12px;cursor:pointer"
-                            title="${hasFB?'View captured Customer Feedback':'Not yet captured on the Field App'}">📋 Feedback${hasFB?' ✓':''}</button>
-                        <button onclick="_wlViewKickOff('${w.wlID}')"
-                            style="padding:6px 12px;border-radius:10px;background:${hasKO?'#6366f1':'#fff'};color:${hasKO?'#fff':'#4338ca'};border:1.5px solid #6366f1;font-weight:600;font-size:12px;cursor:pointer"
-                            title="${hasKO?'View captured Kick-Off Record':'Not yet captured on the Field App'}">📝 Kick-Off${hasKO?' ✓':''}</button>
-                        <button onclick="_wlViewGrowthOfWork('${w.wlID}')"
-                            style="padding:6px 12px;border-radius:10px;background:${hasGW?'#e11d48':'#fff'};color:${hasGW?'#fff':'#9f1239'};border:1.5px solid #e11d48;font-weight:600;font-size:12px;cursor:pointer"
-                            title="${hasGW?'View captured Growth of Work / Re-Work Report':'Not yet captured on the Field App'}">🔄 Growth/RW${hasGW?' ✓':''}</button>
+                         field techs create these via field_app.html).
+                         The small 📎 badge next to each button shows only
+                         when a signed & scanned copy has been uploaded;
+                         click it to jump straight to the signed PDF/image
+                         (skipping the form-data viewer). -->
+                    <div class="flex gap-1.5 mt-3 flex-wrap ml-5" onclick="event.stopPropagation()">
+                        <div class="flex" style="gap:2px">
+                            <button onclick="_wlViewFeedback('${w.wlID}')"
+                                style="padding:6px 12px;border-radius:${fbAttach?'10px 0 0 10px':'10px'};background:${hasFB?'#f59e0b':'#fff'};color:${hasFB?'#fff':'#92400e'};border:1.5px solid #f59e0b;font-weight:600;font-size:12px;cursor:pointer"
+                                title="${hasFB?'View captured Customer Feedback (form data)':'Not yet captured on the Field App'}">📋 Feedback${hasFB?' ✓':''}</button>
+                            ${fbAttach ? `<button onclick="_wlOpenSignedAttachment('${w.wlID}','feedback')"
+                                style="padding:6px 8px;border-radius:0 10px 10px 0;background:#fff;color:#92400e;border:1.5px solid #f59e0b;border-left:none;font-weight:600;font-size:12px;cursor:pointer"
+                                title="View the signed &amp; scanned copy directly">📎 1</button>` : ''}
+                        </div>
+                        <div class="flex" style="gap:2px">
+                            <button onclick="_wlViewKickOff('${w.wlID}')"
+                                style="padding:6px 12px;border-radius:${koAttach?'10px 0 0 10px':'10px'};background:${hasKO?'#6366f1':'#fff'};color:${hasKO?'#fff':'#4338ca'};border:1.5px solid #6366f1;font-weight:600;font-size:12px;cursor:pointer"
+                                title="${hasKO?'View captured Kick-Off Record (form data)':'Not yet captured on the Field App'}">📝 Kick-Off${hasKO?' ✓':''}</button>
+                            ${koAttach ? `<button onclick="_wlOpenSignedAttachment('${w.wlID}','kickoff')"
+                                style="padding:6px 8px;border-radius:0 10px 10px 0;background:#fff;color:#4338ca;border:1.5px solid #6366f1;border-left:none;font-weight:600;font-size:12px;cursor:pointer"
+                                title="View the signed &amp; scanned copy directly">📎 1</button>` : ''}
+                        </div>
+                        <div class="flex" style="gap:2px">
+                            <button onclick="_wlViewGrowthOfWork('${w.wlID}')"
+                                style="padding:6px 12px;border-radius:${gwAttach?'10px 0 0 10px':'10px'};background:${hasGW?'#e11d48':'#fff'};color:${hasGW?'#fff':'#9f1239'};border:1.5px solid #e11d48;font-weight:600;font-size:12px;cursor:pointer"
+                                title="${hasGW?'View captured Growth of Work / Re-Work Report (form data)':'Not yet captured on the Field App'}">🔄 Growth/RW${hasGW?' ✓':''}</button>
+                            ${gwAttach ? `<button onclick="_wlOpenSignedAttachment('${w.wlID}','growth')"
+                                style="padding:6px 8px;border-radius:0 10px 10px 0;background:#fff;color:#9f1239;border:1.5px solid #e11d48;border-left:none;font-weight:600;font-size:12px;cursor:pointer"
+                                title="View the signed &amp; scanned copy directly">📎 1</button>` : ''}
+                        </div>
                     </div>
                 </div>
 
@@ -35846,6 +35871,34 @@ Automated WFH alert — ${company} Attendance System.`;
                 <p class="text-xs text-gray-400 mt-4">Captured ${_wlFmtDate((gw.createdAt||'').substring(0,10))} by ${_wlEscape(gw.createdBy || '—')}${gw.updatedAt && gw.updatedAt !== gw.createdAt ? ` · last edited ${_wlFmtDate(gw.updatedAt.substring(0,10))} by ${_wlEscape(gw.updatedBy || '—')}` : ''}</p>`;
             _wlOpenViewer('🔄 Growth of Work / Re-Work Report', 'linear-gradient(135deg,#9f1239,#e11d48)', html);
             _wlLoadAttachmentPreview(gw.signedAttachment);
+        }
+
+        // ── Direct-jump to a form's signed attachment ─────────────────
+        // Opens a stripped-down viewer showing ONLY the signed & scanned
+        // copy — no form-data table, no auto-regenerated PDF. Bound to
+        // the little 📎 badge on each ITSPL form button in the card
+        // header. Same underlying preview pipeline (Drive /preview iframe
+        // for PDFs, thumbnail + OAuth fallback for images) but centered
+        // in the modal without the form-data layout around it.
+        function _wlOpenSignedAttachment(wlID, formType) {
+            const w = (workLogs || []).find(x => x.wlID === wlID);
+            if (!w) return;
+            const map = {
+                feedback: { rec: w.customerFeedback,     title: '📋 Signed Customer Feedback',       bg: 'linear-gradient(135deg,#92400e,#f59e0b)' },
+                kickoff:  { rec: w.kickOffRecord,         title: '📝 Signed Kick-Off Record',          bg: 'linear-gradient(135deg,#4338ca,#6366f1)' },
+                growth:   { rec: w.growthOfWorkReport,   title: '🔄 Signed Growth of Work Report',   bg: 'linear-gradient(135deg,#9f1239,#e11d48)' }
+            };
+            const entry = map[formType];
+            if (!entry?.rec?.signedAttachment?.driveFileId) {
+                _showToast('No signed copy uploaded for this form yet', '#b45309', 3000);
+                return;
+            }
+            const html = `
+                <p class="text-sm text-gray-600 mb-3">Signed &amp; scanned copy for <strong>${_wlEscape(w.project || '')}</strong></p>
+                ${_wlAttachmentPanelHtml(entry.rec.signedAttachment)}
+            `;
+            _wlOpenViewer(entry.title, entry.bg, html);
+            _wlLoadAttachmentPreview(entry.rec.signedAttachment);
         }
 
         // ═══════════════════════════════════════════════════════════════════
