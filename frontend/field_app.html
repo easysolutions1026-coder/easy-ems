@@ -7140,20 +7140,42 @@
         let y = 45;
         const fmtDate = d => d ? d.split('-').reverse().join('.') : '';
 
-        // Strike helper — renders un-selected options with a strike-through
-        // to mimic the paper form's crossed-out choices.
-        const strikeList = (items, selectedFn) => items.map(it => {
-            const isOn = selectedFn(it);
-            return isOn ? it.label : `~${it.label}~`;   // will convert to actual strike below
-        }).join(' / ');
-
-        // For jsPDF we can't inline strike-through inside a single string,
-        // so we render options as plain text with un-selected ones in
-        // parentheses (matches paper form's crossed-out semantics).
-        const optList = (items, selectedFn) => items.map(it => {
-            const isOn = selectedFn(it);
-            return isOn ? '[✓] ' + it.label : '[ ] ' + it.label;
-        }).join('   ');
+        // Print rules — mirror how the paper form is filled by hand:
+        //   • Documents / Location of Work: show ALL options separated by
+        //     ' / ', strike through the un-selected ones (paper-form
+        //     "cross out what doesn't apply" convention). Rendered by
+        //     the willDrawCell / didDrawCell hooks below because jsPDF has
+        //     no native strike-through for text.
+        //   • Manuals: only mark items with an explicit YES (✓) or NO (✗);
+        //     skip un-selected items.
+        //   • PPE (many items): bullet list of what was ticked.
+        //   • PPE donning: single ✓ YES / ✗ NO.
+        const notMarked = '(not marked)';
+        const selectedList = (items, isOn) => {
+            const on = items.filter(it => isOn(it));
+            if (!on.length) return notMarked;
+            return on.map(it => '\u2022  ' + it.label).join('\n');
+        };
+        const yesNoList = (items, statusFn) => {
+            const rows = items.map(it => {
+                const v = statusFn(it);
+                if (v === true)  return '\u2713  ' + it.label + ' — YES';
+                if (v === false) return '\u2717  ' + it.label + ' — NO';
+                return null;
+            }).filter(Boolean);
+            return rows.length ? rows.join('\n') : notMarked;
+        };
+        const yesNoValue = v => v === true ? '\u2713 YES'
+                             : v === false ? '\u2717 NO'
+                             : notMarked;
+        // strikeOptions: cell renders every option; unselected ones get a
+        // horizontal line drawn through them in didDrawCell below.
+        // `content` is the full joined string — autoTable needs it to
+        // compute the correct row height (multi-line wrap).
+        const strikeOptions = (items, isKept) => ({
+            content: items.map(it => it.label).join(' / '),
+            _strikeOptions: items.map(it => ({ label: it.label, kept: !!isKept(it) }))
+        });
 
         // ── Main body table ──
         doc.autoTable({
@@ -7169,24 +7191,63 @@
                 ['PROJECT NUMBER AND DETAIL', ko.projectDetail || ''],
                 ['EXPECTED DATE STARTING',    fmtDate(ko.expectedStartDate)],
                 ['TEAM DETAILS',              ko.teamDetails || ''],
-                ['DOCUMENTS',                 optList(KO_DOCUMENTS, d => !!(ko.documents||{})[d.key])],
-                ['LOCATION OF WORK',          optList(KO_LOCATIONS, l => ko.locationOfWork === l.key)],
+                ['DOCUMENTS CARRIED / VERIFIED', strikeOptions(KO_DOCUMENTS, d => !!(ko.documents||{})[d.key])],
+                ['LOCATION OF WORK',          strikeOptions(KO_LOCATIONS, l => ko.locationOfWork === l.key)],
                 ['EXPECTED DATE OF COMPLETION', fmtDate(ko.expectedCompletionDate)],
                 ['SPECIFIC DETAILS IF ANY',   ko.specificDetails || ''],
                 ['MANUALS / REFERENCE\nDOCUMENTS',
-                    KO_MANUALS.map(m => {
-                        const v = (ko.manualsRefDocs||{})[m.key];
-                        const mark = v === true ? 'YES' : v === false ? 'NO' : '—';
-                        return m.label + ' — ' + mark;
-                    }).join('\n')
+                    yesNoList(KO_MANUALS, m => (ko.manualsRefDocs||{})[m.key])
                 ],
                 ['PERSONAL PROTECTIVE\nEQUIPMENT FOR ALL\nTECHNICIANS',
-                    optList(KO_PPE, p => !!(ko.ppe||{})[p.key])
+                    selectedList(KO_PPE, p => !!(ko.ppe||{})[p.key])
                 ],
-                ['PERSONAL PROTECTIVE\nEQUIPMENT — CORRECT\nDONNING INSTRUCTION /\nUSAGE DEMONSTRATED',
-                    ko.ppeDonningVerified === true ? 'YES' : ko.ppeDonningVerified === false ? 'NO' : '—'
+                ['PPE — CORRECT DONNING\n/ USAGE DEMONSTRATED',
+                    yesNoValue(ko.ppeDonningVerified)
                 ]
-            ]
+            ],
+            willDrawCell: (data) => {
+                if (data.section === 'body' && data.column.index === 1) {
+                    const raw = data.cell.raw;
+                    if (raw && typeof raw === 'object' && raw._strikeOptions) {
+                        data.cell.text = [];
+                    }
+                }
+            },
+            didDrawCell: (data) => {
+                if (data.section !== 'body' || data.column.index !== 1) return;
+                const raw = data.cell.raw;
+                if (!raw || typeof raw !== 'object' || !raw._strikeOptions) return;
+                const opts = raw._strikeOptions;
+                const sep = ' / ';
+                const pad = 3;
+                const cx = data.cell.x, cy = data.cell.y, cw = data.cell.width;
+                const d2 = data.doc;
+                d2.setFontSize(9); d2.setFont('helvetica','normal'); d2.setTextColor(0,0,0);
+                let x = cx + pad;
+                let y2 = cy + pad + 3;
+                const maxX = cx + cw - pad;
+                const lineH = 4;
+                opts.forEach((opt, i) => {
+                    const w = d2.getTextWidth(opt.label);
+                    if (x + w > maxX && x > cx + pad) {
+                        x = cx + pad; y2 += lineH;
+                    }
+                    d2.text(opt.label, x, y2);
+                    if (!opt.kept) {
+                        const strikeY = y2 - 1.3;
+                        const oldLW = d2.getLineWidth();
+                        d2.setLineWidth(0.4);
+                        d2.line(x, strikeY, x + w, strikeY);
+                        d2.setLineWidth(oldLW);
+                    }
+                    x += w;
+                    if (i < opts.length - 1) {
+                        const sw = d2.getTextWidth(sep);
+                        if (x + sw > maxX) { x = cx + pad; y2 += lineH; }
+                        else { d2.text(sep, x, y2); x += sw; }
+                    }
+                });
+            }
         });
         y = doc.lastAutoTable.finalY + 10;
 
@@ -7456,18 +7517,19 @@
             ? (fmtDate(gw.dateFrom) + (gw.dateTo ? ' TO ' + fmtDate(gw.dateTo) : ''))
             : '';
 
-        // Project / customer / date meta lines (as in paper form)
-        doc.setFontSize(10); doc.setFont('helvetica','bold'); doc.setTextColor(15,58,95);
-        doc.text('PROJECT NO : ' + (gw.projectNo || ''), ML, y, { maxWidth: CW });
-        y += 6;
-        doc.setFont('helvetica','normal'); doc.setTextColor(30,30,30);
-        doc.text('CUSTOMER : ' + (gw.customer || ''), ML, y, { maxWidth: CW });
-        y += 6;
-        if (dateRange) {
-            doc.text('DATE : ' + dateRange, ML, y);
-            y += 4;
-        }
-        y += 2;
+        // Project / customer meta — bordered table matching Kick-Off style
+        // so the two forms look like a set on paper.
+        doc.autoTable({
+            startY: y, margin:{left:ML,right:MR}, theme:'grid',
+            styles:{fontSize:9,cellPadding:3,valign:'top'},
+            columnStyles:{ 0:{cellWidth:32,fontStyle:'bold',fillColor:[241,245,249]}, 1:{cellWidth:CW-32} },
+            body:[
+                ['PROJECT NO', gw.projectNo || ''],
+                ['CUSTOMER',   gw.customer  || ''],
+                ['DATE',       dateRange    || '']
+            ]
+        });
+        y = doc.lastAutoTable.finalY + 5;
 
         // Work items table
         const rows = (gw.workItems || []);
@@ -7490,25 +7552,41 @@
                     r.growthOfWork    || '',
                     r.reWork          || ''
                 ])
-                : [[{content:'(No work items entered)', colSpan:4, styles:{halign:'center',fontStyle:'italic',textColor:[120,120,120]}}]]
+                : [[{content:'(No work items entered)', colSpan:4, styles:{halign:'center',fontStyle:'italic',textColor:[120,120,120]}}]],
+            // Style empty / "Nil" growth-and-rework cells in soft gray
+            // italic so real entries stand out and Nil rows don't crowd
+            // the page visually.
+            didParseCell: (data) => {
+                if (data.section !== 'body') return;
+                if (data.column.index < 2 || data.column.index > 3) return;
+                const v = String(data.cell.raw || '').trim().toLowerCase();
+                if (!v || v === 'nil' || v === '-' || v === '\u2014') {
+                    data.cell.styles.textColor = [140,140,140];
+                    data.cell.styles.fontStyle = 'italic';
+                }
+            }
         });
         y = doc.lastAutoTable.finalY + 8;
 
-        // Remarks
-        doc.setFontSize(10); doc.setFont('helvetica','bold'); doc.setTextColor(15,58,95);
-        doc.text('REMARKS:', ML, y);
-        y += 4;
-        doc.setFont('helvetica','normal'); doc.setTextColor(30,30,30); doc.setFontSize(9);
-        const remarksLines = doc.splitTextToSize(gw.remarks || '', CW);
-        doc.text(remarksLines, ML, y);
-        y += Math.max(10, remarksLines.length * 4) + 6;
+        // Remarks in its own bordered box (was plain text before)
+        doc.autoTable({
+            startY:y, margin:{left:ML,right:MR}, theme:'grid',
+            styles:{fontSize:9,cellPadding:3,minCellHeight:18,valign:'top'},
+            columnStyles:{ 0:{cellWidth:32,fontStyle:'bold',fillColor:[241,245,249]}, 1:{cellWidth:CW-32} },
+            body:[['REMARKS', gw.remarks || '']]
+        });
+        y = doc.lastAutoTable.finalY + 6;
 
-        // Prepared by / date
-        doc.setFontSize(10); doc.setFont('helvetica','bold'); doc.setTextColor(15,58,95);
-        doc.text('PREPARED BY: ' + (gw.preparedBy || ''), ML, y);
-        y += 6;
-        doc.text('DATE: ' + fmtDate(gw.preparedDate), ML, y);
-        y += 10;
+        // Prepared By / Date side-by-side (mirrors Kick-Off's Engineer/GM row)
+        doc.autoTable({
+            startY:y, margin:{left:ML,right:MR}, theme:'grid',
+            styles:{fontSize:9,cellPadding:4,minCellHeight:22,valign:'top'},
+            body:[[
+                {content:'PREPARED BY\n\n' + (gw.preparedBy||''), styles:{cellWidth:CW/2}},
+                {content:'DATE\n\n' + (fmtDate(gw.preparedDate) || ''), styles:{cellWidth:CW/2}}
+            ]]
+        });
+        y = doc.lastAutoTable.finalY + 4;
 
         // Footer notes (matches paper form)
         doc.setFontSize(8); doc.setFont('helvetica','italic'); doc.setTextColor(80,80,80);
