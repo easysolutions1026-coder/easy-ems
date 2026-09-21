@@ -18429,7 +18429,7 @@
                     <details class="mt-3">
                         <summary class="text-xs cursor-pointer text-emerald-700 font-semibold">What gets synced?</summary>
                         <p class="text-[11px] text-emerald-800 mt-2 leading-relaxed">
-                            12 tabs are pushed: <strong>Settings</strong>, <strong>Parties</strong>, <strong>AllTransactions</strong>, <strong>ApprovedTxns</strong>, <strong>Expenses</strong>, <strong>DirectorExpenses</strong>, <strong>Staff</strong>, <strong>Payslips</strong>, <strong>Attendance</strong>, <strong>WorkLogs</strong>, <strong>DailyEntries</strong>, <strong>Calibrations</strong>. Each sync replaces the entire tab content with the current BMS data — manual edits in those tabs will be overwritten. Tabs that don't exist in your sheet are skipped automatically.
+                            22 tabs are pushed: <strong>Settings</strong>, <strong>BankAccounts</strong>, <strong>AllowedUsers</strong>, <strong>Parties</strong>, <strong>AllTransactions</strong>, <strong>ApprovedTxns</strong>, <strong>ProformaInvoices</strong>, <strong>DeliveryNotes</strong>, <strong>Expenses</strong>, <strong>DirectorExpenses</strong>, <strong>Staff</strong>, <strong>Payslips</strong>, <strong>Attendance</strong>, <strong>WFHLog</strong>, <strong>WorkLogs</strong>, <strong>DailyEntries</strong>, <strong>Calibrations</strong>, <strong>ProjectExpenses</strong>, <strong>FieldExpenses</strong>, <strong>FundRequests</strong>, <strong>StaffDocuments</strong>, <strong>WageRevisions</strong>. Each sync replaces the entire tab content with the current BMS data — manual edits in those tabs will be overwritten. Tabs that don't exist in your sheet are skipped automatically (create them from the Sheets UI to enable that tab's sync). Sensitive data (Settings password, PINs, logo/signature blobs) is deliberately omitted from the Settings tab.
                         </p>
                     </details>
                 </div>
@@ -43822,21 +43822,128 @@ Automated WFH alert — ${company} Attendance System.`;
             };
         }
         function _sheetsMapSettings() {
+            // Full mirror of the Settings screen — every field the UI shows,
+            // grouped by section, so an admin can audit the Cloud SQL state
+            // from Google Sheets without opening the app. Sensitive fields
+            // (settingsPassword, PINs, base64 logo/signature blobs) are
+            // deliberately omitted — putting them in a shared Sheet would
+            // widen the attack surface. Bank accounts and allowed users
+            // are complex records with their own tabs; see _sheetsMapBankAccounts
+            // and _sheetsMapAllowedUsers below.
             const s = settings || {};
+            const bool = v => v ? 'Yes' : 'No';
             const rows = [
-                ['Company Name',  s.companyName || ''],
-                ['IEC Number',    s.iecNumber || ''],
-                ['GST Number',    s.gstNumber || ''],
-                ['TAN Number',    s.tanNumber || ''],
-                ['MSME Number',   s.msmeNumber || ''],
-                ['CIN Number',    s.cinNumber || ''],
-                ['PAN Number',    s.panNumber || ''],
-                ['Address',       s.address || ''],
-                ['Phone',         s.phone || ''],
-                ['Email',         s.email || ''],
-                ['Last Synced',   new Date().toISOString()]
+                // ── Company Identity ──
+                ['— Company Identity —', ''],
+                ['Company Name',      s.companyName    || ''],
+                ['IEC Number',        s.iecNumber      || ''],
+                ['GST Number',        s.gstNumber      || ''],
+                ['TAN Number',        s.tanNumber      || ''],
+                ['MSME Number',       s.msmeNumber     || ''],
+                ['CIN Number',        s.cinNumber      || ''],
+                ['PAN Number',        s.panNumber      || ''],
+                ['Address',           s.address        || ''],
+                ['Phone',             s.phone          || ''],
+                ['Email',             s.email          || ''],
+                ['Website',           s.website        || ''],
+
+                // ── Directors & Opening Balances ──
+                ['', ''],
+                ['— Directors —', ''],
+                ['Director 1 Name',           s.director1Name           || ''],
+                ['Director 1 Opening Balance', s.director1OpeningBalance ?? 0],
+                ['Director 1 Opening Date',   s.director1OpeningDate    || ''],
+                ['Director 1 Opening Note',   s.director1OpeningNote    || ''],
+                ['Director 2 Name',           s.director2Name           || ''],
+                ['Director 2 Opening Balance', s.director2OpeningBalance ?? 0],
+                ['Director 2 Opening Date',   s.director2OpeningDate    || ''],
+                ['Director 2 Opening Note',   s.director2OpeningNote    || ''],
+
+                // ── Office Hours & Attendance ──
+                ['', ''],
+                ['— Office Hours & Attendance —', ''],
+                ['Office Start (Mon-Fri)',    s.officeStartTime         || '09:30'],
+                ['Office End (Mon-Fri)',      s.officeEndTime           || '18:00'],
+                ['Saturday Start',            s.saturdayStart           || '09:30'],
+                ['Saturday End',              s.saturdayEnd             || '13:30'],
+                ['Late Grace Period (mins)',  s.lateGraceMins           ?? 10],
+                ['Late Deduction Mode',       s.lateDeductionMode       || 'Off'],
+                ['Standard Workday Hours',    s.standardWorkdayHours    ?? 8],
+
+                // ── Incentives ──
+                ['', ''],
+                ['— Incentives —', ''],
+                ['Punctuality Incentive - Perfect (₹)', s.punctualityIncentivePerfect ?? 0],
+                ['Punctuality Incentive - Good (₹)',    s.punctualityIncentiveGood    ?? 0],
+                ['WFH Backlog Entry (days)',            s.wfhBacklogDays              ?? 30],
+
+                // ── Access / Security ──
+                ['', ''],
+                ['— Access & Security —', ''],
+                ['PIN Expiry (days)',          s.pinExpiryDays          ?? 30],
+                ['Allowed Users Count',        (s.allowedUsers || []).length],
+                ['Settings Password Set',      bool(s.settingsPassword && s.settingsPassword !== 'admin')],
+                // Role names only — full permission matrix would blow the tab up
+                ['Roles With Custom Permissions',
+                    Object.keys(s.rolePermissions || {}).join(', ')],
+
+                // ── Toggles / Feature Flags ──
+                ['', ''],
+                ['— Toggles —', ''],
+                ['Allow Project Delete',       bool(s.allowProjectDelete)],
+                ['Allow Expense Delete',       bool(s.allowExpenseDelete)],
+                ['Allow Staff Delete',         bool(s.allowStaffDelete)],
+                ['Allow Bank Account Delete',  bool(s.allowBankDelete)],
+
+                // ── Integrations ──
+                ['', ''],
+                ['— Integrations —', ''],
+                ['Google Sheets ID',           s.googleSheetsId || s.spreadsheetId || ''],
+                ['Logo Uploaded',              bool(s.logoData)],
+                ['Signature Uploaded',         bool(s.signatureData)],
+                ['Stamp / Seal Uploaded',      bool(s.stampData)],
+                ['Bank Accounts Count',        (bankAccounts || []).length],
+
+                // ── Sync footer ──
+                ['', ''],
+                ['Last Synced',                new Date().toISOString()]
             ];
             return { headers: ['Field','Value'], rows };
+        }
+
+        function _sheetsMapBankAccounts() {
+            // Each bank account is its own row so the sheet is queryable /
+            // sortable / filterable in the usual spreadsheet way.
+            return {
+                headers: ['ID','Account Name','Bank Name','Currency','Type','Account No','IFSC Code','Branch Address','Active','Created At','Updated At'],
+                rows: (bankAccounts || []).map(b => [
+                    b.id           || '',
+                    b.accountName  || '',
+                    b.bankName     || '',
+                    b.currency     || '',
+                    b.type         || '',
+                    b.accountNo    || '',
+                    b.ifscCode     || '',
+                    b.branchAddress|| '',
+                    b.isActive === false ? 'No' : 'Yes',
+                    b.createdAt    || '',
+                    b.updatedAt    || ''
+                ])
+            };
+        }
+
+        function _sheetsMapAllowedUsers() {
+            // Multi-user access list. Role is looked up from allowedUsers[]
+            // itself when set (added via addAllowedUser flow); otherwise blank.
+            return {
+                headers: ['Email','Display Name','Role','Added At'],
+                rows: ((settings || {}).allowedUsers || []).map(u => [
+                    u.email     || '',
+                    u.name      || u.displayName || '',
+                    u.role      || '',
+                    u.addedAt   || ''
+                ])
+            };
         }
 
         function _sheetsMapProformaInvoices() {
@@ -44057,6 +44164,8 @@ Automated WFH alert — ${company} Attendance System.`;
 
         const _sheetsMappings = [
             { tab: 'Settings',           mapper: _sheetsMapSettings },
+            { tab: 'BankAccounts',       mapper: _sheetsMapBankAccounts },
+            { tab: 'AllowedUsers',       mapper: _sheetsMapAllowedUsers },
             { tab: 'Parties',            mapper: _sheetsMapParties },
             { tab: 'AllTransactions',    mapper: _sheetsMapAllTransactions },
             { tab: 'ApprovedTxns',       mapper: _sheetsMapApprovedTransactions },
