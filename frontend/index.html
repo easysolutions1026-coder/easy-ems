@@ -43830,6 +43830,11 @@ Automated WFH alert — ${company} Attendance System.`;
             // widen the attack surface. Bank accounts and allowed users
             // are complex records with their own tabs; see _sheetsMapBankAccounts
             // and _sheetsMapAllowedUsers below.
+            // NB: field-name discipline — every `s.xxx` here must exactly
+            // match a key written by saveSettings() and friends, else the
+            // sheet cell renders empty. There is no `cinNumber`, `panNumber`,
+            // `phone`, `email` or `website` on settings — those live on
+            // parties/staff, not on the company profile.
             const s = settings || {};
             const bool = v => v ? 'Yes' : 'No';
             const rows = [
@@ -43840,24 +43845,19 @@ Automated WFH alert — ${company} Attendance System.`;
                 ['GST Number',        s.gstNumber      || ''],
                 ['TAN Number',        s.tanNumber      || ''],
                 ['MSME Number',       s.msmeNumber     || ''],
-                ['CIN Number',        s.cinNumber      || ''],
-                ['PAN Number',        s.panNumber      || ''],
-                ['Address',           s.address        || ''],
-                ['Phone',             s.phone          || ''],
-                ['Email',             s.email          || ''],
-                ['Website',           s.website        || ''],
+                ['Company Address',   s.companyAddress || ''],
 
                 // ── Directors & Opening Balances ──
                 ['', ''],
                 ['— Directors —', ''],
-                ['Director 1 Name',           s.director1Name           || ''],
+                ['Director 1 Name',            s.director1Name           || ''],
                 ['Director 1 Opening Balance', s.director1OpeningBalance ?? 0],
-                ['Director 1 Opening Date',   s.director1OpeningDate    || ''],
-                ['Director 1 Opening Note',   s.director1OpeningNote    || ''],
-                ['Director 2 Name',           s.director2Name           || ''],
+                ['Director 1 Opening Date',    s.director1OpeningDate    || ''],
+                ['Director 1 Opening Note',    s.director1OpeningNote    || ''],
+                ['Director 2 Name',            s.director2Name           || ''],
                 ['Director 2 Opening Balance', s.director2OpeningBalance ?? 0],
-                ['Director 2 Opening Date',   s.director2OpeningDate    || ''],
-                ['Director 2 Opening Note',   s.director2OpeningNote    || ''],
+                ['Director 2 Opening Date',    s.director2OpeningDate    || ''],
+                ['Director 2 Opening Note',    s.director2OpeningNote    || ''],
 
                 // ── Office Hours & Attendance ──
                 ['', ''],
@@ -43893,7 +43893,6 @@ Automated WFH alert — ${company} Attendance System.`;
                 ['Allow Project Delete',       bool(s.allowProjectDelete)],
                 ['Allow Expense Delete',       bool(s.allowExpenseDelete)],
                 ['Allow Staff Delete',         bool(s.allowStaffDelete)],
-                ['Allow Bank Account Delete',  bool(s.allowBankDelete)],
 
                 // ── Integrations ──
                 ['', ''],
