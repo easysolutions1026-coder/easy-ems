@@ -36083,12 +36083,12 @@ Automated WFH alert — ${company} Attendance System.`;
             //     "cross out what doesn't apply" convention). Rendered by
             //     the willDrawCell / didDrawCell hooks below because
             //     jsPDF has no native strike-through for text.
-            //   • Manuals: only mark items with an explicit YES (✓) or NO
-            //     (✗); skip the "not selected" ones — otherwise the row
-            //     shows six lines of dashes when nothing was captured.
-            //   • PPE (many items): bullet list of what was ticked; cleaner
-            //     than crowding all 7 into one strike-through line.
-            //   • PPE donning: single ✓ YES / ✗ NO.
+            //   • Manuals: label — YES / label — NO, one per line; skip
+            //     un-selected items. No tick/cross prefix — those glyphs
+            //     (U+2713 / U+2717) aren't in jsPDF Helvetica's WinANSI
+            //     encoding and rendered as garbled bytes.
+            //   • PPE (many items): bullet list (• is in WinANSI).
+            //   • PPE donning: single YES / NO.
             const notMarked = '(not marked)';
             const selectedList = (items, isOn) => {
                 const on = items.filter(it => isOn(it));
@@ -36098,14 +36098,14 @@ Automated WFH alert — ${company} Attendance System.`;
             const yesNoList = (items, statusFn) => {
                 const rows = items.map(it => {
                     const v = statusFn(it);
-                    if (v === true)  return '\u2713  ' + it.label + ' — YES';
-                    if (v === false) return '\u2717  ' + it.label + ' — NO';
+                    if (v === true)  return it.label + ' \u2014 YES';
+                    if (v === false) return it.label + ' \u2014 NO';
                     return null;
                 }).filter(Boolean);
                 return rows.length ? rows.join('\n') : notMarked;
             };
-            const yesNoValue = v => v === true ? '\u2713 YES'
-                                 : v === false ? '\u2717 NO'
+            const yesNoValue = v => v === true ? 'YES'
+                                 : v === false ? 'NO'
                                  : notMarked;
             // strikeOptions: cell renders every option; unselected ones get
             // a horizontal line drawn through them in didDrawCell below.
@@ -36117,7 +36117,9 @@ Automated WFH alert — ${company} Attendance System.`;
             });
             doc.autoTable({
                 startY: y, margin:{left:ML,right:MR}, theme:'grid',
-                styles:{fontSize:9,cellPadding:3,valign:'top'},
+                // textColor:[0,0,0] overrides grid theme's default [80,80,80]
+                // so body cells render pure black instead of gray.
+                styles:{fontSize:9,cellPadding:3,valign:'top',textColor:[0,0,0]},
                 columnStyles:{ 0:{cellWidth:60,fontStyle:'bold',fillColor:[241,245,249]}, 1:{cellWidth:CW-60} },
                 body:[
                     ['PROJECT NUMBER AND DETAIL', ko.projectDetail || ''],
@@ -36171,7 +36173,11 @@ Automated WFH alert — ${company} Attendance System.`;
                         if (!opt.kept) {
                             const strikeY = y2 - 1.3;
                             const oldLW = d2.getLineWidth();
-                            d2.setLineWidth(0.4);
+                            // Force black stroke — autoTable's grid theme
+                            // leaves the pen set to a light gray for cell
+                            // borders; without this the strike would be gray.
+                            d2.setDrawColor(0, 0, 0);
+                            d2.setLineWidth(0.5);
                             d2.line(x, strikeY, x + w, strikeY);
                             d2.setLineWidth(oldLW);
                         }
@@ -36187,7 +36193,7 @@ Automated WFH alert — ${company} Attendance System.`;
             y = doc.lastAutoTable.finalY + 10;
             doc.autoTable({
                 startY:y, margin:{left:ML,right:MR}, theme:'grid',
-                styles:{fontSize:9,cellPadding:4,minCellHeight:24,valign:'top'},
+                styles:{fontSize:9,cellPadding:4,minCellHeight:24,valign:'top',textColor:[0,0,0]},
                 body:[[
                     {content:'ENGINEER / TECHNICIAN\n\n' + (ko.engineerName||''), styles:{cellWidth:CW/2}},
                     {content:'GENERAL MANAGER\n\n' + (ko.generalManagerName||''), styles:{cellWidth:CW/2}}
@@ -36240,7 +36246,7 @@ Automated WFH alert — ${company} Attendance System.`;
             // so the two forms look like a set on paper.
             doc.autoTable({
                 startY: y, margin:{left:ML,right:MR}, theme:'grid',
-                styles:{fontSize:9,cellPadding:3,valign:'top'},
+                styles:{fontSize:9,cellPadding:3,valign:'top',textColor:[0,0,0]},
                 columnStyles:{ 0:{cellWidth:32,fontStyle:'bold',fillColor:[241,245,249]}, 1:{cellWidth:CW-32} },
                 body:[
                     ['PROJECT NO', gw.projectNo || ''],
@@ -36252,7 +36258,7 @@ Automated WFH alert — ${company} Attendance System.`;
             const rows = (gw.workItems || []);
             doc.autoTable({
                 startY:y, margin:{left:ML,right:MR}, theme:'grid',
-                styles:{fontSize:9,cellPadding:3,valign:'top'},
+                styles:{fontSize:9,cellPadding:3,valign:'top',textColor:[0,0,0]},
                 headStyles:{fillColor:[30,58,138],textColor:[255,255,255],fontStyle:'bold',fontSize:9,halign:'center'},
                 head:[[
                     {content:'S.NO',styles:{cellWidth:14,halign:'center'}},
@@ -36280,7 +36286,7 @@ Automated WFH alert — ${company} Attendance System.`;
             // Remarks in its own bordered box (was plain text before)
             doc.autoTable({
                 startY:y, margin:{left:ML,right:MR}, theme:'grid',
-                styles:{fontSize:9,cellPadding:3,minCellHeight:18,valign:'top'},
+                styles:{fontSize:9,cellPadding:3,minCellHeight:18,valign:'top',textColor:[0,0,0]},
                 columnStyles:{ 0:{cellWidth:32,fontStyle:'bold',fillColor:[241,245,249]}, 1:{cellWidth:CW-32} },
                 body:[['REMARKS', gw.remarks || '']]
             });
@@ -36288,7 +36294,7 @@ Automated WFH alert — ${company} Attendance System.`;
             // Prepared By / Date side-by-side (mirrors Kick-Off's Engineer/GM row)
             doc.autoTable({
                 startY:y, margin:{left:ML,right:MR}, theme:'grid',
-                styles:{fontSize:9,cellPadding:4,minCellHeight:22,valign:'top'},
+                styles:{fontSize:9,cellPadding:4,minCellHeight:22,valign:'top',textColor:[0,0,0]},
                 body:[[
                     {content:'PREPARED BY\n\n' + (gw.preparedBy||''), styles:{cellWidth:CW/2}},
                     {content:'DATE\n\n' + (fmt(gw.preparedDate) || ''), styles:{cellWidth:CW/2}}
