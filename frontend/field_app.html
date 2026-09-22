@@ -5006,6 +5006,7 @@
     function _calMergeBelow() {
         if (!_calibFocusCell) { _calToast('Tap a cell first'); return; }
         const {r, c} = _calibFocusCell;
+        if (r === -1) { _calToast('Header cells can only merge horizontally'); return; }
         let m = _calGetMergeAt(r, c);
         if (!m) { m = { r, c, rs: 1, cs: 1 }; _calibMerges.push(m); }
         if (r + m.rs >= _calNumRows()) { _calToast('Already at the last row'); _calCleanEmptyMerge(m); return; }
@@ -5049,22 +5050,27 @@
     // ── Focus + keyboard navigation ──────────────────────────────────
     function _calSetFocus(r, c) {
         _calibFocusCell = { r, c };
-        // Update visual highlight without full re-render — find all .cal-cell, then mark
-        document.querySelectorAll('#calibTable td[data-cal-r]').forEach(td => {
-            const tr = parseInt(td.getAttribute('data-cal-r'));
-            const tc = parseInt(td.getAttribute('data-cal-c'));
-            td.style.outline = (tr === r && tc === c) ? '2px solid #7c3aed' : '';
-            td.style.outlineOffset = (tr === r && tc === c) ? '-2px' : '';
+        // Update visual highlight without full re-render. r === -1 is the
+        // header row — its cells are <th> not <td>, so match on the shared
+        // data-cal-r attribute instead of the tag.
+        document.querySelectorAll('#calibTable [data-cal-r]').forEach(el => {
+            const tr = parseInt(el.getAttribute('data-cal-r'));
+            const tc = parseInt(el.getAttribute('data-cal-c'));
+            const on = (tr === r && tc === c);
+            el.style.outline       = on ? '2px solid #7c3aed' : '';
+            el.style.outlineOffset = on ? '-2px' : '';
         });
         // Show in toolbar
         const statusEl = document.getElementById('calToolbarStatus');
         if (statusEl) {
             const m = _calGetMergeAt(r, c);
-            statusEl.textContent = m
-                ? `Cell ${_calLabel(r, c)} · merged (${m.rs}×${m.cs})`
-                : `Cell ${_calLabel(r, c)}`;
+            const label = r === -1
+                ? `Header ${_calColLetter(c)}${m ? ` · merged (${m.cs} cols)` : ''}`
+                : `Cell ${_calLabel(r, c)}${m ? ` · merged (${m.rs}\u00d7${m.cs})` : ''}`;
+            statusEl.textContent = label;
         }
     }
+    function _calColLetter(c) { return String.fromCharCode(65 + c); }
     function _calLabel(r, c) {
         // Letter for column (A, B, C…) + number for row (1-based) — spreadsheet style
         return String.fromCharCode(65 + c) + (r + 1);
@@ -5203,17 +5209,35 @@
         // ── CUSTOM TABLE BUILDER MODE ────────────────────────────
         if (_calibTemplate._isCustom) {
             // Header: editable column labels + remove button + "+Col" button + resize handle
-            const headerCells = _customColHeaders.map((h, ci) => `
-                <th data-cal-c="${ci}" style="${thStyle};min-width:${_calibColWidths[ci]}px;width:${_calibColWidths[ci]}px;position:relative">
+            // Header cells are focusable and mergeable (horizontal only) via
+            // r === -1 in _calibMerges. Cells covered by a header merge are
+            // skipped; the origin cell renders with colspan and the summed
+            // width of the spanned columns.
+            const headerCells = _customColHeaders.map((h, ci) => {
+                if (_calIsMergedOut(-1, ci)) return '';   // covered by a merged header to the left
+                const hm = _calGetMergeAt(-1, ci);
+                const spanAttr = hm ? ` colspan="${hm.cs}"` : '';
+                // Width: single-cell width, or sum of spanned column widths
+                const wPx = hm
+                    ? Array.from({length: hm.cs}, (_, i) => _calibColWidths[ci + i] || 0).reduce((a, b) => a + b, 0)
+                    : _calibColWidths[ci];
+                // No resize handle on merged cells — user should split first, then resize
+                const rh = hm ? '' : resizeHandle(ci);
+                return `
+                <th data-cal-r="-1" data-cal-c="${ci}"${spanAttr}
+                    onclick="if(event.target.tagName!=='INPUT'&&event.target.tagName!=='BUTTON')_calSetFocus(-1,${ci})"
+                    style="${thStyle};min-width:${wPx}px;width:${wPx}px;position:relative;cursor:pointer">
                     <div style="display:flex;align-items:center;gap:4px">
                         <input type="text" value="${(h||'').replace(/"/g,'&quot;')}"
                             placeholder="Column ${ci+1}"
+                            onfocus="_calSetFocus(-1,${ci})"
                             onchange="_customColHeaders[${ci}]=this.value;renderCalibTable()"
                             style="flex:1;border:1px solid #475569;background:rgba(255,255,255,.1);color:#fff;font-size:11px;padding:3px 5px;border-radius:3px;outline:none"/>
-                        ${_customColHeaders.length > 1 ? `<button type="button" onclick="removeCustomCol(${ci})" title="Remove column" style="color:#fca5a5;background:none;border:none;cursor:pointer;font-size:13px;line-height:1;padding:0 2px">✕</button>` : ''}
+                        ${_customColHeaders.length > 1 ? `<button type="button" onclick="event.stopPropagation();removeCustomCol(${ci})" title="Remove column" style="color:#fca5a5;background:none;border:none;cursor:pointer;font-size:13px;line-height:1;padding:0 2px">✕</button>` : ''}
                     </div>
-                    ${resizeHandle(ci)}
-                </th>`).join('');
+                    ${rh}
+                </th>`;
+            }).join('');
             thead.innerHTML = `<tr>${headerCells}<th style="${thStyle};width:60px">
                 <button type="button" onclick="addCustomCol()" title="Add column" style="background:#10b981;color:#fff;border:none;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;font-weight:600">+ Col</button>
             </th></tr>`;
