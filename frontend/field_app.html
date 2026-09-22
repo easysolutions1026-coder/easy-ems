@@ -5006,7 +5006,11 @@
     function _calMergeBelow() {
         if (!_calibFocusCell) { _calToast('Tap a cell first'); return; }
         const {r, c} = _calibFocusCell;
-        if (r === -1) { _calToast('Header cells can only merge horizontally'); return; }
+        // Header cells (r === -1) can merge downward too — the merge extends
+        // into the data rows below. Header row is virtual and always height
+        // 1, so a header rs > 1 means the merge spans thead + N-1 body rows,
+        // rendered as a <th> with rowspan (HTML tables allow rowspan to
+        // cross thead/tbody boundaries).
         let m = _calGetMergeAt(r, c);
         if (!m) { m = { r, c, rs: 1, cs: 1 }; _calibMerges.push(m); }
         if (r + m.rs >= _calNumRows()) { _calToast('Already at the last row'); _calCleanEmptyMerge(m); return; }
@@ -5065,7 +5069,7 @@
         if (statusEl) {
             const m = _calGetMergeAt(r, c);
             const label = r === -1
-                ? `Header ${_calColLetter(c)}${m ? ` · merged (${m.cs} cols)` : ''}`
+                ? `Header ${_calColLetter(c)}${m ? ` · merged (${m.rs}\u00d7${m.cs})` : ''}`
                 : `Cell ${_calLabel(r, c)}${m ? ` · merged (${m.rs}\u00d7${m.cs})` : ''}`;
             statusEl.textContent = label;
         }
@@ -5214,9 +5218,13 @@
             // skipped; the origin cell renders with colspan and the summed
             // width of the spanned columns.
             const headerCells = _customColHeaders.map((h, ci) => {
-                if (_calIsMergedOut(-1, ci)) return '';   // covered by a merged header to the left
+                if (_calIsMergedOut(-1, ci)) return '';   // covered by a merged header to the left or above
                 const hm = _calGetMergeAt(-1, ci);
-                const spanAttr = hm ? ` colspan="${hm.cs}"` : '';
+                // colspan for horizontal merges; rowspan when the merge
+                // extends down into data rows (crosses thead → tbody).
+                const spanAttr = hm
+                    ? ` colspan="${hm.cs}"${hm.rs > 1 ? ` rowspan="${hm.rs}"` : ''}`
+                    : '';
                 // Width: single-cell width, or sum of spanned column widths
                 const wPx = hm
                     ? Array.from({length: hm.cs}, (_, i) => _calibColWidths[ci + i] || 0).reduce((a, b) => a + b, 0)
