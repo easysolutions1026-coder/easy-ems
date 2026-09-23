@@ -11967,7 +11967,7 @@
                 return '<p class="text-gray-400 text-center py-12">No expenses yet. Add your first bill!</p>';
             _pgInit('exp', 10);
             const paged = _pgSlice('exp', list);
-            return `${_pgControlsHtml('exp')}
+            return `
             <div class="overflow-x-auto">
                 <table class="w-full text-sm">
                     <thead class="bg-orange-50 text-xs text-gray-500 uppercase">
@@ -11989,7 +11989,8 @@
                     </tbody>
                 </table>
             </div>
-            ${_pgHtml('exp', list.length)}`;
+            ${_pgHtml('exp', list.length)}
+            ${_pgControlsHtml('exp')}`;
         }
 
         function expRow(e) {
@@ -18282,6 +18283,11 @@
         }
 
         function renderMIS(content) {
+            // Clear MIS sub-table caches so they recompute from live data
+            window._misPnlCache = null;
+            window._misPnlPg    = { perPage: 10, page: 0 };
+            window._misRecvPg   = { perPage: 10, page: 0 };
+
             const fy = getFinancialYearCode(new Date());
             const fyLabel = '20' + fy.slice(0,2) + '–' + '20' + fy.slice(2);
 
@@ -18392,89 +18398,9 @@
                 </div>
 
                 <!-- ── Per-Project P&L ─────────────────────────────
-                     Rolls up every cost bucket (Business Expenses, Petty
-                     Cash, Director Expenses, Project Expenses) against
-                     revenue (Invoiced) for each project. Sorted margin
-                     ascending — worst performers first, since that's where
-                     management attention is actionable. Tech-wage allocation
-                     comes in Phase 4. -->
-                ${(() => {
-                    const pnl = _computeProjectPnL();
-                    if (pnl.rows.length === 0 && pnl.untagged.totalCost === 0 && pnl.untagged.revenue === 0) {
-                        return `<div class="bg-white rounded-2xl shadow-sm p-4 mb-4">
-                            <h3 class="font-bold text-gray-700 mb-2">🏗️ Per-Project P&amp;L</h3>
-                            <p class="text-sm text-gray-400 italic">No project-tagged records yet. Tag invoices, expenses, petty-cash txns and director expenses to a project (via the modal's 🏗️ Project field) — they'll roll up here.</p>
-                        </div>`;
-                    }
-                    const marginCell = (m, revenue) => {
-                        // No revenue yet — margin math is meaningless, show a
-                        // neutral placeholder instead of a misleading -100%
-                        // that just means "any spend with no invoice".
-                        if (revenue === 0) return '<span class="text-gray-400 text-xs">— no revenue yet —</span>';
-                        return `<span style="${_marginBandStyle(m)};padding:2px 8px;border-radius:9px;font-size:11px">${m.toFixed(1)}%</span>`;
-                    };
-                    const projRow = (r, isTotal, isUntagged) => `
-                        <tr class="${isTotal ? 'bg-slate-50 font-semibold border-t-2 border-slate-300' : isUntagged ? 'bg-amber-50 italic border-t border-amber-200' : 'border-b hover:bg-gray-50'}">
-                            <td class="px-3 py-2 text-xs" style="max-width:220px">
-                                ${isTotal ? '<strong>All projects</strong>' :
-                                  isUntagged ? '<span class="text-amber-800">▪ Untagged / Overhead</span>' :
-                                  `<div class="text-gray-800 font-medium truncate" title="${(r.projectName||'').replace(/"/g,'&quot;')}">${r.projectRef ? '<span class="text-blue-700 font-mono">'+r.projectRef+'</span> · ' : ''}${r.projectName||'—'}</div>
-                                   ${r.clientName ? `<div class="text-[10px] text-gray-500 truncate">${r.clientName}</div>` : ''}`}
-                            </td>
-                            <td class="px-3 py-2 text-xs text-right text-blue-700 font-medium">${fmtK(r.revenue)}${!isTotal && !isUntagged && r.invoiceCount ? `<div class="text-[9px] text-gray-400">${r.invoiceCount} inv</div>` : ''}</td>
-                            <td class="px-3 py-2 text-xs text-right text-orange-700">${fmtK(r.bizExp)}</td>
-                            <td class="px-3 py-2 text-xs text-right text-amber-700">${fmtK(r.pcExp)}</td>
-                            <td class="px-3 py-2 text-xs text-right text-indigo-700">${fmtK(r.dirExp)}</td>
-                            <td class="px-3 py-2 text-xs text-right text-purple-700">${fmtK(r.projExp)}</td>
-                            <td class="px-3 py-2 text-xs text-right text-cyan-700">${fmtK(r.techWages)}</td>
-                            <td class="px-3 py-2 text-xs text-right text-red-700 font-semibold">${fmtK(r.totalCost)}</td>
-                            <td class="px-3 py-2 text-xs text-right ${r.grossProfit >= 0 ? 'text-green-700' : 'text-red-700'} font-semibold">${fmtK(r.grossProfit)}</td>
-                            <td class="px-3 py-2 text-center">${isUntagged ? '<span class="text-gray-400 text-xs">n/a</span>' : marginCell(r.margin, r.revenue)}</td>
-                        </tr>`;
-                    const losing = pnl.rows.filter(r => r.grossProfit < 0).length;
-                    const marginal = pnl.rows.filter(r => r.grossProfit >= 0 && r.margin < 10 && r.revenue > 0).length;
-                    return `
-                    <div class="bg-white rounded-2xl shadow-sm p-4 mb-4">
-                        <div class="flex justify-between items-start mb-3 flex-wrap gap-2">
-                            <div>
-                                <h3 class="font-bold text-gray-700">🏗️ Per-Project P&amp;L</h3>
-                                <p class="text-[11px] text-gray-500">
-                                    ${pnl.rows.length} project(s) with activity
-                                    ${losing > 0 ? `· <span class="text-red-600 font-semibold">⚠ ${losing} at a loss</span>` : ''}
-                                    ${marginal > 0 ? `· <span class="text-amber-700">${marginal} at &lt; 10% margin</span>` : ''}
-                                    · Sorted worst-first
-                                </p>
-                            </div>
-                            <div class="text-[11px] text-gray-400 italic">Wages split by hours when a tech works on multiple projects same day</div>
-                        </div>
-                        <div class="overflow-x-auto">
-                            <table class="w-full text-sm">
-                                <thead class="bg-gray-50 text-[10px] text-gray-500 uppercase">
-                                    <tr>
-                                        <th class="px-3 py-2 text-left">Project</th>
-                                        <th class="px-3 py-2 text-right">Revenue</th>
-                                        <th class="px-3 py-2 text-right" title="Business Expenses / Bills">Biz Exp</th>
-                                        <th class="px-3 py-2 text-right" title="Petty Cash">Petty</th>
-                                        <th class="px-3 py-2 text-right" title="Director Expenses">Dir Exp</th>
-                                        <th class="px-3 py-2 text-right" title="Project Expenses (items on project record)">Proj Exp</th>
-                                        <th class="px-3 py-2 text-right" title="Technician wages allocated from workLog attendance × dailyWage. Split by hours when a tech works on multiple projects same day.">👷 Tech Wages</th>
-                                        <th class="px-3 py-2 text-right">Total Cost</th>
-                                        <th class="px-3 py-2 text-right">Profit</th>
-                                        <th class="px-3 py-2 text-center">Margin</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    ${pnl.rows.map(r => projRow(r, false, false)).join('')}
-                                    ${(pnl.untagged.revenue > 0 || pnl.untagged.totalCost > 0) ? projRow(pnl.untagged, false, true) : ''}
-                                    ${projRow(pnl.totals, true, false)}
-                                </tbody>
-                            </table>
-                        </div>
-                        <p class="text-[10px] text-gray-400 mt-2 italic">
-                            Revenue = Approved / Sent / Completed / Paid invoices tagged to the project. Costs sum bills, petty-cash expenses, director expenses, project-expense items, and technician wages (dailyWage × person-days from workLog entries, split by hours when a tech works on multiple projects same day). Untagged records are shown separately and do NOT reduce any project's margin.
-                        </p>
-                    </div>`;
-                })()}
+                     Container filled by _renderMisPnLTable() which supports
+                     search + pagination (10/20/100). -->
+                <div id="misPnlContainer" class="mb-4"></div>
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                     <!-- Monthly trend table -->
@@ -18517,17 +18443,8 @@
                     </div>
                 </div>
 
-                <!-- Outstanding invoices table -->
-                <div class="bg-white rounded-2xl shadow-sm p-4 mb-4">
-                    <h3 class="font-bold text-gray-700 mb-3">Outstanding Receivables (Unpaid Invoices)</h3>
-                    ${(() => {
-                        const outstanding = transactions.filter(t => t.txnCategory==='INVOICE' && t.txnDirection==='Outgoing' && ['Approved','Sent'].includes(t.status));
-                        if (outstanding.length === 0) return '<p class="text-gray-400 text-sm">No outstanding invoices.</p>';
-                        return '<div class="overflow-x-auto"><table class="w-full text-sm"><thead class="text-xs text-gray-500 uppercase border-b"><tr><th class="py-1 text-left">Invoice</th><th class="py-1 text-left">Party</th><th class="py-1 text-left">Date</th><th class="py-1 text-right">Amount</th><th class="py-1 text-center">Status</th></tr></thead><tbody>' +
-                            outstanding.map(t => { const tot = calculateTotals(t.items||[]); return `<tr class="border-b"><td class="py-1.5 font-medium text-indigo-700">${t.txnID}</td><td class="py-1.5">${t.partyName}</td><td class="py-1.5">${t.txnDate}</td><td class="py-1.5 text-right font-semibold">${fmt(parseFloat(tot.total))}</td><td class="py-1.5 text-center"><span class="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">${t.status}</span></td></tr>`; }).join('') +
-                        '</tbody></table></div>';
-                    })()}
-                </div>
+                <!-- Outstanding invoices — container filled by _renderMisReceivables() -->
+                <div id="misReceivablesContainer" class="mb-4"></div>
 
                 <!-- Expense detail table -->
                 <div class="bg-white rounded-2xl shadow-sm p-4">
@@ -18535,6 +18452,211 @@
                     ${renderExpenseTable(expenses)}
                 </div>
             `;
+
+            // ── Render the P&L + Receivables sub-tables (search + paginated) ──
+            _renderMisPnLTable();
+            _renderMisReceivables();
+        }
+
+        // ── MIS: Per-Project P&L with search + pagination ──────────
+        // Stashes compute results on window so re-renders don't recompute.
+        // Called once from renderMIS, then again on search/page change.
+        function _renderMisPnLTable() {
+            const container = document.getElementById('misPnlContainer');
+            if (!container) return;
+
+            // Compute once per renderMIS call; stash for re-renders
+            if (!window._misPnlCache) window._misPnlCache = _computeProjectPnL();
+            const pnl = window._misPnlCache;
+
+            if (pnl.rows.length === 0 && pnl.untagged.totalCost === 0 && pnl.untagged.revenue === 0) {
+                container.innerHTML = `<div class="bg-white rounded-2xl shadow-sm p-4">
+                    <h3 class="font-bold text-gray-700 mb-2">🏗️ Per-Project P&amp;L</h3>
+                    <p class="text-sm text-gray-400 italic">No project-tagged records yet. Tag invoices, expenses, petty-cash txns and director expenses to a project (via the modal's 🏗️ Project field) — they'll roll up here.</p>
+                </div>`;
+                return;
+            }
+
+            const fmt  = n => '₹' + n.toLocaleString('en-IN', {minimumFractionDigits:2,maximumFractionDigits:2});
+            const fmtK = n => n >= 100000 ? '₹' + (n/100000).toFixed(2) + 'L' : n >= 1000 ? '₹' + (n/1000).toFixed(1) + 'K' : fmt(n);
+
+            // Search filter
+            const q = (document.getElementById('misPnlSearch')?.value || '').toLowerCase();
+            const filtered = q
+                ? pnl.rows.filter(r => (r.projectRef||'').toLowerCase().includes(q) || (r.projectName||'').toLowerCase().includes(q) || (r.clientName||'').toLowerCase().includes(q))
+                : pnl.rows;
+
+            // Pagination state
+            if (!window._misPnlPg) window._misPnlPg = { perPage: 10, page: 0 };
+            const pg = window._misPnlPg;
+            const totalPages = Math.ceil(filtered.length / pg.perPage) || 1;
+            if (pg.page >= totalPages) pg.page = totalPages - 1;
+            if (pg.page < 0) pg.page = 0;
+            const start = pg.page * pg.perPage;
+            const paged = filtered.slice(start, start + pg.perPage);
+
+            const marginCell = (m, revenue) => {
+                if (revenue === 0) return '<span class="text-gray-400 text-xs">— no revenue yet —</span>';
+                return `<span style="${_marginBandStyle(m)};padding:2px 8px;border-radius:9px;font-size:11px">${m.toFixed(1)}%</span>`;
+            };
+            const projRow = (r, isTotal, isUntagged) => `
+                <tr class="${isTotal ? 'bg-slate-50 font-semibold border-t-2 border-slate-300' : isUntagged ? 'bg-amber-50 italic border-t border-amber-200' : 'border-b hover:bg-gray-50'}">
+                    <td class="px-3 py-2 text-xs" style="max-width:220px">
+                        ${isTotal ? '<strong>All projects</strong>' :
+                          isUntagged ? '<span class="text-amber-800">▪ Untagged / Overhead</span>' :
+                          `<div class="text-gray-800 font-medium truncate" title="${(r.projectName||'').replace(/"/g,'&quot;')}">${r.projectRef ? '<span class="text-blue-700 font-mono">'+r.projectRef+'</span> · ' : ''}${r.projectName||'—'}</div>
+                           ${r.clientName ? `<div class="text-[10px] text-gray-500 truncate">${r.clientName}</div>` : ''}`}
+                    </td>
+                    <td class="px-3 py-2 text-xs text-right text-blue-700 font-medium">${fmtK(r.revenue)}${!isTotal && !isUntagged && r.invoiceCount ? `<div class="text-[9px] text-gray-400">${r.invoiceCount} inv</div>` : ''}</td>
+                    <td class="px-3 py-2 text-xs text-right text-orange-700">${fmtK(r.bizExp)}</td>
+                    <td class="px-3 py-2 text-xs text-right text-amber-700">${fmtK(r.pcExp)}</td>
+                    <td class="px-3 py-2 text-xs text-right text-indigo-700">${fmtK(r.dirExp)}</td>
+                    <td class="px-3 py-2 text-xs text-right text-purple-700">${fmtK(r.projExp)}</td>
+                    <td class="px-3 py-2 text-xs text-right text-cyan-700">${fmtK(r.techWages)}</td>
+                    <td class="px-3 py-2 text-xs text-right text-red-700 font-semibold">${fmtK(r.totalCost)}</td>
+                    <td class="px-3 py-2 text-xs text-right ${r.grossProfit >= 0 ? 'text-green-700' : 'text-red-700'} font-semibold">${fmtK(r.grossProfit)}</td>
+                    <td class="px-3 py-2 text-center">${isUntagged ? '<span class="text-gray-400 text-xs">n/a</span>' : marginCell(r.margin, r.revenue)}</td>
+                </tr>`;
+            const losing   = pnl.rows.filter(r => r.grossProfit < 0).length;
+            const marginal = pnl.rows.filter(r => r.grossProfit >= 0 && r.margin < 10 && r.revenue > 0).length;
+
+            container.innerHTML = `
+            <div class="bg-white rounded-2xl shadow-sm p-4">
+                <div class="flex justify-between items-start mb-3 flex-wrap gap-2">
+                    <div>
+                        <h3 class="font-bold text-gray-700">🏗️ Per-Project P&amp;L</h3>
+                        <p class="text-[11px] text-gray-500">
+                            ${pnl.rows.length} project(s) with activity
+                            ${losing > 0 ? `· <span class="text-red-600 font-semibold">⚠ ${losing} at a loss</span>` : ''}
+                            ${marginal > 0 ? `· <span class="text-amber-700">${marginal} at &lt; 10% margin</span>` : ''}
+                            · Sorted worst-first
+                        </p>
+                    </div>
+                    <div class="text-[11px] text-gray-400 italic">Wages split by hours when a tech works on multiple projects same day</div>
+                </div>
+                <div class="flex flex-wrap gap-2 items-center mb-3">
+                    <input type="text" id="misPnlSearch" placeholder="Search project name, ref, client…"
+                        value="${q.replace(/"/g,'&quot;')}"
+                        oninput="window._misPnlPg.page=0;_renderMisPnLTable()"
+                        class="flex-1 min-w-48 px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"/>
+                    <span class="text-xs text-gray-500">${filtered.length} of ${pnl.rows.length} project(s)</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50 text-[10px] text-gray-500 uppercase">
+                            <tr>
+                                <th class="px-3 py-2 text-left">Project</th>
+                                <th class="px-3 py-2 text-right">Revenue</th>
+                                <th class="px-3 py-2 text-right" title="Business Expenses / Bills">Biz Exp</th>
+                                <th class="px-3 py-2 text-right" title="Petty Cash">Petty</th>
+                                <th class="px-3 py-2 text-right" title="Director Expenses">Dir Exp</th>
+                                <th class="px-3 py-2 text-right" title="Project Expenses (items on project record)">Proj Exp</th>
+                                <th class="px-3 py-2 text-right" title="Technician wages allocated from workLog attendance × dailyWage.">👷 Tech Wages</th>
+                                <th class="px-3 py-2 text-right">Total Cost</th>
+                                <th class="px-3 py-2 text-right">Profit</th>
+                                <th class="px-3 py-2 text-center">Margin</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${paged.map(r => projRow(r, false, false)).join('')}
+                            ${(!q && (pnl.untagged.revenue > 0 || pnl.untagged.totalCost > 0)) ? projRow(pnl.untagged, false, true) : ''}
+                            ${!q ? projRow(pnl.totals, true, false) : ''}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="flex justify-between items-center mt-3 flex-wrap gap-2">
+                    <p class="text-[10px] text-gray-400 italic" style="max-width:70%">
+                        Revenue = Approved/Sent/Completed/Paid invoices. Costs sum bills, petty-cash, director exp, project-exp items, and tech wages.
+                    </p>
+                    <div class="flex items-center gap-2 text-xs text-gray-600">
+                        <span>Show:</span>
+                        ${[10,20,100].map(n => `<button onclick="window._misPnlPg={perPage:${n},page:0};_renderMisPnLTable()" class="px-2 py-1 rounded ${pg.perPage===n?'bg-indigo-600 text-white':'bg-gray-100 hover:bg-gray-200'}">${n}</button>`).join('')}
+                        <span class="ml-2">Page ${pg.page+1} of ${totalPages}</span>
+                        <button onclick="window._misPnlPg.page=Math.max(0,window._misPnlPg.page-1);_renderMisPnLTable()" class="px-2 py-1 rounded bg-gray-100 hover:bg-gray-200" ${pg.page===0?'disabled style="opacity:.4"':''}>‹</button>
+                        <button onclick="window._misPnlPg.page=Math.min(${totalPages-1},window._misPnlPg.page+1);_renderMisPnLTable()" class="px-2 py-1 rounded bg-gray-100 hover:bg-gray-200" ${pg.page>=totalPages-1?'disabled style="opacity:.4"':''}>›</button>
+                    </div>
+                </div>
+            </div>`;
+        }
+
+        // ── MIS: Outstanding Receivables with search + pagination ──
+        function _renderMisReceivables() {
+            const container = document.getElementById('misReceivablesContainer');
+            if (!container) return;
+
+            const outstanding = transactions.filter(t =>
+                t.txnCategory === 'INVOICE' && t.txnDirection === 'Outgoing' && ['Approved','Sent'].includes(t.status)
+            );
+
+            if (outstanding.length === 0) {
+                container.innerHTML = `<div class="bg-white rounded-2xl shadow-sm p-4">
+                    <h3 class="font-bold text-gray-700 mb-3">Outstanding Receivables (Unpaid Invoices)</h3>
+                    <p class="text-gray-400 text-sm">No outstanding invoices.</p>
+                </div>`;
+                return;
+            }
+
+            const fmt = n => '₹' + n.toLocaleString('en-IN', {minimumFractionDigits:2,maximumFractionDigits:2});
+
+            // Search
+            const q = (document.getElementById('misRecvSearch')?.value || '').toLowerCase();
+            const filtered = q
+                ? outstanding.filter(t => (t.txnID||'').toLowerCase().includes(q) || (t.partyName||'').toLowerCase().includes(q) || (t.projectNo||'').toLowerCase().includes(q))
+                : outstanding;
+
+            // Pagination
+            if (!window._misRecvPg) window._misRecvPg = { perPage: 10, page: 0 };
+            const pg = window._misRecvPg;
+            const totalPages = Math.ceil(filtered.length / pg.perPage) || 1;
+            if (pg.page >= totalPages) pg.page = totalPages - 1;
+            if (pg.page < 0) pg.page = 0;
+            const start = pg.page * pg.perPage;
+            const paged = filtered.slice(start, start + pg.perPage);
+
+            container.innerHTML = `<div class="bg-white rounded-2xl shadow-sm p-4">
+                <h3 class="font-bold text-gray-700 mb-3">Outstanding Receivables (Unpaid Invoices)</h3>
+                <div class="flex flex-wrap gap-2 items-center mb-3">
+                    <input type="text" id="misRecvSearch" placeholder="Search invoice ID, party, project…"
+                        value="${q.replace(/"/g,'&quot;')}"
+                        oninput="window._misRecvPg.page=0;_renderMisReceivables()"
+                        class="flex-1 min-w-48 px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"/>
+                    <span class="text-xs text-gray-500">${filtered.length} of ${outstanding.length} invoice(s)</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="text-xs text-gray-500 uppercase border-b">
+                            <tr>
+                                <th class="py-1 text-left">Invoice</th>
+                                <th class="py-1 text-left">Party</th>
+                                <th class="py-1 text-left">Project</th>
+                                <th class="py-1 text-left">Date</th>
+                                <th class="py-1 text-right">Amount</th>
+                                <th class="py-1 text-center">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${paged.map(t => {
+                                const tot = calculateTotals(t.items||[]);
+                                return `<tr class="border-b">
+                                    <td class="py-1.5 font-medium text-indigo-700">${t.txnID}</td>
+                                    <td class="py-1.5">${t.partyName}</td>
+                                    <td class="py-1.5 text-xs">${t.projectNo ? `<span class="text-blue-700 font-medium">${t.projectNo}</span>` : '<span class="text-gray-300">—</span>'}</td>
+                                    <td class="py-1.5">${t.txnDate}</td>
+                                    <td class="py-1.5 text-right font-semibold">${fmt(parseFloat(tot.total))}</td>
+                                    <td class="py-1.5 text-center"><span class="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700">${t.status}</span></td>
+                                </tr>`;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="flex justify-end items-center mt-3 gap-2 text-xs text-gray-600">
+                    <span>Show:</span>
+                    ${[10,20,100].map(n => `<button onclick="window._misRecvPg={perPage:${n},page:0};_renderMisReceivables()" class="px-2 py-1 rounded ${pg.perPage===n?'bg-indigo-600 text-white':'bg-gray-100 hover:bg-gray-200'}">${n}</button>`).join('')}
+                    <span class="ml-2">Page ${pg.page+1} of ${totalPages}</span>
+                    <button onclick="window._misRecvPg.page=Math.max(0,window._misRecvPg.page-1);_renderMisReceivables()" class="px-2 py-1 rounded bg-gray-100 hover:bg-gray-200" ${pg.page===0?'disabled style="opacity:.4"':''}>‹</button>
+                    <button onclick="window._misRecvPg.page=Math.min(${totalPages-1},window._misRecvPg.page+1);_renderMisReceivables()" class="px-2 py-1 rounded bg-gray-100 hover:bg-gray-200" ${pg.page>=totalPages-1?'disabled style="opacity:.4"':''}>›</button>
+                </div>
+            </div>`;
         }
 
         function buildMonthlyData() {
