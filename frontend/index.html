@@ -18064,6 +18064,145 @@
         //  MIS REPORT MODULE
         // ════════════════════════════════════════════════════════════════════
 
+        // ═══════════════════════════════════════════════════════════════
+        // PER-PROJECT P&L — rolls up revenue and every cost bucket against
+        // the shared projectNo field (added across Business Expenses, Petty
+        // Cash, Director Expenses and Transactions in Phase 1). One row per
+        // project master record; rows with zero activity are dropped so the
+        // MIS doesn't list a hundred empty projects. Technician wage
+        // allocation is NOT included here yet — that's Phase 4.
+        //
+        // Key = project.projectRef || project.projectName. This is the exact
+        // string the modal dropdowns store on child records, so equality
+        // matching Just Works — no fuzzy joins.
+        //
+        // Returns { rows, totals, untagged } where:
+        //   rows     — array of per-project P&L objects, sorted by margin asc
+        //              (worst first, actionable — that's where management
+        //              attention needs to go)
+        //   totals   — sum row across projects (excludes untagged)
+        //   untagged — same shape but for records with projectNo === ''
+        //              (pure overhead, no attribution possible)
+        // ═══════════════════════════════════════════════════════════════
+        function _computeProjectPnL() {
+            const rows = [];
+            const seen = new Set();
+
+            const buildRow = (project, key) => {
+                // Revenue — invoiced work-in-progress and closed
+                const revTxns = (transactions||[]).filter(t =>
+                    t.txnCategory === 'INVOICE' &&
+                    t.txnDirection === 'Outgoing' &&
+                    (t.projectNo || '') === key &&
+                    ['Approved','Sent','Completed','Paid'].includes(t.status)
+                );
+                const revenue = revTxns.reduce((s,t) => {
+                    const tot = calculateTotals(t.items||[]);
+                    return s + (parseFloat(tot.total) || 0);
+                }, 0);
+
+                // Business Expenses (bills booked against the project)
+                const bizExpMatches = (expenses||[]).filter(e => (e.projectNo || '') === key);
+                const bizExp = bizExpMatches.reduce((s,e) => s + (parseFloat(e.billAmtINR)||0), 0);
+
+                // Petty Cash — site travel, tea for crew, small purchases
+                const pcExpMatches = (pettyCashTransactions||[]).filter(t =>
+                    (t.projectNo || '') === key && t.txnType === 'EXPENSE'
+                );
+                const pcExp = pcExpMatches.reduce((s,t) => s + (parseFloat(t.amount)||0), 0);
+
+                // Director Expenses — director reimbursables tagged to project
+                const dirExpMatches = (directorExpenses||[]).filter(d => (d.projectNo || '') === key);
+                const dirExp = dirExpMatches.reduce((s,d) => s + (parseFloat(d.totalAmt || d.amount)||0), 0);
+
+                // Project Expenses — items on the project record itself.
+                // Only relevant when project is truthy (untagged bucket has no
+                // parent record). Sum ALL items regardless of pool allocation
+                // — from a P&L view every rupee spent counts.
+                const projExp = project
+                    ? (project.items||[]).reduce((s,it) => s + (parseFloat(it.amount)||0), 0)
+                    : 0;
+
+                const totalCost   = bizExp + pcExp + dirExp + projExp;
+                const grossProfit = revenue - totalCost;
+                const margin      = revenue > 0 ? (grossProfit / revenue) * 100 : (totalCost > 0 ? -100 : 0);
+
+                return {
+                    key,
+                    projectRef:  project ? project.projectRef  : '',
+                    projectName: project ? project.projectName : '',
+                    clientName:  project ? project.clientName  : '',
+                    projExpID:   project ? project.projExpID   : '',
+                    revenue, bizExp, pcExp, dirExp, projExp,
+                    totalCost, grossProfit, margin,
+                    invoiceCount: revTxns.length,
+                    hasActivity:  revenue > 0 || totalCost > 0
+                };
+            };
+
+            // One row per project master
+            (projectExpenses||[]).forEach(p => {
+                const key = p.projectRef || p.projectName || '';
+                if (!key || seen.has(key)) return;
+                seen.add(key);
+                const row = buildRow(p, key);
+                if (row.hasActivity) rows.push(row);
+            });
+
+            // Orphaned tags — records referring to a projectNo that no
+            // longer exists in projectExpenses (project was renamed/deleted).
+            // Show these too so the money isn't invisible; they'd otherwise
+            // silently vanish from the MIS.
+            const allTags = new Set();
+            (expenses||[]).forEach(e => e.projectNo && allTags.add(e.projectNo));
+            (pettyCashTransactions||[]).forEach(t => t.projectNo && allTags.add(t.projectNo));
+            (directorExpenses||[]).forEach(d => d.projectNo && allTags.add(d.projectNo));
+            (transactions||[]).forEach(t => t.projectNo && allTags.add(t.projectNo));
+            allTags.forEach(k => {
+                if (seen.has(k)) return;
+                seen.add(k);
+                const row = buildRow(null, k);
+                if (row.hasActivity) { row.projectName = k + ' (removed)'; rows.push(row); }
+            });
+
+            // Untagged bucket — pure overhead. Same builder but with key=''.
+            const untagged = buildRow(null, '');
+            untagged.projectName = 'Untagged / Overhead';
+
+            // Sort by margin ascending — the worst performers surface first.
+            // Ties broken by revenue desc so the impactful ones lead within a
+            // margin band.
+            rows.sort((a,b) => a.margin - b.margin || b.revenue - a.revenue);
+
+            // Totals across attributed projects (not untagged)
+            const totals = rows.reduce((acc, r) => {
+                acc.revenue   += r.revenue;
+                acc.bizExp    += r.bizExp;
+                acc.pcExp     += r.pcExp;
+                acc.dirExp    += r.dirExp;
+                acc.projExp   += r.projExp;
+                acc.totalCost += r.totalCost;
+                acc.grossProfit += r.grossProfit;
+                acc.invoiceCount += r.invoiceCount;
+                return acc;
+            }, { revenue:0, bizExp:0, pcExp:0, dirExp:0, projExp:0, totalCost:0, grossProfit:0, invoiceCount:0 });
+            totals.margin = totals.revenue > 0 ? (totals.grossProfit / totals.revenue) * 100 : 0;
+
+            return { rows, totals, untagged };
+        }
+
+        // Colour helper for margin cells. Aggressive band choice —
+        // < 0     : red bg (loss)
+        // 0-10    : amber (marginal)
+        // 10-25   : light green (acceptable)
+        // > 25    : dark green (healthy)
+        function _marginBandStyle(m) {
+            if (m < 0)   return 'background:#fef2f2;color:#991b1b;font-weight:700';
+            if (m < 10)  return 'background:#fffbeb;color:#92400e;font-weight:600';
+            if (m < 25)  return 'background:#f0fdf4;color:#166534;font-weight:600';
+            return 'background:#dcfce7;color:#14532d;font-weight:700';
+        }
+
         function renderMIS(content) {
             const fy = getFinancialYearCode(new Date());
             const fyLabel = '20' + fy.slice(0,2) + '–' + '20' + fy.slice(2);
@@ -18173,6 +18312,89 @@
                         <div class="text-lg font-bold text-orange-600">${fmtK(proformaPipeline)}</div>
                     </div>
                 </div>
+
+                <!-- ── Per-Project P&L ─────────────────────────────
+                     Rolls up every cost bucket (Business Expenses, Petty
+                     Cash, Director Expenses, Project Expenses) against
+                     revenue (Invoiced) for each project. Sorted margin
+                     ascending — worst performers first, since that's where
+                     management attention is actionable. Tech-wage allocation
+                     comes in Phase 4. -->
+                ${(() => {
+                    const pnl = _computeProjectPnL();
+                    if (pnl.rows.length === 0 && pnl.untagged.totalCost === 0 && pnl.untagged.revenue === 0) {
+                        return `<div class="bg-white rounded-2xl shadow-sm p-4 mb-4">
+                            <h3 class="font-bold text-gray-700 mb-2">🏗️ Per-Project P&amp;L</h3>
+                            <p class="text-sm text-gray-400 italic">No project-tagged records yet. Tag invoices, expenses, petty-cash txns and director expenses to a project (via the modal's 🏗️ Project field) — they'll roll up here.</p>
+                        </div>`;
+                    }
+                    const marginCell = (m, revenue) => {
+                        // No revenue yet — margin math is meaningless, show a
+                        // neutral placeholder instead of a misleading -100%
+                        // that just means "any spend with no invoice".
+                        if (revenue === 0) return '<span class="text-gray-400 text-xs">— no revenue yet —</span>';
+                        return `<span style="${_marginBandStyle(m)};padding:2px 8px;border-radius:9px;font-size:11px">${m.toFixed(1)}%</span>`;
+                    };
+                    const projRow = (r, isTotal, isUntagged) => `
+                        <tr class="${isTotal ? 'bg-slate-50 font-semibold border-t-2 border-slate-300' : isUntagged ? 'bg-amber-50 italic border-t border-amber-200' : 'border-b hover:bg-gray-50'}">
+                            <td class="px-3 py-2 text-xs" style="max-width:220px">
+                                ${isTotal ? '<strong>All projects</strong>' :
+                                  isUntagged ? '<span class="text-amber-800">▪ Untagged / Overhead</span>' :
+                                  `<div class="text-gray-800 font-medium truncate" title="${(r.projectName||'').replace(/"/g,'&quot;')}">${r.projectRef ? '<span class="text-blue-700 font-mono">'+r.projectRef+'</span> · ' : ''}${r.projectName||'—'}</div>
+                                   ${r.clientName ? `<div class="text-[10px] text-gray-500 truncate">${r.clientName}</div>` : ''}`}
+                            </td>
+                            <td class="px-3 py-2 text-xs text-right text-blue-700 font-medium">${fmtK(r.revenue)}${!isTotal && !isUntagged && r.invoiceCount ? `<div class="text-[9px] text-gray-400">${r.invoiceCount} inv</div>` : ''}</td>
+                            <td class="px-3 py-2 text-xs text-right text-orange-700">${fmtK(r.bizExp)}</td>
+                            <td class="px-3 py-2 text-xs text-right text-amber-700">${fmtK(r.pcExp)}</td>
+                            <td class="px-3 py-2 text-xs text-right text-indigo-700">${fmtK(r.dirExp)}</td>
+                            <td class="px-3 py-2 text-xs text-right text-purple-700">${fmtK(r.projExp)}</td>
+                            <td class="px-3 py-2 text-xs text-right text-red-700 font-semibold">${fmtK(r.totalCost)}</td>
+                            <td class="px-3 py-2 text-xs text-right ${r.grossProfit >= 0 ? 'text-green-700' : 'text-red-700'} font-semibold">${fmtK(r.grossProfit)}</td>
+                            <td class="px-3 py-2 text-center">${isUntagged ? '<span class="text-gray-400 text-xs">n/a</span>' : marginCell(r.margin, r.revenue)}</td>
+                        </tr>`;
+                    const losing = pnl.rows.filter(r => r.grossProfit < 0).length;
+                    const marginal = pnl.rows.filter(r => r.grossProfit >= 0 && r.margin < 10 && r.revenue > 0).length;
+                    return `
+                    <div class="bg-white rounded-2xl shadow-sm p-4 mb-4">
+                        <div class="flex justify-between items-start mb-3 flex-wrap gap-2">
+                            <div>
+                                <h3 class="font-bold text-gray-700">🏗️ Per-Project P&amp;L</h3>
+                                <p class="text-[11px] text-gray-500">
+                                    ${pnl.rows.length} project(s) with activity
+                                    ${losing > 0 ? `· <span class="text-red-600 font-semibold">⚠ ${losing} at a loss</span>` : ''}
+                                    ${marginal > 0 ? `· <span class="text-amber-700">${marginal} at &lt; 10% margin</span>` : ''}
+                                    · Sorted worst-first
+                                </p>
+                            </div>
+                            <div class="text-[11px] text-gray-400 italic">Tech wages not yet allocated (Phase 4)</div>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <thead class="bg-gray-50 text-[10px] text-gray-500 uppercase">
+                                    <tr>
+                                        <th class="px-3 py-2 text-left">Project</th>
+                                        <th class="px-3 py-2 text-right">Revenue</th>
+                                        <th class="px-3 py-2 text-right" title="Business Expenses / Bills">Biz Exp</th>
+                                        <th class="px-3 py-2 text-right" title="Petty Cash">Petty</th>
+                                        <th class="px-3 py-2 text-right" title="Director Expenses">Dir Exp</th>
+                                        <th class="px-3 py-2 text-right" title="Project Expenses (items on project record)">Proj Exp</th>
+                                        <th class="px-3 py-2 text-right">Total Cost</th>
+                                        <th class="px-3 py-2 text-right">Profit</th>
+                                        <th class="px-3 py-2 text-center">Margin</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${pnl.rows.map(r => projRow(r, false, false)).join('')}
+                                    ${(pnl.untagged.revenue > 0 || pnl.untagged.totalCost > 0) ? projRow(pnl.untagged, false, true) : ''}
+                                    ${projRow(pnl.totals, true, false)}
+                                </tbody>
+                            </table>
+                        </div>
+                        <p class="text-[10px] text-gray-400 mt-2 italic">
+                            Revenue = Approved / Sent / Completed / Paid invoices tagged to the project. Costs sum bills, petty-cash expenses, director expenses and project-expense items. Untagged records are shown separately and do NOT reduce any project's margin.
+                        </p>
+                    </div>`;
+                })()}
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                     <!-- Monthly trend table -->
