@@ -11909,40 +11909,6 @@
             ${_pgHtml('exp', list.length)}`;
         }
 
-        // Inline project chip/dropdown used across expense lists. Chip form
-        // when a project is tagged (blue pill, click to open dropdown to
-        // change); "Tag project" ghost dropdown when empty (part of the A1
-        // backfill approach — you tag records as you see them). Change fires
-        // the given handler which does the persist.
-        // Params:
-        //   currentValue — the record's current projectNo string
-        //   onChangeFn   — JS expression evaluated with `this` as the select;
-        //                  should call the backend save
-        function _projectInlinePicker(currentValue, onChangeFn) {
-            const opts = (projectExpenses || []).map(p => {
-                const val = p.projectRef || p.projectName || '';
-                const label = (p.projectRef ? p.projectRef + ' — ' : '') + (p.projectName || '');
-                const selected = (val === currentValue) ? ' selected' : '';
-                return `<option value="${val.replace(/"/g,'&quot;')}"${selected}>${label.replace(/</g,'&lt;')}</option>`;
-            }).join('');
-            // Orphan value (project renamed / removed): keep it as an option
-            // so the user still sees what's tagged.
-            const availableRefs = new Set((projectExpenses||[]).map(p => p.projectRef || p.projectName || ''));
-            const orphan = currentValue && !availableRefs.has(currentValue)
-                ? `<option value="${currentValue.replace(/"/g,'&quot;')}" selected>${currentValue.replace(/</g,'&lt;')} (removed)</option>`
-                : '';
-            const isTagged = !!currentValue;
-            const cls = isTagged
-                ? 'text-blue-700 font-medium bg-blue-50 border border-blue-200'
-                : 'text-gray-400 italic bg-white border border-dashed border-gray-300';
-            return `<select onclick="event.stopPropagation()" onchange="${onChangeFn}"
-                class="text-xs px-1.5 py-1 rounded ${cls}" style="max-width:160px"
-                title="${isTagged ? 'Change project' : 'Assign this record to a project'}">
-                <option value="">${isTagged ? '— Remove tag —' : '+ Tag project'}</option>
-                ${opts}${orphan}
-            </select>`;
-        }
-
         function expRow(e) {
             const statusCls = {Paid:'bg-green-100 text-green-700', Pending:'bg-red-100 text-red-700', Partial:'bg-yellow-100 text-yellow-700'}[e.payStatus] || 'bg-gray-100';
             // Uses `== null` instead of the truthy check so ₹0.00 renders as
@@ -11985,10 +11951,15 @@
                         return badge + label;
                     })()}
                 </td>
-                <!-- Project column — inline chip/dropdown, click stops row-toggle
-                     event. Change persists immediately via _tagExpenseProject. -->
-                <td class="px-3 py-2" onclick="event.stopPropagation()">
-                    ${_projectInlinePicker(e.projectNo || '', `_tagExpenseProject('${safeId}', this.value)`)}
+                <!-- Project column — read-only. Tagged records show a blue
+                     chip; untagged rows are left blank (visually calm and
+                     unambiguous). Editing is handled in the Edit modal only
+                     — an inline dropdown here proved too easy to hit by
+                     mistake and change the tag on the wrong row. -->
+                <td class="px-3 py-2" style="max-width:160px">
+                    ${e.projectNo
+                        ? `<span class="inline-block text-blue-700 font-medium bg-blue-50 border border-blue-200 rounded px-2 py-0.5 text-xs" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle" title="${(e.projectNo||'').replace(/"/g,'&quot;')}">${e.projectNo}</span>`
+                        : ''}
                 </td>
                 <td class="px-3 py-2${tallyDone?' text-teal-700 font-medium':''}" style="max-width:220px">
                     <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${e.description||''}">${e.description||'—'}</div>
@@ -12209,29 +12180,6 @@
             expenses[idx].tallyUpdated   = !expenses[idx].tallyUpdated;
             expenses[idx].tallyUpdatedAt = expenses[idx].tallyUpdated ? new Date().toISOString() : null;
             await saveData('expenses', expenses);
-            renderView();
-        }
-
-        // Inline project tagging — called from the Project column dropdown in
-        // the expenses list. Persists immediately with an update stamp so the
-        // audit trail catches backfill activity. Silent when the value doesn't
-        // actually change (e.g. dropdown reopen without picking).
-        async function _tagExpenseProject(expID, newProjectNo) {
-            const idx = expenses.findIndex(e => e.expID === expID);
-            if (idx < 0) return;
-            const prev = expenses[idx].projectNo || '';
-            if (prev === (newProjectNo || '')) return;
-            expenses[idx].projectNo = newProjectNo || '';
-            expenses[idx].updatedAt = new Date().toISOString();
-            expenses[idx].updatedBy = currentUser?.name || currentUser?.email || 'Unknown';
-            try {
-                await saveData('expenses', expenses);
-                _showSaveToast(newProjectNo ? '🏗️ Tagged to ' + newProjectNo : '🏷️ Project tag removed', 1500);
-            } catch (err) {
-                expenses[idx].projectNo = prev;   // roll back on failure
-                console.error('Tag save failed:', err);
-                alert('Could not save project tag: ' + (err.message || err));
-            }
             renderView();
         }
 
