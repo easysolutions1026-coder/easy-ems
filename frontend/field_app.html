@@ -635,7 +635,13 @@
                     <button type="button" onclick="_calMergeBelow()" title="Extend the focused cell downward by one row" style="font-size:11px;padding:4px 8px;border-radius:5px;background:#ede9fe;color:#7c3aed;border:1px solid #c4b5fd;cursor:pointer;font-weight:600">⤓ Merge Below</button>
                     <button type="button" onclick="_calSplit()" title="Split the focused merged cell back into individual cells" style="font-size:11px;padding:4px 8px;border-radius:5px;background:#fef3c7;color:#92400e;border:1px solid #fcd34d;cursor:pointer;font-weight:600">⤬ Split</button>
                     <button type="button" onclick="_calClearAllMerges()" title="Remove all merges in this table" style="font-size:11px;padding:4px 8px;border-radius:5px;background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;cursor:pointer;font-weight:600">Clear All</button>
+                    <!-- Alignment buttons — set text-align on the focused cell -->
+                    <span style="color:#c4b5fd;padding:0 2px">|</span>
+                    <button type="button" onclick="_calSetAlign('left')"   title="Align focused cell to the left"   style="font-size:11px;padding:4px 8px;border-radius:5px;background:#f0f9ff;color:#075985;border:1px solid #7dd3fc;cursor:pointer;font-weight:600">◀ Left</button>
+                    <button type="button" onclick="_calSetAlign('center')" title="Center focused cell"              style="font-size:11px;padding:4px 8px;border-radius:5px;background:#f0f9ff;color:#075985;border:1px solid #7dd3fc;cursor:pointer;font-weight:600">◆ Center</button>
+                    <button type="button" onclick="_calSetAlign('right')"  title="Align focused cell to the right"  style="font-size:11px;padding:4px 8px;border-radius:5px;background:#f0f9ff;color:#075985;border:1px solid #7dd3fc;cursor:pointer;font-weight:600">▶ Right</button>
                     <span style="flex:1"></span>
+                    <button type="button" id="calSubHdrToggle" onclick="_calToggleSubHeader()" title="Show / hide a second header row that groups columns" style="font-size:11px;padding:4px 8px;border-radius:5px;background:#f5f3ff;color:#5b21b6;border:1px solid #ddd6fe;cursor:pointer;font-weight:600">+ Sub Header</button>
                     <button type="button" onclick="_calResetWidths()" title="Reset all column widths to default" style="font-size:11px;padding:4px 8px;border-radius:5px;background:#e0f2fe;color:#075985;border:1px solid #7dd3fc;cursor:pointer;font-weight:600">↔ Reset Widths</button>
                 </div>
                 <div style="overflow-x:auto">
@@ -4947,23 +4953,37 @@
     let _customColHeaders = [];
     let _customColKeys    = [];  // auto-generated 'c0','c1','c2'... keys
     let _customTitle      = '';
+    // Sub-header row (row -2): parallel array to _customColHeaders. Empty by
+    // default (no sub-header shown). Populated when the user clicks "+ Sub
+    // Header" — provides a second-level header for grouping columns, e.g.
+    // top header "Dimensions (mm)" spanning several sub-headers like
+    // "Actual", "Std", "Limit". Participates in _calibMerges alongside the
+    // main header (row -1) and data rows.
+    let _customSubHeaders = [];
 
     // ── Spreadsheet-feature state ──
     // colWidths   : array of pixel widths per column (resizable headers)
     // merges      : array of {r, c, rs, cs} — origin cell with row-span and col-span
-    //               cells covered by another's span are skipped during render
-    // focusCell   : {r, c} of the currently focused cell — used by Merge/Split toolbar
-    //               actions which operate on the active cell rather than a selection
-    //               (touch-friendly: tap a cell, tap a button)
+    //               cells covered by another's span are skipped during render.
+    //               r === -1 is the main header row; r === -2 is the sub-header
+    //               row (when present); r >= 0 are data rows.
+    // alignments  : "r,c" → 'left' | 'center' | 'right' — per-cell text alignment.
+    //               Defaults: left for data column 0 (labels), center otherwise.
+    // focusCell   : {r, c} of the currently focused cell — used by Merge/Split
+    //               and alignment toolbar actions which operate on the active
+    //               cell (touch-friendly: tap a cell, tap a button).
     let _calibColWidths = [];
     let _calibMerges    = [];
+    let _calibAlignments = {};
     let _calibFocusCell = null;
 
     // Reset spreadsheet state when switching templates or creating fresh
     function _calResetGridState(numCols) {
-        _calibColWidths = new Array(numCols).fill(0).map((_, i) => i < 2 ? 100 : 80);
-        _calibMerges    = [];
-        _calibFocusCell = null;
+        _calibColWidths  = new Array(numCols).fill(0).map((_, i) => i < 2 ? 100 : 80);
+        _calibMerges     = [];
+        _calibAlignments = {};
+        _calibFocusCell  = null;
+        _customSubHeaders = [];
     }
 
     // ── Helpers: merge geometry ──────────────────────────────────────
@@ -5054,9 +5074,9 @@
     // ── Focus + keyboard navigation ──────────────────────────────────
     function _calSetFocus(r, c) {
         _calibFocusCell = { r, c };
-        // Update visual highlight without full re-render. r === -1 is the
-        // header row — its cells are <th> not <td>, so match on the shared
-        // data-cal-r attribute instead of the tag.
+        // Update visual highlight without full re-render. r === -1 is the main
+        // header row and r === -2 is the sub-header row — both use <th> cells,
+        // so match on the shared data-cal-r attribute.
         document.querySelectorAll('#calibTable [data-cal-r]').forEach(el => {
             const tr = parseInt(el.getAttribute('data-cal-r'));
             const tc = parseInt(el.getAttribute('data-cal-c'));
@@ -5068,16 +5088,53 @@
         const statusEl = document.getElementById('calToolbarStatus');
         if (statusEl) {
             const m = _calGetMergeAt(r, c);
-            const label = r === -1
-                ? `Header ${_calColLetter(c)}${m ? ` · merged (${m.rs}\u00d7${m.cs})` : ''}`
-                : `Cell ${_calLabel(r, c)}${m ? ` · merged (${m.rs}\u00d7${m.cs})` : ''}`;
-            statusEl.textContent = label;
+            const rowLabel = r === -2 ? 'Sub-Header'
+                           : r === -1 ? 'Header'
+                           : 'Cell';
+            const cellLabel = r < 0 ? _calColLetter(c) : _calLabel(r, c);
+            statusEl.textContent = `${rowLabel} ${cellLabel}${m ? ` · merged (${m.rs}\u00d7${m.cs})` : ''}`;
         }
     }
     function _calColLetter(c) { return String.fromCharCode(65 + c); }
     function _calLabel(r, c) {
         // Letter for column (A, B, C…) + number for row (1-based) — spreadsheet style
         return String.fromCharCode(65 + c) + (r + 1);
+    }
+    // Get / set alignment for a cell. Keyed by "r,c" so it survives merges
+    // (the origin cell's alignment is what matters; covered cells are skipped).
+    // Default alignment: header rows center; data column 0 left; other data cells center.
+    function _calAlignFor(r, c) {
+        const explicit = _calibAlignments[`${r},${c}`];
+        if (explicit) return explicit;
+        if (r < 0)          return 'center';   // headers default center
+        if (c === 0)        return 'left';     // first data column defaults left
+        return 'center';                        // other data cells default center
+    }
+    function _calSetAlign(align) {
+        if (!_calibFocusCell) { _calToast('Tap a cell first'); return; }
+        const { r, c } = _calibFocusCell;
+        _calibAlignments[`${r},${c}`] = align;
+        renderCalibTable();
+    }
+    // Toggle the sub-header row. When enabled, adds a second header row above
+    // the main header; when disabled, removes it and cleans up any merges
+    // originating in row -2 (or extending down from it).
+    function _calToggleSubHeader() {
+        if (!_calibTemplate || !_calibTemplate._isCustom) { _calToast('Sub-header only available on Custom Table'); return; }
+        if (_customSubHeaders.length > 0) {
+            // Remove sub-header: drop merges that touch row -2
+            _calibMerges = _calibMerges.filter(m => !(m.r === -2 || (m.r === -2 && m.r + m.rs > -1)));
+            // Also remove alignments keyed to row -2
+            Object.keys(_calibAlignments).forEach(k => {
+                if (k.startsWith('-2,')) delete _calibAlignments[k];
+            });
+            _customSubHeaders = [];
+        } else {
+            // Add sub-header row: one blank label per current column
+            _customSubHeaders = new Array(_customColHeaders.length).fill('');
+        }
+        _calibFocusCell = null;
+        renderCalibTable();
     }
     function _calOnInputKeyDown(ev, r, c) {
         if (ev.key === 'Enter') {
@@ -5213,10 +5270,10 @@
         // ── CUSTOM TABLE BUILDER MODE ────────────────────────────
         if (_calibTemplate._isCustom) {
             // Header: editable column labels + remove button + "+Col" button + resize handle
-            // Header cells are focusable and mergeable (horizontal only) via
-            // r === -1 in _calibMerges. Cells covered by a header merge are
-            // skipped; the origin cell renders with colspan and the summed
-            // width of the spanned columns.
+            // Header cells are focusable and mergeable via r === -1 in
+            // _calibMerges. Cells covered by a header merge are skipped;
+            // the origin cell renders with colspan and the summed width
+            // of the spanned columns.
             const headerCells = _customColHeaders.map((h, ci) => {
                 if (_calIsMergedOut(-1, ci)) return '';   // covered by a merged header to the left or above
                 const hm = _calGetMergeAt(-1, ci);
@@ -5231,24 +5288,67 @@
                     : _calibColWidths[ci];
                 // No resize handle on merged cells — user should split first, then resize
                 const rh = hm ? '' : resizeHandle(ci);
+                const align = _calAlignFor(-1, ci);
                 return `
                 <th data-cal-r="-1" data-cal-c="${ci}"${spanAttr}
                     onclick="if(event.target.tagName!=='INPUT'&&event.target.tagName!=='BUTTON')_calSetFocus(-1,${ci})"
-                    style="${thStyle};min-width:${wPx}px;width:${wPx}px;position:relative;cursor:pointer">
+                    style="${thStyle};min-width:${wPx}px;width:${wPx}px;position:relative;cursor:pointer;text-align:${align}">
                     <div style="display:flex;align-items:center;gap:4px">
                         <input type="text" value="${(h||'').replace(/"/g,'&quot;')}"
                             placeholder="Column ${ci+1}"
                             onfocus="_calSetFocus(-1,${ci})"
                             onchange="_customColHeaders[${ci}]=this.value;renderCalibTable()"
-                            style="flex:1;border:1px solid #475569;background:rgba(255,255,255,.1);color:#fff;font-size:11px;padding:3px 5px;border-radius:3px;outline:none"/>
+                            style="flex:1;border:1px solid #475569;background:rgba(255,255,255,.1);color:#fff;font-size:11px;padding:3px 5px;border-radius:3px;outline:none;text-align:${align}"/>
                         ${_customColHeaders.length > 1 ? `<button type="button" onclick="event.stopPropagation();removeCustomCol(${ci})" title="Remove column" style="color:#fca5a5;background:none;border:none;cursor:pointer;font-size:13px;line-height:1;padding:0 2px">✕</button>` : ''}
                     </div>
                     ${rh}
                 </th>`;
             }).join('');
-            thead.innerHTML = `<tr>${headerCells}<th style="${thStyle};width:60px">
+
+            // Sub-header row (row -2) — only rendered when _customSubHeaders
+            // is populated. Same merge / alignment rules as the main header.
+            // The trailing +Col button spans both header rows via rowspan.
+            let subHeaderRow = '';
+            if (_customSubHeaders.length > 0) {
+                const subCells = _customSubHeaders.map((h, ci) => {
+                    if (_calIsMergedOut(-2, ci)) return '';
+                    const hm = _calGetMergeAt(-2, ci);
+                    const spanAttr = hm
+                        ? ` colspan="${hm.cs}"${hm.rs > 1 ? ` rowspan="${hm.rs}"` : ''}`
+                        : '';
+                    const wPx = hm
+                        ? Array.from({length: hm.cs}, (_, i) => _calibColWidths[ci + i] || 0).reduce((a, b) => a + b, 0)
+                        : _calibColWidths[ci];
+                    const align = _calAlignFor(-2, ci);
+                    // Sub-header cells use a slightly lighter fill so they're
+                    // visually distinct from the main header but still clearly
+                    // header-like.
+                    const subThStyle = 'background:#4c1d95;color:#fff;padding:6px 8px;text-align:' + align + ';font-size:11px;font-weight:600;border:1px solid #6d28d9;letter-spacing:.02em';
+                    return `
+                    <th data-cal-r="-2" data-cal-c="${ci}"${spanAttr}
+                        onclick="if(event.target.tagName!=='INPUT')_calSetFocus(-2,${ci})"
+                        style="${subThStyle};min-width:${wPx}px;width:${wPx}px;cursor:pointer">
+                        <input type="text" value="${(h||'').replace(/"/g,'&quot;')}"
+                            placeholder="—"
+                            onfocus="_calSetFocus(-2,${ci})"
+                            onchange="_customSubHeaders[${ci}]=this.value;renderCalibTable()"
+                            style="width:100%;border:1px solid #6d28d9;background:rgba(255,255,255,.1);color:#fff;font-size:11px;padding:3px 5px;border-radius:3px;outline:none;text-align:${align}"/>
+                    </th>`;
+                }).join('');
+                subHeaderRow = `<tr>${subCells}</tr>`;
+            }
+            // Main header (row -1). When a sub-header row exists it renders
+            // ABOVE the sub-header; we build both rows into thead. The +Col
+            // button's containing <th> spans both header rows so a
+            // sub-header doesn't leave it dangling.
+            const addColRowspan = _customSubHeaders.length > 0 ? ' rowspan="2"' : '';
+            const mainHeaderRow = `<tr>${headerCells}<th${addColRowspan} style="${thStyle};width:60px;vertical-align:middle">
                 <button type="button" onclick="addCustomCol()" title="Add column" style="background:#10b981;color:#fff;border:none;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;font-weight:600">+ Col</button>
             </th></tr>`;
+            thead.innerHTML = mainHeaderRow + subHeaderRow;
+            // Reflect sub-header presence in the toolbar toggle label
+            const subBtn = document.getElementById('calSubHdrToggle');
+            if (subBtn) subBtn.textContent = _customSubHeaders.length > 0 ? '− Sub Header' : '+ Sub Header';
 
             tbody.innerHTML = _calibRows.map((row, ri) => {
                 const cells = _customColKeys.map((key, ci) => {
@@ -5257,16 +5357,17 @@
                     const spanAttrs = m ? ` rowspan="${m.rs}" colspan="${m.cs}"` : '';
                     const val = row[key] || '';
                     const w = _calibColWidths[ci];
+                    const align = _calAlignFor(ri, ci);
                     return `<td data-cal-r="${ri}" data-cal-c="${ci}"${spanAttrs}
                         onclick="_calSetFocus(${ri},${ci})"
-                        style="padding:3px 4px;border:1px solid #e2e8f0;min-width:${w}px;width:${w}px">
+                        style="padding:3px 4px;border:1px solid #e2e8f0;min-width:${w}px;width:${w}px;text-align:${align}">
                         <input type="text" value="${val.replace(/"/g,'&quot;')}"
                             placeholder=""
                             data-cal-r="${ri}" data-cal-c="${ci}"
                             onchange="_calibRows[${ri}]['${key}']=this.value"
                             onfocus="_calSetFocus(${ri},${ci})"
                             onkeydown="_calOnInputKeyDown(event, ${ri}, ${ci})"
-                            style="width:100%;border:none;background:transparent;font-size:11px;padding:3px 4px;outline:none;color:#1e3a5f"/>
+                            style="width:100%;border:none;background:transparent;font-size:11px;padding:3px 4px;outline:none;color:#1e3a5f;text-align:${align}"/>
                     </td>`;
                 }).join('');
                 return `<tr>${cells}<td style="padding:3px 6px;border:1px solid #e2e8f0;text-align:center">
@@ -5351,6 +5452,9 @@
         const newLabel = 'Column ' + (_customColHeaders.length + 1);
         _customColHeaders.push(newLabel);
         _customColKeys.push(newKey);
+        // Keep sub-header array parallel to main headers when the sub-header
+        // row is enabled — new column gets a blank sub-label slot.
+        if (_customSubHeaders.length > 0) _customSubHeaders.push('');
         // Initialize new column to empty in all existing rows
         _calibRows.forEach(r => { r[newKey] = ''; });
         renderCalibTable();
@@ -5363,6 +5467,8 @@
         const removedKey = _customColKeys[ci];
         _customColHeaders.splice(ci, 1);
         _customColKeys.splice(ci, 1);
+        // Sub-header slot for the removed column
+        if (_customSubHeaders.length > 0) _customSubHeaders.splice(ci, 1);
         _calibRows.forEach(r => { delete r[removedKey]; });
         renderCalibTable();
     }
@@ -5406,6 +5512,7 @@
         document.getElementById('calibOverall').value='PASS';
         _calibRows=[]; _calibTemplate=null;
         _customColHeaders=[]; _customColKeys=[]; _customTitle='';
+        _customSubHeaders=[]; _calibAlignments={};
         _calibColWidths=[]; _calibMerges=[]; _calibFocusCell=null;
         const thead=document.getElementById('calibTableHead');
         const tbody=document.getElementById('calibTableBody');
@@ -5440,8 +5547,10 @@
                 _calibColWidths = Array.isArray(rec.colWidths) && rec.colWidths.length
                     ? [...rec.colWidths]
                     : new Array(_calNumCols()).fill(0).map((_, i) => i < 2 ? 100 : 80);
-                _calibMerges    = Array.isArray(rec.merges) ? rec.merges.map(m=>({...m})) : [];
-                _calibFocusCell = null;
+                _calibMerges     = Array.isArray(rec.merges) ? rec.merges.map(m=>({...m})) : [];
+                _customSubHeaders = Array.isArray(rec.subHeaders) ? [...rec.subHeaders] : [];
+                _calibAlignments  = (rec.alignments && typeof rec.alignments === 'object') ? {...rec.alignments} : {};
+                _calibFocusCell   = null;
                 renderCalibTable();
             }
         }
@@ -5457,6 +5566,7 @@
         document.getElementById('calibModal').classList.remove('show');
         _calibRows=[]; _calibTemplate=null;
         _customColHeaders=[]; _customColKeys=[]; _customTitle='';
+        _customSubHeaders=[]; _calibAlignments={};
         _calibColWidths=[]; _calibMerges=[]; _calibFocusCell=null;
         // Remove the custom tip element if present
         const tip = document.getElementById('customTableTip'); if (tip) tip.remove();
@@ -5500,8 +5610,10 @@
             customTitle: isCustom ? (_customTitle || '') : '',
             // Spreadsheet-feature state — kept alongside the data so the table
             // looks the same on next edit / print. New fields, safe defaults if absent.
-            colWidths: [..._calibColWidths],
-            merges:    _calibMerges.map(m => ({...m}))
+            colWidths:  [..._calibColWidths],
+            merges:     _calibMerges.map(m => ({...m})),
+            subHeaders: [..._customSubHeaders],
+            alignments: {..._calibAlignments}
         };
         _stampRecord(rec);
 
@@ -8080,17 +8192,70 @@
                         const colW=Math.min(24,CW/cal.columns.length);
                         const cs={};cal.columns.forEach((_,i)=>{cs[i]={cellWidth:colW,halign:'center'};});
                         cs[0]={cellWidth:colW,halign:'left'};if(cal.columns.length>1)cs[1]={cellWidth:colW,halign:'left'};
+
+                        // Merges + sub-header + per-cell alignment support.
+                        // Merges array uses r === -1 for main header, r === -2
+                        // for sub-header, r >= 0 for data rows. Cells covered
+                        // by another cell's span are skipped; origin cells
+                        // emit colSpan/rowSpan. Alignment stored per cell as
+                        // "r,c" → 'left'|'center'|'right' (defaults: headers
+                        // center, data col 0 left, other data center).
+                        const merges     = Array.isArray(cal.merges) ? cal.merges : [];
+                        const alignments = (cal.alignments && typeof cal.alignments === 'object') ? cal.alignments : {};
+                        const subHeaders = Array.isArray(cal.subHeaders) ? cal.subHeaders : [];
+                        const nCols      = cal.columns.length;
+                        const nRows      = cal.rows.length;
+                        // Predicates operating on the merges array
+                        const mergeAt      = (r,c) => merges.find(m => m.r === r && m.c === c) || null;
+                        const isMergedOut  = (r,c) => merges.some(m => !(m.r === r && m.c === c) && r >= m.r && r < m.r + m.rs && c >= m.c && c < m.c + m.cs);
+                        const alignFor     = (r,c) => alignments[`${r},${c}`]
+                                                    || (r < 0 ? 'center' : (c === 0 ? 'left' : 'center'));
+                        // Build a header row for autoTable respecting merges/alignment.
+                        // headStyles.textColor is overridden per-cell to preserve autoTable's white header text.
+                        const buildHeaderRow = (r, labels) => {
+                            const row = [];
+                            labels.forEach((label, ci) => {
+                                if (isMergedOut(r, ci)) return;
+                                const m = mergeAt(r, ci);
+                                const cell = { content: label || '' };
+                                if (m) { if (m.cs > 1) cell.colSpan = m.cs; if (m.rs > 1) cell.rowSpan = m.rs; }
+                                cell.styles = { halign: alignFor(r, ci) };
+                                row.push(cell);
+                            });
+                            return row;
+                        };
+                        const head = [ buildHeaderRow(-1, cal.columns) ];
+                        if (subHeaders.length) head.push(buildHeaderRow(-2, subHeaders));
+
+                        // Build body rows. Each data cell honours merges + alignment.
+                        // The "result" column keeps its coloured PASS/FAIL treatment.
+                        const rowKeys = cal.rowKeys || [];
+                        const body = cal.rows.map((row, ri) => {
+                            const outRow = [];
+                            rowKeys.forEach((k, ci) => {
+                                if (isMergedOut(ri, ci)) return;
+                                const m = mergeAt(ri, ci);
+                                const v = row[k] || '\u2014';
+                                const cell = { content: v };
+                                if (m) { if (m.cs > 1) cell.colSpan = m.cs; if (m.rs > 1) cell.rowSpan = m.rs; }
+                                if (k === 'result') {
+                                    cell.styles = { fontStyle:'bold', halign:'center',
+                                        textColor: v === 'PASS' ? [21,128,61] : v === 'FAIL' ? [220,38,38] : [100,100,100],
+                                        fillColor: v === 'PASS' ? [220,252,231] : v === 'FAIL' ? [254,226,226] : [255,255,255] };
+                                } else {
+                                    cell.styles = { halign: alignFor(ri, ci) };
+                                }
+                                outRow.push(cell);
+                            });
+                            return outRow;
+                        });
+
                         doc.autoTable({startY:y,margin:{top:42,left:ML,right:MR,bottom:SIG_H+FOOTER_SAFETY+2},theme:'grid',
                             styles:{fontSize:7.5,cellPadding:2},
                             headStyles:{fillColor:[30,58,138],textColor:[255,255,255],fontStyle:'bold',fontSize:7.5},
-                            head:[cal.columns.map(h=>({content:h,styles:{halign:'center'}}))],
-                            body:cal.rows.map(row=>(cal.rowKeys||[]).map((k,ki)=>{
-                                const v=row[k]||'—';
-                                if(k==='result')return{content:v,styles:{fontStyle:'bold',halign:'center',
-                                    textColor:v==='PASS'?[21,128,61]:v==='FAIL'?[220,38,38]:[100,100,100],
-                                    fillColor:v==='PASS'?[220,252,231]:v==='FAIL'?[254,226,226]:[255,255,255]}};
-                                return{content:v,styles:{halign:ki<2?'left':'center'}};
-                            })),columnStyles:cs,
+                            head: head,
+                            body: body,
+                            columnStyles:cs,
                             didDrawPage:(data)=>{ if(data.pageNumber>1) drawPageHeader(); }
                         });
                         y=doc.lastAutoTable.finalY+6;
