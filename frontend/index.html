@@ -18065,29 +18065,113 @@
         // ════════════════════════════════════════════════════════════════════
 
         // ═══════════════════════════════════════════════════════════════
-        // PER-PROJECT P&L — rolls up revenue and every cost bucket against
-        // the shared projectNo field (added across Business Expenses, Petty
-        // Cash, Director Expenses and Transactions in Phase 1). One row per
-        // project master record; rows with zero activity are dropped so the
-        // MIS doesn't list a hundred empty projects. Technician wage
-        // allocation is NOT included here yet — that's Phase 4.
+        // PER-PROJECT P&L — rolls up revenue, every cost bucket, and
+        // technician wage allocation against the shared projectNo field.
         //
-        // Key = project.projectRef || project.projectName. This is the exact
-        // string the modal dropdowns store on child records, so equality
-        // matching Just Works — no fuzzy joins.
+        // TECH WAGE ALLOCATION (Phase 4):
+        // For each workLog.dailyEntries[] day × each technician on that
+        // day, look up staff.dailyWage → that's one "person-day" of cost
+        // attributed to the workLog's project.
         //
-        // Returns { rows, totals, untagged } where:
-        //   rows     — array of per-project P&L objects, sorted by margin asc
-        //              (worst first, actionable — that's where management
-        //              attention needs to go)
-        //   totals   — sum row across projects (excludes untagged)
-        //   untagged — same shape but for records with projectNo === ''
-        //              (pure overhead, no attribution possible)
+        // Split-day rule (user chose "based on hours in daily entry"):
+        //   If a tech appears on multiple workLogs on the SAME date, the
+        //   day's wage is split proportionally by the hours worked
+        //   (endTime − startTime) on each workLog. If hours are missing,
+        //   the wage is split evenly across logs.
+        //
+        // Join key: workLog.ref || workLog.project → must match
+        //   projectExpenses[].projectRef || projectExpenses[].projectName
+        //   (the same string stored as projectNo on invoices/expenses).
+        //
+        // Returns { rows, totals, untagged }
         // ═══════════════════════════════════════════════════════════════
         function _computeProjectPnL() {
             const rows = [];
             const seen = new Set();
 
+            // ── STAGE 1: compute tech dailyWage per staff name ──────
+            // Tech wage formula matches the CTC structure at line ~19558:
+            //   Tech: (basic + basic*(HRA%+DA%+GP%)/100 + variable) / 30
+            //   Non-tech: s.dailyWage (stored flat)
+            const staffWageMap = {};   // staffName → dailyWage (number)
+            (staff||[]).forEach(s => {
+                if (!s.name || s.status !== 'Active') return;
+                let dw = 0;
+                if (s.staffType === 'Technician') {
+                    const b = parseFloat(s.basicSalary) || 0;
+                    const hP = s.techHRAPct ?? 50;
+                    const dP = s.techDAPct  ?? 65;
+                    const gP = s.techGPPct  ?? 30;
+                    const v  = parseFloat(s.techVariable) || 0;
+                    dw = +((b + b * (hP + dP + gP) / 100 + v) / 30).toFixed(2);
+                } else {
+                    dw = parseFloat(s.dailyWage) || 0;
+                }
+                staffWageMap[s.name] = dw;
+            });
+
+            // ── STAGE 2: build person-day records from workLogs ─────
+            // Each entry = { techName, date, hours, projectKey, dailyWage }
+            // hours = endTime − startTime in decimal; 0 if missing.
+            const parseHours = (start, end) => {
+                if (!start || !end) return 0;
+                const [sh,sm] = start.split(':').map(Number);
+                const [eh,em] = end.split(':').map(Number);
+                const m = (eh*60+em) - (sh*60+sm);
+                return m > 0 ? +(m / 60).toFixed(4) : 0;
+            };
+
+            // personDayMap: "techName|date" → [ {projectKey, hours} ]
+            // Used for the split-day logic.
+            const personDayMap = {};
+            (workLogs||[]).forEach(w => {
+                // Project key for this workLog — same string convention as
+                // the modal dropdowns store on records.
+                const projKey = w.ref || w.project || '';
+                (w.dailyEntries||[]).forEach(d => {
+                    if (!d.date) return;
+                    const techs = _wlCollectDayTechs(d, w);
+                    const hours = parseHours(d.startTime, d.endTime);
+                    techs.forEach(techName => {
+                        const key = techName + '|' + d.date;
+                        if (!personDayMap[key]) personDayMap[key] = [];
+                        personDayMap[key].push({ projKey, hours });
+                    });
+                });
+            });
+
+            // ── STAGE 3: allocate wages per project ─────────────────
+            // For each person-day, if only one workLog → full dailyWage.
+            // If multiple → split by hours (or evenly if hours missing).
+            const projWageMap = {};   // projectKey → total allocated wage
+            Object.entries(personDayMap).forEach(([key, entries]) => {
+                const techName = key.split('|')[0];
+                const dw = staffWageMap[techName] || 0;
+                if (dw <= 0) return;   // unknown or zero-wage staff, skip
+
+                if (entries.length === 1) {
+                    // Single project that day → full wage
+                    const pk = entries[0].projKey;
+                    projWageMap[pk] = (projWageMap[pk] || 0) + dw;
+                } else {
+                    // Multiple projects same day → split by hours
+                    const totalHours = entries.reduce((s,e) => s + e.hours, 0);
+                    if (totalHours > 0) {
+                        entries.forEach(e => {
+                            const share = dw * (e.hours / totalHours);
+                            projWageMap[e.projKey] = (projWageMap[e.projKey] || 0) + share;
+                        });
+                    } else {
+                        // No hours recorded — split evenly
+                        const share = dw / entries.length;
+                        entries.forEach(e => {
+                            projWageMap[e.projKey] = (projWageMap[e.projKey] || 0) + share;
+                        });
+                    }
+                }
+            });
+
+            // ── STAGE 4: build per-project P&L rows ─────────────────
             const buildRow = (project, key) => {
                 // Revenue — invoiced work-in-progress and closed
                 const revTxns = (transactions||[]).filter(t =>
@@ -18102,28 +18186,27 @@
                 }, 0);
 
                 // Business Expenses (bills booked against the project)
-                const bizExpMatches = (expenses||[]).filter(e => (e.projectNo || '') === key);
-                const bizExp = bizExpMatches.reduce((s,e) => s + (parseFloat(e.billAmtINR)||0), 0);
+                const bizExp = (expenses||[]).filter(e => (e.projectNo || '') === key)
+                    .reduce((s,e) => s + (parseFloat(e.billAmtINR)||0), 0);
 
                 // Petty Cash — site travel, tea for crew, small purchases
-                const pcExpMatches = (pettyCashTransactions||[]).filter(t =>
+                const pcExp = (pettyCashTransactions||[]).filter(t =>
                     (t.projectNo || '') === key && t.txnType === 'EXPENSE'
-                );
-                const pcExp = pcExpMatches.reduce((s,t) => s + (parseFloat(t.amount)||0), 0);
+                ).reduce((s,t) => s + (parseFloat(t.amount)||0), 0);
 
                 // Director Expenses — director reimbursables tagged to project
-                const dirExpMatches = (directorExpenses||[]).filter(d => (d.projectNo || '') === key);
-                const dirExp = dirExpMatches.reduce((s,d) => s + (parseFloat(d.totalAmt || d.amount)||0), 0);
+                const dirExp = (directorExpenses||[]).filter(d => (d.projectNo || '') === key)
+                    .reduce((s,d) => s + (parseFloat(d.totalAmt || d.amount)||0), 0);
 
-                // Project Expenses — items on the project record itself.
-                // Only relevant when project is truthy (untagged bucket has no
-                // parent record). Sum ALL items regardless of pool allocation
-                // — from a P&L view every rupee spent counts.
+                // Project Expenses — items on the project record itself
                 const projExp = project
                     ? (project.items||[]).reduce((s,it) => s + (parseFloat(it.amount)||0), 0)
                     : 0;
 
-                const totalCost   = bizExp + pcExp + dirExp + projExp;
+                // Tech wages — allocated from workLogs (Stage 3)
+                const techWages = +(projWageMap[key] || 0).toFixed(2);
+
+                const totalCost   = bizExp + pcExp + dirExp + projExp + techWages;
                 const grossProfit = revenue - totalCost;
                 const margin      = revenue > 0 ? (grossProfit / revenue) * 100 : (totalCost > 0 ? -100 : 0);
 
@@ -18133,7 +18216,7 @@
                     projectName: project ? project.projectName : '',
                     clientName:  project ? project.clientName  : '',
                     projExpID:   project ? project.projExpID   : '',
-                    revenue, bizExp, pcExp, dirExp, projExp,
+                    revenue, bizExp, pcExp, dirExp, projExp, techWages,
                     totalCost, grossProfit, margin,
                     invoiceCount: revTxns.length,
                     hasActivity:  revenue > 0 || totalCost > 0
@@ -18150,14 +18233,14 @@
             });
 
             // Orphaned tags — records referring to a projectNo that no
-            // longer exists in projectExpenses (project was renamed/deleted).
-            // Show these too so the money isn't invisible; they'd otherwise
-            // silently vanish from the MIS.
+            // longer exists in projectExpenses (project was renamed/deleted)
             const allTags = new Set();
             (expenses||[]).forEach(e => e.projectNo && allTags.add(e.projectNo));
             (pettyCashTransactions||[]).forEach(t => t.projectNo && allTags.add(t.projectNo));
             (directorExpenses||[]).forEach(d => d.projectNo && allTags.add(d.projectNo));
             (transactions||[]).forEach(t => t.projectNo && allTags.add(t.projectNo));
+            // Also include workLog project keys so wage-only projects surface
+            Object.keys(projWageMap).forEach(k => k && allTags.add(k));
             allTags.forEach(k => {
                 if (seen.has(k)) return;
                 seen.add(k);
@@ -18165,37 +18248,32 @@
                 if (row.hasActivity) { row.projectName = k + ' (removed)'; rows.push(row); }
             });
 
-            // Untagged bucket — pure overhead. Same builder but with key=''.
+            // Untagged bucket — pure overhead
             const untagged = buildRow(null, '');
             untagged.projectName = 'Untagged / Overhead';
 
-            // Sort by margin ascending — the worst performers surface first.
-            // Ties broken by revenue desc so the impactful ones lead within a
-            // margin band.
+            // Sort by margin ascending — worst performers first
             rows.sort((a,b) => a.margin - b.margin || b.revenue - a.revenue);
 
             // Totals across attributed projects (not untagged)
             const totals = rows.reduce((acc, r) => {
-                acc.revenue   += r.revenue;
-                acc.bizExp    += r.bizExp;
-                acc.pcExp     += r.pcExp;
-                acc.dirExp    += r.dirExp;
-                acc.projExp   += r.projExp;
-                acc.totalCost += r.totalCost;
+                acc.revenue     += r.revenue;
+                acc.bizExp      += r.bizExp;
+                acc.pcExp       += r.pcExp;
+                acc.dirExp      += r.dirExp;
+                acc.projExp     += r.projExp;
+                acc.techWages   += r.techWages;
+                acc.totalCost   += r.totalCost;
                 acc.grossProfit += r.grossProfit;
                 acc.invoiceCount += r.invoiceCount;
                 return acc;
-            }, { revenue:0, bizExp:0, pcExp:0, dirExp:0, projExp:0, totalCost:0, grossProfit:0, invoiceCount:0 });
+            }, { revenue:0, bizExp:0, pcExp:0, dirExp:0, projExp:0, techWages:0, totalCost:0, grossProfit:0, invoiceCount:0 });
             totals.margin = totals.revenue > 0 ? (totals.grossProfit / totals.revenue) * 100 : 0;
 
             return { rows, totals, untagged };
         }
 
-        // Colour helper for margin cells. Aggressive band choice —
-        // < 0     : red bg (loss)
-        // 0-10    : amber (marginal)
-        // 10-25   : light green (acceptable)
-        // > 25    : dark green (healthy)
+        // Colour helper for margin cells
         function _marginBandStyle(m) {
             if (m < 0)   return 'background:#fef2f2;color:#991b1b;font-weight:700';
             if (m < 10)  return 'background:#fffbeb;color:#92400e;font-weight:600';
@@ -18348,6 +18426,7 @@
                             <td class="px-3 py-2 text-xs text-right text-amber-700">${fmtK(r.pcExp)}</td>
                             <td class="px-3 py-2 text-xs text-right text-indigo-700">${fmtK(r.dirExp)}</td>
                             <td class="px-3 py-2 text-xs text-right text-purple-700">${fmtK(r.projExp)}</td>
+                            <td class="px-3 py-2 text-xs text-right text-cyan-700">${fmtK(r.techWages)}</td>
                             <td class="px-3 py-2 text-xs text-right text-red-700 font-semibold">${fmtK(r.totalCost)}</td>
                             <td class="px-3 py-2 text-xs text-right ${r.grossProfit >= 0 ? 'text-green-700' : 'text-red-700'} font-semibold">${fmtK(r.grossProfit)}</td>
                             <td class="px-3 py-2 text-center">${isUntagged ? '<span class="text-gray-400 text-xs">n/a</span>' : marginCell(r.margin, r.revenue)}</td>
@@ -18366,7 +18445,7 @@
                                     · Sorted worst-first
                                 </p>
                             </div>
-                            <div class="text-[11px] text-gray-400 italic">Tech wages not yet allocated (Phase 4)</div>
+                            <div class="text-[11px] text-gray-400 italic">Wages split by hours when a tech works on multiple projects same day</div>
                         </div>
                         <div class="overflow-x-auto">
                             <table class="w-full text-sm">
@@ -18378,6 +18457,7 @@
                                         <th class="px-3 py-2 text-right" title="Petty Cash">Petty</th>
                                         <th class="px-3 py-2 text-right" title="Director Expenses">Dir Exp</th>
                                         <th class="px-3 py-2 text-right" title="Project Expenses (items on project record)">Proj Exp</th>
+                                        <th class="px-3 py-2 text-right" title="Technician wages allocated from workLog attendance × dailyWage. Split by hours when a tech works on multiple projects same day.">👷 Tech Wages</th>
                                         <th class="px-3 py-2 text-right">Total Cost</th>
                                         <th class="px-3 py-2 text-right">Profit</th>
                                         <th class="px-3 py-2 text-center">Margin</th>
@@ -18391,7 +18471,7 @@
                             </table>
                         </div>
                         <p class="text-[10px] text-gray-400 mt-2 italic">
-                            Revenue = Approved / Sent / Completed / Paid invoices tagged to the project. Costs sum bills, petty-cash expenses, director expenses and project-expense items. Untagged records are shown separately and do NOT reduce any project's margin.
+                            Revenue = Approved / Sent / Completed / Paid invoices tagged to the project. Costs sum bills, petty-cash expenses, director expenses, project-expense items, and technician wages (dailyWage × person-days from workLog entries, split by hours when a tech works on multiple projects same day). Untagged records are shown separately and do NOT reduce any project's margin.
                         </p>
                     </div>`;
                 })()}
