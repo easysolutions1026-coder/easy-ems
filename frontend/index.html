@@ -534,6 +534,20 @@
                         </div>
                     </div>
 
+                    <!-- Project tag — optional. Feeds the per-project P&L in
+                         MIS Report so this expense is netted against the
+                         project's invoices. Same dropdown + storage pattern
+                         as Director Expenses (value stored is projectRef ||
+                         projectName). Leave blank for overheads. -->
+                    <div class="mb-4">
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">
+                            🏗️ Project <span class="text-gray-400 font-normal">— optional, tag to a project for per-project P&L</span>
+                        </label>
+                        <select id="expProjectNo" class="field-editable w-full px-3 py-2 border rounded-lg text-sm">
+                            <option value="">— No project (overhead) —</option>
+                        </select>
+                    </div>
+
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                         <div>
                             <label class="block text-xs font-semibold text-gray-600 mb-1">Taxable Amount <span class="text-red-500">*</span></label>
@@ -7763,12 +7777,12 @@
                 });
 
                 // Expenses sheet data
-                const expenseRows = [['Bill Log Ref No','Bill No','Bill Date','Company/Vendor','Description','Currency','Exch Rate',
+                const expenseRows = [['Bill Log Ref No','Bill No','Bill Date','Company/Vendor','Project','Description','Currency','Exch Rate',
                     'Bill Amt','Bill Amt INR','CGST','SGST','IGST','Credit Note','TDS?','Taxable Amt','TDS%','TDS Amt','Net Amt',
                     'Advance Amt','Advance Date','Balance','Pay Status','Pay Mode','Cheque No','Pay Date','Bank','Remark']];
                 expenses.forEach(e => {
                     expenseRows.push([
-                        e.voucherNo||'', e.billNo||'', e.billDate||'', e.companyName||'', e.description||'',
+                        e.voucherNo||'', e.billNo||'', e.billDate||'', e.companyName||'', e.projectNo||'', e.description||'',
                         e.currency||'INR', e.exchRate||1, parseFloat(e.billAmount||0), parseFloat(e.billAmtINR||0),
                         parseFloat(e.cgst||0), parseFloat(e.sgst||0), parseFloat(e.igst||0), parseFloat(e.creditNote||0),
                         e.tdsApplicable?'Y':'N', parseFloat(e.taxableAmt||0), e.tdsPct||0, parseFloat(e.tdsAmt||0),
@@ -11807,6 +11821,16 @@
                         <option value="">All Statuses</option>
                         ${['Pending','Partial','Paid'].map(s => `<option value="${s}"${(window._expFilterState?.st||'')===s?' selected':''}>${s}</option>`).join('')}
                     </select>
+                    <select id="expFilterProject" onchange="filterExpenses()" class="px-3 py-2 border border-gray-200 rounded-lg text-sm" title="Filter by project — includes an 'Untagged' option to isolate records that still need backfill">
+                        <option value="">All Projects</option>
+                        <option value="__untagged__"${(window._expFilterState?.proj||'')==='__untagged__'?' selected':''}>▪ Untagged only</option>
+                        ${(projectExpenses||[]).map(p => {
+                            const val = p.projectRef || p.projectName || '';
+                            const label = (p.projectRef ? p.projectRef + ' — ' : '') + (p.projectName || '');
+                            const sel = (window._expFilterState?.proj||'')===val ? ' selected' : '';
+                            return `<option value="${val.replace(/"/g,'&quot;')}"${sel}>${label.replace(/</g,'&lt;')}</option>`;
+                        }).join('')}
+                    </select>
                     <select id="expFilterMonth" onchange="filterExpenses()" class="px-3 py-2 border border-gray-200 rounded-lg text-sm">
                         <option value="">All Months</option>
                         ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -11869,6 +11893,7 @@
                             <th class="px-3 py-2 text-left">Bill Log Ref No</th>
                             <th class="px-3 py-2 text-left">Date</th>
                             <th class="px-3 py-2 text-left">Vendor</th>
+                            <th class="px-3 py-2 text-left" style="min-width:130px" title="Tag to project for per-project P&L. Backfill by picking from the dropdown on any row.">🏗️ Project</th>
                             <th class="px-3 py-2 text-left">Description</th>
                             <th class="px-3 py-2 text-right">Net Payable</th>
                             <th class="px-3 py-2 text-center">Status</th>
@@ -11882,6 +11907,40 @@
                 </table>
             </div>
             ${_pgHtml('exp', list.length)}`;
+        }
+
+        // Inline project chip/dropdown used across expense lists. Chip form
+        // when a project is tagged (blue pill, click to open dropdown to
+        // change); "Tag project" ghost dropdown when empty (part of the A1
+        // backfill approach — you tag records as you see them). Change fires
+        // the given handler which does the persist.
+        // Params:
+        //   currentValue — the record's current projectNo string
+        //   onChangeFn   — JS expression evaluated with `this` as the select;
+        //                  should call the backend save
+        function _projectInlinePicker(currentValue, onChangeFn) {
+            const opts = (projectExpenses || []).map(p => {
+                const val = p.projectRef || p.projectName || '';
+                const label = (p.projectRef ? p.projectRef + ' — ' : '') + (p.projectName || '');
+                const selected = (val === currentValue) ? ' selected' : '';
+                return `<option value="${val.replace(/"/g,'&quot;')}"${selected}>${label.replace(/</g,'&lt;')}</option>`;
+            }).join('');
+            // Orphan value (project renamed / removed): keep it as an option
+            // so the user still sees what's tagged.
+            const availableRefs = new Set((projectExpenses||[]).map(p => p.projectRef || p.projectName || ''));
+            const orphan = currentValue && !availableRefs.has(currentValue)
+                ? `<option value="${currentValue.replace(/"/g,'&quot;')}" selected>${currentValue.replace(/</g,'&lt;')} (removed)</option>`
+                : '';
+            const isTagged = !!currentValue;
+            const cls = isTagged
+                ? 'text-blue-700 font-medium bg-blue-50 border border-blue-200'
+                : 'text-gray-400 italic bg-white border border-dashed border-gray-300';
+            return `<select onclick="event.stopPropagation()" onchange="${onChangeFn}"
+                class="text-xs px-1.5 py-1 rounded ${cls}" style="max-width:160px"
+                title="${isTagged ? 'Change project' : 'Assign this record to a project'}">
+                <option value="">${isTagged ? '— Remove tag —' : '+ Tag project'}</option>
+                ${opts}${orphan}
+            </select>`;
         }
 
         function expRow(e) {
@@ -11925,6 +11984,11 @@
                                     : (e.companyName || '—');
                         return badge + label;
                     })()}
+                </td>
+                <!-- Project column — inline chip/dropdown, click stops row-toggle
+                     event. Change persists immediately via _tagExpenseProject. -->
+                <td class="px-3 py-2" onclick="event.stopPropagation()">
+                    ${_projectInlinePicker(e.projectNo || '', `_tagExpenseProject('${safeId}', this.value)`)}
                 </td>
                 <td class="px-3 py-2${tallyDone?' text-teal-700 font-medium':''}" style="max-width:220px">
                     <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${e.description||''}">${e.description||'—'}</div>
@@ -12078,13 +12142,13 @@
         // Module-level state for Expenses & Bills filters. Persists across re-renders
         // so that selecting (say) "Apr" doesn't snap back to "All Months" after saving
         // a new expense or doing any other action that triggers renderView().
-        window._expFilterState = window._expFilterState || { q: '', st: '', mo: '', tally: '' };
+        window._expFilterState = window._expFilterState || { q: '', st: '', mo: '', tally: '', proj: '' };
 
         // Returns the filtered expense list using the persisted filter state.
         // Used by both the initial render and post-action re-renders so filters
         // don't get lost.
         function _filteredExpensesForTable() {
-            const s = window._expFilterState || { q: '', st: '', mo: '', tally: '' };
+            const s = window._expFilterState || { q: '', st: '', mo: '', tally: '', proj: '' };
             const q = (s.q || '').toLowerCase();
             return (expenses || []).filter(e => {
                 const mq = !q || (e.billNo||'').toLowerCase().includes(q) ||
@@ -12108,16 +12172,18 @@
             const st  = document.getElementById('expFilterStatus')?.value||'';
             const mo  = document.getElementById('expFilterMonth')?.value||'';
             const tally = document.getElementById('expFilterTally')?.value||'';
+            const proj  = document.getElementById('expFilterProject')?.value||'';
             // Persist for next render
-            window._expFilterState = { q, st, mo, tally };
+            window._expFilterState = { q, st, mo, tally, proj };
             _pgResetPage('exp');   // filter changed → back to page 1
             const filtered = expenses.filter(e => {
-                // Search: include tally voucher number in search
+                // Search: include tally voucher number AND project tag in search
                 const mq = !q || (e.billNo||'').toLowerCase().includes(q) ||
                            (e.companyName||'').toLowerCase().includes(q) ||
                            (e.description||'').toLowerCase().includes(q) ||
                            (e.voucherNo||'').toLowerCase().includes(q) ||
-                           (e.tallyVoucherNo||'').toLowerCase().includes(q);
+                           (e.tallyVoucherNo||'').toLowerCase().includes(q) ||
+                           (e.projectNo||'').toLowerCase().includes(q);
                 const ms = !st || e.payStatus === st;
                 const mm = !mo || (e.billDate||'').substring(5,7) === mo;
                 // Tally filter
@@ -12126,7 +12192,11 @@
                 else if (tally === 'not_updated') mt = !e.tallyUpdated;
                 else if (tally === 'has_voucher') mt = !!(e.tallyVoucherNo);
                 else if (tally === 'missing_voucher') mt = !!e.tallyUpdated && !e.tallyVoucherNo;
-                return mq && ms && mm && mt;
+                // Project filter — '__untagged__' means "records without projectNo"
+                let mp = true;
+                if (proj === '__untagged__') mp = !e.projectNo;
+                else if (proj)               mp = (e.projectNo || '') === proj;
+                return mq && ms && mm && mt && mp;
             });
             const c = document.getElementById('expTableContainer');
             if (c) c.innerHTML = renderExpenseTable(filtered);
@@ -12139,6 +12209,29 @@
             expenses[idx].tallyUpdated   = !expenses[idx].tallyUpdated;
             expenses[idx].tallyUpdatedAt = expenses[idx].tallyUpdated ? new Date().toISOString() : null;
             await saveData('expenses', expenses);
+            renderView();
+        }
+
+        // Inline project tagging — called from the Project column dropdown in
+        // the expenses list. Persists immediately with an update stamp so the
+        // audit trail catches backfill activity. Silent when the value doesn't
+        // actually change (e.g. dropdown reopen without picking).
+        async function _tagExpenseProject(expID, newProjectNo) {
+            const idx = expenses.findIndex(e => e.expID === expID);
+            if (idx < 0) return;
+            const prev = expenses[idx].projectNo || '';
+            if (prev === (newProjectNo || '')) return;
+            expenses[idx].projectNo = newProjectNo || '';
+            expenses[idx].updatedAt = new Date().toISOString();
+            expenses[idx].updatedBy = currentUser?.name || currentUser?.email || 'Unknown';
+            try {
+                await saveData('expenses', expenses);
+                _showSaveToast(newProjectNo ? '🏗️ Tagged to ' + newProjectNo : '🏷️ Project tag removed', 1500);
+            } catch (err) {
+                expenses[idx].projectNo = prev;   // roll back on failure
+                console.error('Tag save failed:', err);
+                alert('Could not save project tag: ' + (err.message || err));
+            }
             renderView();
         }
 
@@ -12926,6 +13019,27 @@
             // Populate Ledger Account dropdown (additive, optional — Chart of Accounts)
             const expLedgerSel = document.getElementById('expLedgerAccount');
             if (expLedgerSel) expLedgerSel.innerHTML = _coaDropdownOptions(exp?.ledgerAccountId);
+
+            // Populate Project dropdown — options from projectExpenses master.
+            // Value stored is projectRef || projectName (matches DirEx pattern
+            // at line ~30861). Always include the currently-saved project even
+            // if it's been renamed or removed from projectExpenses, so an
+            // edit re-open doesn't silently blank out the tag.
+            const expProjSel = document.getElementById('expProjectNo');
+            if (expProjSel) {
+                const savedProj = exp?.projectNo || '';
+                const availableRefs = new Set();
+                const options = (projectExpenses || []).map(p => {
+                    const val   = p.projectRef || p.projectName || '';
+                    const label = (p.projectRef ? p.projectRef + ' — ' : '') + (p.projectName || '');
+                    availableRefs.add(val);
+                    return `<option value="${val.replace(/"/g,'&quot;')}"${savedProj === val ? ' selected' : ''}>${label.replace(/</g,'&lt;')}</option>`;
+                }).join('');
+                const orphan = savedProj && !availableRefs.has(savedProj)
+                    ? `<option value="${savedProj.replace(/"/g,'&quot;')}" selected>${savedProj.replace(/</g,'&lt;')} (removed from projects)</option>`
+                    : '';
+                expProjSel.innerHTML = '<option value="">— No project (overhead) —</option>' + options + orphan;
+            }
 
             // Populate Inter-Bank From/To dropdowns (all active accounts)
             populateInterBankDropdowns();
@@ -14008,6 +14122,10 @@
                 voucherNo:         document.getElementById('expVoucherNo').value,
                 billNo:            document.getElementById('expBillNo').value,
                 billDate:          document.getElementById('expBillDate').value,
+                // Project tag — string stored is projectRef || projectName
+                // (matches Director Expenses shape). Blank when the expense
+                // is an overhead not attributable to any specific project.
+                projectNo:         document.getElementById('expProjectNo')?.value || '',
                 companyName:       document.getElementById('expCompanyName').value,
                 // Vendor PAN — needed for TDS filings (Form 26Q). Stored uppercased.
                 // For GST-registered vendors this typically equals chars 3-12 of vendorGSTIN
@@ -43814,9 +43932,9 @@ Automated WFH alert — ${company} Attendance System.`;
         }
         function _sheetsMapExpenses() {
             return {
-                headers: ['Bill Log Ref No','Bill No','Bill Date','Company/Vendor','Description','Currency','Exch Rate','Bill Amt','Bill Amt INR','CGST','SGST','IGST','Credit Note','TDS?','Taxable Amt','TDS%','TDS Amt','Net Amt','Advance Amt','Advance Date','Balance','Pay Status','Pay Mode','Cheque No','Pay Date','Bank','Remark'],
+                headers: ['Bill Log Ref No','Bill No','Bill Date','Company/Vendor','Project','Description','Currency','Exch Rate','Bill Amt','Bill Amt INR','CGST','SGST','IGST','Credit Note','TDS?','Taxable Amt','TDS%','TDS Amt','Net Amt','Advance Amt','Advance Date','Balance','Pay Status','Pay Mode','Cheque No','Pay Date','Bank','Remark'],
                 rows: (expenses||[]).map(e => [
-                    e.expID||'', e.billNo||'', e.billDate||'', e.companyName||e.vendor||'',
+                    e.expID||'', e.billNo||'', e.billDate||'', e.companyName||e.vendor||'', e.projectNo||'',
                     e.description||'', e.currency||'INR', e.exchangeRate||1,
                     e.billAmount||0, e.billINR||e.billAmountINR||e.billAmount||0,
                     e.cgst||0, e.sgst||0, e.igst||0, e.creditNote||'',
