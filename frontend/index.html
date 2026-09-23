@@ -534,20 +534,6 @@
                         </div>
                     </div>
 
-                    <!-- Project tag — optional. Feeds the per-project P&L in
-                         MIS Report so this expense is netted against the
-                         project's invoices. Same dropdown + storage pattern
-                         as Director Expenses (value stored is projectRef ||
-                         projectName). Leave blank for overheads. -->
-                    <div class="mb-4">
-                        <label class="block text-xs font-semibold text-gray-600 mb-1">
-                            🏗️ Project <span class="text-gray-400 font-normal">— optional, tag to a project for per-project P&L</span>
-                        </label>
-                        <select id="expProjectNo" class="field-editable w-full px-3 py-2 border rounded-lg text-sm">
-                            <option value="">— No project (overhead) —</option>
-                        </select>
-                    </div>
-
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                         <div>
                             <label class="block text-xs font-semibold text-gray-600 mb-1">Taxable Amount <span class="text-red-500">*</span></label>
@@ -636,6 +622,23 @@
                             <div class="text-[10px] text-orange-700 italic">↑ Rate × Taxable Amount auto-fills the GST fields above</div>
                         </div>
                     </div>
+                </div>
+
+                <!-- Project tag — optional. Feeds the per-project P&L in
+                     MIS Report so this expense is netted against the
+                     project's invoices. Same dropdown + storage pattern
+                     as Director Expenses (value stored is projectRef ||
+                     projectName). Placed OUTSIDE expGSTSection so it stays
+                     visible for Statutory / Salary / Interbank bill types
+                     too — salary paid to a project engineer should be
+                     tagged even though the GST block is hidden. -->
+                <div class="mb-4">
+                    <label class="block text-xs font-semibold text-gray-600 mb-1">
+                        🏗️ Project <span class="text-gray-400 font-normal">— optional, tag to a project for per-project P&L</span>
+                    </label>
+                    <select id="expProjectNo" class="field-editable w-full px-3 py-2 border rounded-lg text-sm">
+                        <option value="">— No project (overhead) —</option>
+                    </select>
                 </div>
 
                 <!-- Simple amount block — shown for STATUTORY and SALARY (replaces the hidden GST taxable amount) -->
