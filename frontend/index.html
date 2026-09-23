@@ -36718,19 +36718,7 @@ Automated WFH alert — ${company} Attendance System.`;
                 ]],
                 body: rows.length
                     ? rows.map((r,i) => [{content:String(i+1),styles:{halign:'center'}}, r.agreedWorkScope||'', r.growthOfWork||'', r.reWork||''])
-                    : [[{content:'(No work items entered)',colSpan:4,styles:{halign:'center',fontStyle:'italic',textColor:[120,120,120]}}]],
-                // Style empty / "Nil" growth-and-rework cells in soft gray
-                // italic so real entries stand out and Nil rows don't crowd
-                // the page visually.
-                didParseCell: (data) => {
-                    if (data.section !== 'body') return;
-                    if (data.column.index < 2 || data.column.index > 3) return;
-                    const v = String(data.cell.raw || '').trim().toLowerCase();
-                    if (!v || v === 'nil' || v === '-' || v === '—') {
-                        data.cell.styles.textColor = [140,140,140];
-                        data.cell.styles.fontStyle = 'italic';
-                    }
-                }
+                    : [[{content:'(No work items entered)',colSpan:4,styles:{halign:'center',fontStyle:'italic',textColor:[120,120,120]}}]]
             });
             y = doc.lastAutoTable.finalY + 8;
             // Remarks in its own bordered box (was plain text before)

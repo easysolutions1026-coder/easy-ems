@@ -955,7 +955,8 @@
                 </div>
                 <div>
                     <label style="font-size:11px;font-weight:600;color:#9f1239">Customer</label>
-                    <input type="text" id="gwCustomer" class="field-input" style="font-size:13px" placeholder="e.g. THE SHIPPING CORPORATION OF INDIA LTD"/>
+                    <input type="text" id="gwCustomer" list="gwCustomerList" class="field-input" style="font-size:13px" placeholder="e.g. THE SHIPPING CORPORATION OF INDIA LTD"/>
+                    <datalist id="gwCustomerList"></datalist>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
                     <div>
@@ -7492,6 +7493,15 @@
 
         document.getElementById('gwProjectNo').value    = gw.projectNo    || projAuto || '';
         document.getElementById('gwCustomer').value     = gw.customer     || wl.client || '';
+
+        // Populate the Customer datalist from unique client names across
+        // projectExpenses + workLogs. Gives a dropdown-like autocomplete
+        // while still allowing free text for new clients.
+        const clientSet = new Set();
+        (projectExpenses || []).forEach(p => { if (p.clientName) clientSet.add(p.clientName); });
+        (workLogs || []).forEach(w => { if (w.client) clientSet.add(w.client); });
+        const dlEl = document.getElementById('gwCustomerList');
+        if (dlEl) dlEl.innerHTML = [...clientSet].sort().map(c => `<option value="${c.replace(/"/g,'&quot;')}"/>`).join('');
         document.getElementById('gwDateFrom').value     = gw.dateFrom     || wl.workStartDate || '';
         document.getElementById('gwDateTo').value       = gw.dateTo       || wl.workEndDate || '';
         document.getElementById('gwRemarks').value      = gw.remarks      || '';
@@ -7697,19 +7707,7 @@
                     r.growthOfWork    || '',
                     r.reWork          || ''
                 ])
-                : [[{content:'(No work items entered)', colSpan:4, styles:{halign:'center',fontStyle:'italic',textColor:[120,120,120]}}]],
-            // Style empty / "Nil" growth-and-rework cells in soft gray
-            // italic so real entries stand out and Nil rows don't crowd
-            // the page visually.
-            didParseCell: (data) => {
-                if (data.section !== 'body') return;
-                if (data.column.index < 2 || data.column.index > 3) return;
-                const v = String(data.cell.raw || '').trim().toLowerCase();
-                if (!v || v === 'nil' || v === '-' || v === '\u2014') {
-                    data.cell.styles.textColor = [140,140,140];
-                    data.cell.styles.fontStyle = 'italic';
-                }
-            }
+                : [[{content:'(No work items entered)', colSpan:4, styles:{halign:'center',fontStyle:'italic',textColor:[120,120,120]}}]]
         });
         y = doc.lastAutoTable.finalY + 8;
 
