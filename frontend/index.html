@@ -1289,6 +1289,20 @@
                         <input type="text" id="txnVesselName" placeholder="e.g. Haldi" class="w-full px-4 py-2 border border-gray-300 rounded-lg" maxlength="100" />
                         <p class="text-xs text-gray-400 mt-1">Prints "To The Master and Owner of Vessel [name]" on the PDF, below "To:" and above the party details</p>
                     </div>
+                    <!-- Project tag — optional. Feeds the per-project P&L in
+                         MIS Report so income (Invoice / Proforma / PO / Quotation
+                         chain) gets attributed to a project. The same value
+                         should flow from the initial Quotation through the
+                         Proforma → PO → Invoice for the same project so the
+                         MIS aggregates cleanly. Blank for stand-alone / one-off
+                         transactions. -->
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 mb-2">🏗️ Project <span class="text-xs font-normal text-gray-400">(optional)</span></label>
+                        <select id="txnProjectNo" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                            <option value="">— No project —</option>
+                        </select>
+                        <p class="text-xs text-gray-400 mt-1">Tag to a project for per-project P&L. Prints on the invoice/PDF footer.</p>
+                    </div>
                     <div>
                         <label class="block text-sm font-semibold text-gray-700 mb-2">Status</label>
                         <select id="txnStatus" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
@@ -6828,6 +6842,18 @@
                     // we just count all of Subject's height as pushing content down.
                     refExtraHeight += txn.reference ? blockHeight : (blockHeight - 5);
                 }
+                // Project — printed right after Subject when tagged. Same
+                // wrapping-block treatment. Prefix "Project:" bold to match
+                // Subject's visual weight. Silent for un-tagged transactions.
+                if (txn.projectNo) {
+                    const projLines = doc.splitTextToSize('Project: ' + txn.projectNo, 180);
+                    doc.setFont(undefined, 'bold');
+                    doc.text(projLines, 14, yCursor);
+                    doc.setFont(undefined, 'normal');
+                    const blockHeight = projLines.length * 5;
+                    yCursor += blockHeight;
+                    refExtraHeight += (txn.reference || txn.subject) ? blockHeight : (blockHeight - 5);
+                }
                 // Everything below shifts down by the extra height accumulated
                 startY += refExtraHeight;
                 
@@ -10435,6 +10461,15 @@
                         <option>Completed</option><option>Paid</option>
                         <option>Issued</option><option>Acknowledged</option><option>Invoiced</option>
                     </select>
+                    <select id="txnFilterProject" onchange="filterTransactions()" class="px-3 py-2 border border-gray-200 rounded-lg text-sm" title="Filter by project. 'Untagged only' surfaces records still needing backfill.">
+                        <option value="">All Projects</option>
+                        <option value="__untagged__">▪ Untagged only</option>
+                        ${(projectExpenses||[]).map(p => {
+                            const val = p.projectRef || p.projectName || '';
+                            const label = (p.projectRef ? p.projectRef + ' — ' : '') + (p.projectName || '');
+                            return `<option value="${val.replace(/"/g,'&quot;')}">${label.replace(/</g,'&lt;')}</option>`;
+                        }).join('')}
+                    </select>
                 </div>
 
                 <!-- Grouped transaction sections -->
@@ -10526,6 +10561,14 @@
                 <td class="txn-sticky-col px-3 py-2" style="position:sticky;left:110px;z-index:5;width:170px;min-width:170px;max-width:170px;box-shadow:2px 0 4px -2px rgba(0,0,0,0.15)">
                     <div class="truncate" title="${t.partyName}">${t.partyName}</div>
                     ${(t.txnCategory==='INVOICE'||t.txnCategory==='PO') ? _ledgerBadge(t.ledgerAccountId) : ''}
+                </td>
+                <!-- Project column — read-only chip when tagged, empty when
+                     not. Edit inside the transaction modal. Same treatment as
+                     the Business Expenses and Petty Cash lists. -->
+                <td class="px-3 py-2" style="max-width:160px">
+                    ${t.projectNo
+                        ? `<span class="inline-block text-blue-700 font-medium bg-blue-50 border border-blue-200 rounded px-2 py-0.5 text-xs" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle" title="${(t.projectNo||'').replace(/"/g,'&quot;')}">${t.projectNo}</span>`
+                        : ''}
                 </td>
                 <td class="px-3 py-2 text-gray-500 whitespace-nowrap">${t.txnDate}</td>
                 <td class="px-3 py-2 text-gray-500 max-w-xs truncate" title="${(t.subject||'').replace(/"/g,'&quot;')}">${t.subject || '—'}</td>
@@ -10929,6 +10972,7 @@
                                 <tr>
                                     <th class="px-3 py-2 text-left" style="position:sticky;left:0;z-index:11;background:#f9fafb;width:110px;min-width:110px;max-width:110px;box-shadow:2px 0 4px -2px rgba(0,0,0,0.15)">ID</th>
                                     <th class="px-3 py-2 text-left" style="position:sticky;left:110px;z-index:11;background:#f9fafb;width:170px;min-width:170px;max-width:170px;box-shadow:2px 0 4px -2px rgba(0,0,0,0.15)">Party</th>
+                                    <th class="px-3 py-2 text-left" style="min-width:130px" title="Tag transactions to projects for per-project P&L. Set inside the Edit Transaction modal.">🏗️ Project</th>
                                     <th class="px-3 py-2 text-left">Date</th>
                                     <th class="px-3 py-2 text-left">Subject</th>
                                     ${showAmountCol ? '<th class="px-3 py-2 text-right">Amount</th>' : ''}
@@ -10961,7 +11005,7 @@
             const esc = v => { const s = (v==null?'':String(v)); return '"' + s.replace(/"/g,'""') + '"'; };
             const priced = ['QUOTATION','PROFORMA_INVOICE','PO','CREDIT_NOTE','INVOICE'].includes(cat);
 
-            const header = ['Txn ID','Category','Direction','Party','Currency','Date','Subject','Amount','Status'];
+            const header = ['Txn ID','Category','Direction','Party','Currency','Date','Subject','Project','Amount','Status'];
             const rows = [header];
             list.forEach(t => {
                 let amount = '';
@@ -10976,6 +11020,7 @@
                     t.currency || 'INR',
                     t.txnDate || '',
                     t.subject || '',
+                    t.projectNo || '',
                     amount,
                     t.status || ''
                 ]);
@@ -10994,12 +11039,14 @@
         function filterTransactions() {
             const q      = (document.getElementById('txnSearchInput')?.value || '').toLowerCase();
             const status = document.getElementById('txnFilterStatus')?.value || '';
+            const proj   = document.getElementById('txnFilterProject')?.value || '';
             // Reset every group's page to 0 when the user changes the search
-            // query or the status filter — otherwise, if they were on page 5
-            // of Invoices and search collapses the result set to 3 rows, the
-            // table shows nothing until they manually click ⏮. We snapshot
-            // the last-known filters and only reset when they actually change.
-            const filterKey = q + '\u0001' + status;
+            // query, status, or project filter — otherwise, if they were on
+            // page 5 of Invoices and search collapses the result set to 3
+            // rows, the table shows nothing until they manually click ⏮.
+            // We snapshot the last-known filters and only reset when they
+            // actually change.
+            const filterKey = q + '\u0001' + status + '\u0001' + proj;
             if (window._lastTxnFilterKey !== filterKey) {
                 Object.keys(window._txnPaging || {}).forEach(k => { window._txnPaging[k].page = 0; });
                 window._lastTxnFilterKey = filterKey;
@@ -11009,9 +11056,14 @@
                     t.txnID.toLowerCase().includes(q) ||
                     (t.partyName||'').toLowerCase().includes(q) ||
                     (t.reference||'').toLowerCase().includes(q) ||
-                    (t.status||'').toLowerCase().includes(q);
+                    (t.status||'').toLowerCase().includes(q) ||
+                    (t.projectNo||'').toLowerCase().includes(q);
                 const matchS = !status || t.status === status;
-                return matchQ && matchS;
+                // Project filter — '__untagged__' means "records without projectNo"
+                let matchP = true;
+                if (proj === '__untagged__') matchP = !t.projectNo;
+                else if (proj)               matchP = (t.projectNo || '') === proj;
+                return matchQ && matchS && matchP;
             });
             const container = document.getElementById('txnGroupContainer');
             if (container) container.innerHTML = renderGroupedTransactions(filtered);
@@ -20078,6 +20130,12 @@
             const vesselEl = document.getElementById('txnVesselName');
             if (vesselEl) vesselEl.value = (txn && txn.vesselName) ? txn.vesselName : '';
 
+            // Populate Project dropdown from projectExpenses master — uses the
+            // shared helper which preserves currently-saved values even when
+            // the master record has been renamed / removed.
+            const txnProjSel = document.getElementById('txnProjectNo');
+            if (txnProjSel) txnProjSel.innerHTML = _projectDropdownOptions(txn?.projectNo || '');
+
             // Load vendor code if exists
             if (txn && txn.vendorCode) {
                 document.getElementById('txnVendorCode').value = txn.vendorCode;
@@ -21088,6 +21146,12 @@
                     referenceType: document.getElementById('txnReferenceType')?.value || '',
                     subject: document.getElementById('txnSubject')?.value || '',
                     vesselName: document.getElementById('txnVesselName')?.value?.trim() || '',
+                    // Project tag — string stored is projectRef || projectName
+                    // from projectExpenses (same shape as Business Expenses,
+                    // Petty Cash, Director Expenses). Used by the per-project
+                    // P&L in MIS Report to attribute this txn's revenue to a
+                    // project. Blank when the txn isn't project-specific.
+                    projectNo: document.getElementById('txnProjectNo')?.value || '',
                     vendorCode: document.getElementById('txnVendorCode')?.value || '',
                     poNumber: document.getElementById('txnPoNumber')?.value || '',
                     poDate: document.getElementById('txnPoDate')?.value || '',
@@ -43897,7 +43961,7 @@ Automated WFH alert — ${company} Attendance System.`;
         }
         function _sheetsMapAllTransactions() {
             return {
-                headers: ['Txn ID','Category','Direction','Party','Vendor Code','Date','Reference','Status','Currency','Subtotal','Tax','Grand Total'],
+                headers: ['Txn ID','Category','Direction','Party','Vendor Code','Project','Date','Reference','Status','Currency','Subtotal','Tax','Grand Total'],
                 rows: (transactions||[]).map(t => {
                     // Transactions don't store pre-computed totals as top-level fields —
                     // amounts live in t.items[] and must be computed via calculateTotals().
@@ -43909,6 +43973,7 @@ Automated WFH alert — ${company} Attendance System.`;
                         t.txnDirection||t.direction||'',
                         t.partyName||t.party||'',
                         t.vendorCode||'',
+                        t.projectNo||'',
                         t.txnDate||t.date||'',
                         t.reference||'',
                         t.status||'',
