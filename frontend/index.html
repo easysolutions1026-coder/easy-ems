@@ -11372,6 +11372,34 @@
             ).join('');
         }
 
+        // Project dropdown options — feeds the "Project" field on Business
+        // Expenses, Petty Cash Transactions and Invoices. Options come from
+        // projectExpenses[]; value stored is projectRef || projectName
+        // (same shape as Director Expenses at line ~30861).
+        //
+        // Preserves the currently-saved value even when the project has been
+        // renamed or removed from projectExpenses — otherwise re-opening an
+        // edit modal would silently blank out the tag. The orphan appears as
+        // "PROJREF (removed)" so it's obvious the master record is gone.
+        //
+        // Used inline in modal HTML templates (Petty Cash builds its modal via
+        // template literal, so needs the whole HTML string) AND via
+        // element.innerHTML = ... in modals that populate after render.
+        function _projectDropdownOptions(currentValue) {
+            const cur = currentValue || '';
+            const availableRefs = new Set();
+            const options = (projectExpenses || []).map(p => {
+                const val   = p.projectRef || p.projectName || '';
+                const label = (p.projectRef ? p.projectRef + ' — ' : '') + (p.projectName || '');
+                availableRefs.add(val);
+                return `<option value="${val.replace(/"/g,'&quot;')}"${cur === val ? ' selected' : ''}>${label.replace(/</g,'&lt;')}</option>`;
+            }).join('');
+            const orphan = cur && !availableRefs.has(cur)
+                ? `<option value="${cur.replace(/"/g,'&quot;')}" selected>${cur.replace(/</g,'&lt;')} (removed from projects)</option>`
+                : '';
+            return '<option value="">— No project (overhead) —</option>' + options + orphan;
+        }
+
         // ═══════════════════════════════════════════════════════════════
         // BANK ACCOUNT MERGE — safe, previewable consolidation of duplicate
         // accounts (same physical account split into separate Income/Expense
@@ -12973,24 +13001,11 @@
 
             // Populate Project dropdown — options from projectExpenses master.
             // Value stored is projectRef || projectName (matches DirEx pattern
-            // at line ~30861). Always include the currently-saved project even
-            // if it's been renamed or removed from projectExpenses, so an
-            // edit re-open doesn't silently blank out the tag.
+            // at line ~30861). Uses the shared _projectDropdownOptions helper
+            // which preserves the currently-saved value even when the project
+            // has been renamed or removed from projectExpenses.
             const expProjSel = document.getElementById('expProjectNo');
-            if (expProjSel) {
-                const savedProj = exp?.projectNo || '';
-                const availableRefs = new Set();
-                const options = (projectExpenses || []).map(p => {
-                    const val   = p.projectRef || p.projectName || '';
-                    const label = (p.projectRef ? p.projectRef + ' — ' : '') + (p.projectName || '');
-                    availableRefs.add(val);
-                    return `<option value="${val.replace(/"/g,'&quot;')}"${savedProj === val ? ' selected' : ''}>${label.replace(/</g,'&lt;')}</option>`;
-                }).join('');
-                const orphan = savedProj && !availableRefs.has(savedProj)
-                    ? `<option value="${savedProj.replace(/"/g,'&quot;')}" selected>${savedProj.replace(/</g,'&lt;')} (removed from projects)</option>`
-                    : '';
-                expProjSel.innerHTML = '<option value="">— No project (overhead) —</option>' + options + orphan;
-            }
+            if (expProjSel) expProjSel.innerHTML = _projectDropdownOptions(exp?.projectNo || '');
 
             // Populate Inter-Bank From/To dropdowns (all active accounts)
             populateInterBankDropdowns();
@@ -37637,7 +37652,7 @@ Automated WFH alert — ${company} Attendance System.`;
         }
 
         function _pcSetFilter(key, val) { window._pcFilter[key] = val; renderView(); }
-        function _pcClearFilters() { window._pcFilter = { officeID: '', month: '', year: new Date().getFullYear(), type: '', verified: '' }; renderView(); }
+        function _pcClearFilters() { window._pcFilter = { officeID: '', month: '', year: new Date().getFullYear(), type: '', verified: '', projectNo: '' }; renderView(); }
         // ═══════════════════════════════════════════════════════════════
         // BANK LEDGER — read-only aggregation across existing records.
         // Does NOT write anything, does NOT change any other module's
@@ -38448,7 +38463,7 @@ Automated WFH alert — ${company} Attendance System.`;
             const fmt = n => '₹' + (+n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             const offices = (pettyCashOffices || []).filter(o => o.active !== false);
 
-            if (!window._pcFilter) window._pcFilter = { officeID: '', month: '', year: new Date().getFullYear(), type: '', verified: '' };
+            if (!window._pcFilter) window._pcFilter = { officeID: '', month: '', year: new Date().getFullYear(), type: '', verified: '', projectNo: '' };
             const F = window._pcFilter;
 
             if (offices.length === 0) {
@@ -38513,6 +38528,9 @@ Automated WFH alert — ${company} Attendance System.`;
                 if (F.verified === 'no'  && t.verified)  return false;
                 if (pfxMonth && !(t.txnDate||'').startsWith(pfxMonth)) return false;
                 else if (!pfxMonth && pfxYear && !(t.txnDate||'').startsWith(pfxYear)) return false;
+                // Project filter — '__untagged__' isolates records still needing backfill
+                if (F.projectNo === '__untagged__') { if (t.projectNo) return false; }
+                else if (F.projectNo && t.projectNo !== F.projectNo) return false;
                 return true;
             }).sort((a, b) => (b.txnDate||'').localeCompare(a.txnDate||'') || (b.enteredAt||'').localeCompare(a.enteredAt||''));
 
@@ -38559,6 +38577,16 @@ Automated WFH alert — ${company} Attendance System.`;
                     <option value="yes" ${F.verified==='yes'?'selected':''}>✓ Verified</option>
                     <option value="no" ${F.verified==='no'?'selected':''}>⏳ Pending</option>
                 </select>
+                <select onchange="_pcSetFilter('projectNo', this.value)" class="px-3 py-1.5 border rounded text-sm" title="Filter by project. 'Untagged only' isolates records still needing backfill.">
+                    <option value="">All Projects</option>
+                    <option value="__untagged__" ${F.projectNo==='__untagged__'?'selected':''}>▪ Untagged only</option>
+                    ${(projectExpenses||[]).map(p => {
+                        const val = p.projectRef || p.projectName || '';
+                        const label = (p.projectRef ? p.projectRef + ' — ' : '') + (p.projectName || '');
+                        const sel = F.projectNo===val ? ' selected' : '';
+                        return `<option value="${val.replace(/"/g,'&quot;')}"${sel}>${label.replace(/</g,'&lt;')}</option>`;
+                    }).join('')}
+                </select>
                 <button onclick="_pcClearFilters()" class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 underline">Clear</button>
                 <span class="text-xs text-gray-500 ml-auto">${txns.length} transaction${txns.length===1?'':'s'}</span>
             </div>
@@ -38575,6 +38603,7 @@ Automated WFH alert — ${company} Attendance System.`;
                                 <th class="px-3 py-2 text-left">Type</th>
                                 <th class="px-3 py-2 text-left">Category / Description</th>
                                 <th class="px-3 py-2 text-left">Vendor</th>
+                                <th class="px-3 py-2 text-left" style="min-width:130px" title="Tag records to projects for per-project P&L. Set inside Edit Petty Cash.">🏗️ Project</th>
                                 <th class="px-3 py-2 text-right">Amount</th>
                                 <th class="px-3 py-2 text-center">Bills</th>
                                 <th class="px-3 py-2 text-center">Verified</th>
@@ -38584,7 +38613,7 @@ Automated WFH alert — ${company} Attendance System.`;
                         </thead>
                         <tbody>
                             ${txns.length === 0 ? `
-                            <tr><td colspan="10" class="px-3 py-8 text-center text-gray-400 italic">No transactions match the current filters</td></tr>` : (() => { _pgInit('pc', 10); return _pgSlice('pc', txns); })().map(t => {
+                            <tr><td colspan="11" class="px-3 py-8 text-center text-gray-400 italic">No transactions match the current filters</td></tr>` : (() => { _pgInit('pc', 10); return _pgSlice('pc', txns); })().map(t => {
                                 const office = offices.find(o => o.officeID === t.officeID) || {officeName: t.officeID};
                                 const isExp = t.txnType === 'EXPENSE';
                                 const typeLabel = ({EXPENSE:'💸 Expense', REPLENISHMENT:'💰 Replenish', OPENING_BALANCE:'🏁 Opening', ADJUSTMENT:'⚙ Adjust', STAFF_LOAN_RECOVERY:'💵 Loan Recovery'})[t.txnType] || t.txnType;
@@ -38601,6 +38630,14 @@ Automated WFH alert — ${company} Attendance System.`;
                                         ${_ledgerBadge(t.ledgerAccountId)}
                                     </td>
                                     <td class="px-3 py-2 text-xs text-gray-600">${(t.vendor||'').replace(/</g,'&lt;') || '—'}</td>
+                                    <!-- Project column — read-only chip when tagged, blank when
+                                         not. Edit inside the Petty Cash modal. Same pattern as
+                                         the Business Expenses list. -->
+                                    <td class="px-3 py-2 text-xs" style="max-width:160px">
+                                        ${t.projectNo
+                                            ? `<span class="inline-block text-blue-700 font-medium bg-blue-50 border border-blue-200 rounded px-2 py-0.5 text-[11px]" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle" title="${(t.projectNo||'').replace(/"/g,'&quot;')}">${t.projectNo}</span>`
+                                            : ''}
+                                    </td>
                                     <td class="px-3 py-2 text-xs text-right font-semibold ${isExp?'text-red-700':'text-green-700'}">${isExp?'−':'+'}${fmt(t.amount)}</td>
                                     <td class="px-3 py-2 text-xs text-center">
                                         ${(t.attachments||[]).length > 0
@@ -38701,7 +38738,7 @@ Automated WFH alert — ${company} Attendance System.`;
             const today = new Date().toISOString().split('T')[0];
             const t = existingTxn || {
                 txnDate: today, category: '', amount: '', vendor: '', voucherNo: '',
-                description: '', officeID: officeID || ''
+                description: '', officeID: officeID || '', projectNo: ''
             };
             const offices = (pettyCashOffices || []).filter(o => o.active !== false);
             const office  = offices.find(o => o.officeID === t.officeID) || (officeID && offices.find(o=>o.officeID===officeID));
@@ -38762,6 +38799,18 @@ Automated WFH alert — ${company} Attendance System.`;
                         <label class="block text-xs font-semibold text-gray-700 mb-1">📒 Ledger Account <span class="font-normal text-gray-400">(optional)</span></label>
                         <select id="pcLedgerAccount" class="w-full px-3 py-2 border rounded-lg text-sm">
                             ${_coaDropdownOptions(t.ledgerAccountId)}
+                        </select>
+                    </div>
+                    <!-- Project tag — optional. Same dropdown + storage pattern
+                         as Business Expenses. Feeds the per-project P&L in MIS
+                         so a petty-cash expense sits under the project it's
+                         actually for (site travel, tea for the crew, local
+                         hardware purchases, etc.). Blank for genuine
+                         office-overhead spends. -->
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-700 mb-1">🏗️ Project <span class="font-normal text-gray-400">— optional, tag for per-project P&L</span></label>
+                        <select id="pcProjectNo" class="w-full px-3 py-2 border rounded-lg text-sm">
+                            ${_projectDropdownOptions(t.projectNo || '')}
                         </select>
                     </div>
                     <div class="border-2 border-dashed border-amber-300 rounded-xl p-4 bg-amber-50/30">
@@ -38862,6 +38911,7 @@ Automated WFH alert — ${company} Attendance System.`;
             const voucherNo= document.getElementById('pcVoucherNo').value.trim();
             const description = document.getElementById('pcDescription').value.trim();
             const ledgerAccountId = document.getElementById('pcLedgerAccount')?.value || '';
+            const projectNo    = document.getElementById('pcProjectNo')?.value || '';
             const atts     = window._pcStagedAttachments || [];
 
             if (!officeID) { alert('Please select an office.'); return; }
@@ -38887,7 +38937,7 @@ Automated WFH alert — ${company} Attendance System.`;
                 txnDate,
                 amount: +amount.toFixed(2),
                 category, otherCategoryText: category === 'OTHER' ? otherText : '',
-                vendor, voucherNo, description, ledgerAccountId,
+                vendor, voucherNo, description, ledgerAccountId, projectNo,
                 attachments: atts,
                 verified: isEdit ? (orig.verified||false) : false,
                 verifiedBy: isEdit ? (orig.verifiedBy||'') : '',
