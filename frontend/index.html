@@ -10383,7 +10383,7 @@
                     </div>
                     <div class="bg-gradient-to-br from-teal-500 to-green-600 rounded-2xl p-6 text-white shadow-lg cursor-pointer" onclick="switchView('mis')">
                         <div class="text-xl font-bold">
-                            ${(() => { const rev = transactions.filter(t=>t.txnCategory==='INVOICE'&&t.txnDirection==='Outgoing'&&['Approved','Sent','Completed','Paid'].includes(t.status)).reduce((s,t)=>{const tot=calculateTotals(t.items||[]);return s+parseFloat(tot.total);},0); const exp=expenses.reduce((s,e)=>s+(parseFloat(e.billAmtINR)||0),0); const gp=rev-exp; return (gp>=0?'▲ ':'▼ ')+'₹'+(Math.abs(gp)/100000).toFixed(1)+'L'; })()}
+                            ${(() => { const rev = transactions.filter(t=>t.txnCategory==='INVOICE'&&t.txnDirection==='Outgoing'&&['Approved','Sent','Completed','Paid'].includes(t.status)).reduce((s,t)=>{const tot=calculateTotals(t.items||[]);return s+parseFloat(tot.total);},0); const exp=expenses.filter(e=>e.billType!=='INTERBANK').reduce((s,e)=>s+(parseFloat(e.billAmtINR)||0),0); const gp=rev-exp; return (gp>=0?'▲ ':'▼ ')+'₹'+(Math.abs(gp)/100000).toFixed(1)+'L'; })()}
                         </div>
                         <div class="text-teal-100 text-sm">📊 Gross Profit</div>
                     </div>
@@ -18187,7 +18187,8 @@
                 }, 0);
 
                 // Business Expenses (bills booked against the project)
-                const bizExp = (expenses||[]).filter(e => (e.projectNo || '') === key)
+                // Exclude INTERBANK — those are internal fund movements, not costs.
+                const bizExp = (expenses||[]).filter(e => (e.projectNo || '') === key && e.billType !== 'INTERBANK')
                     .reduce((s,e) => s + (parseFloat(e.billAmtINR)||0), 0);
 
                 // Petty Cash — site travel, tea for crew, small purchases
@@ -18300,12 +18301,17 @@
                 .reduce((s,t) => { const tot = calculateTotals(t.items||[]); return s + parseFloat(tot.total); }, 0);
             const revTax    = revTxns.reduce((s,t) => { const tot = calculateTotals(t.items||[]); return s + parseFloat(tot.tax); }, 0);
 
-            // Expenses
-            const totalExp  = expenses.reduce((s,e) => s + (parseFloat(e.billAmtINR)||0), 0);
-            const expTax    = expenses.reduce((s,e) => s + (parseFloat(e.cgst)||0) + (parseFloat(e.sgst)||0) + (parseFloat(e.igst)||0), 0);
-            const tdsTotal  = expenses.reduce((s,e) => s + (parseFloat(e.tdsAmt)||0), 0);
-            const pendingPay= expenses.filter(e => e.payStatus !== 'Paid').reduce((s,e) => s + (parseFloat(e.balanceAmt)||0), 0);
-            const paidExp   = expenses.filter(e => e.payStatus === 'Paid').reduce((s,e) => s + (parseFloat(e.billAmtINR)||0), 0);
+            // Expenses — exclude INTERBANK transfers (money moving between
+            // the company's own bank accounts is not a cost; including them
+            // was inflating the expense total by ~2× vs actual bank outflows).
+            const realExpenses = expenses.filter(e => e.billType !== 'INTERBANK');
+            const totalExp  = realExpenses.reduce((s,e) => s + (parseFloat(e.billAmtINR)||0), 0);
+            const expTax    = realExpenses.reduce((s,e) => s + (parseFloat(e.cgst)||0) + (parseFloat(e.sgst)||0) + (parseFloat(e.igst)||0), 0);
+            const tdsTotal  = realExpenses.reduce((s,e) => s + (parseFloat(e.tdsAmt)||0), 0);
+            const pendingPay= realExpenses.filter(e => e.payStatus !== 'Paid').reduce((s,e) => s + (parseFloat(e.balanceAmt)||0), 0);
+            const paidExp   = realExpenses.filter(e => e.payStatus === 'Paid').reduce((s,e) => s + (parseFloat(e.billAmtINR)||0), 0);
+            // Interbank transfers — tracked separately for visibility
+            const interbankTotal = expenses.filter(e => e.billType === 'INTERBANK').reduce((s,e) => s + (parseFloat(e.billAmtINR)||0), 0);
 
             // PO commitments
             const poTxns    = transactions.filter(t => t.txnCategory === 'PO' && t.txnDirection === 'Incoming');
@@ -18395,6 +18401,11 @@
                         <div class="text-xs text-gray-500 mb-1">Proforma Pipeline</div>
                         <div class="text-lg font-bold text-orange-600">${fmtK(proformaPipeline)}</div>
                     </div>
+                    ${interbankTotal > 0 ? `<div class="bg-white rounded-xl p-4 border shadow-sm">
+                        <div class="text-xs text-gray-500 mb-1">Interbank Transfers</div>
+                        <div class="text-lg font-bold text-gray-500">${fmtK(interbankTotal)}</div>
+                        <div class="text-[10px] text-gray-400 mt-1">Not counted as expense</div>
+                    </div>` : ''}
                 </div>
 
                 <!-- ── Per-Project P&L ─────────────────────────────
@@ -18674,7 +18685,7 @@
                     .reduce((s,t) => { const tot = calculateTotals(t.items||[]); return s+parseFloat(tot.total); }, 0);
 
                 const exp = expenses
-                    .filter(e => (e.billDate||'').startsWith(prefix))
+                    .filter(e => (e.billDate||'').startsWith(prefix) && e.billType !== 'INTERBANK')
                     .reduce((s,e) => s+(parseFloat(e.billAmtINR)||0), 0);
 
                 months.push({label:lbl, rev, exp});
@@ -18703,8 +18714,8 @@
                 let y = 30;
                 const revTxns   = transactions.filter(t => t.txnCategory==='INVOICE' && t.txnDirection==='Outgoing' && ['Approved','Sent','Completed','Paid'].includes(t.status));
                 const revenue   = revTxns.reduce((s,t) => { const tot=calculateTotals(t.items||[]); return s+parseFloat(tot.total); }, 0);
-                const totalExp  = expenses.reduce((s,e) => s+(parseFloat(e.billAmtINR)||0), 0);
-                const tdsTotal  = expenses.reduce((s,e) => s+(parseFloat(e.tdsAmt)||0), 0);
+                const totalExp  = expenses.filter(e => e.billType !== 'INTERBANK').reduce((s,e) => s+(parseFloat(e.billAmtINR)||0), 0);
+                const tdsTotal  = expenses.filter(e => e.billType !== 'INTERBANK').reduce((s,e) => s+(parseFloat(e.tdsAmt)||0), 0);
                 const receivable= transactions.filter(t => t.txnCategory==='INVOICE' && t.txnDirection==='Outgoing' && ['Approved','Sent'].includes(t.status))
                                   .reduce((s,t) => { const tot=calculateTotals(t.items||[]); return s+parseFloat(tot.total); }, 0);
                 const grossProfit = revenue - totalExp;
