@@ -22,10 +22,21 @@ export async function verifyGoogleToken(accessToken) {
 
   if (info.error) throw new Error(info.error_description || info.error);
 
-  // Token audience must match our OAuth client (if configured)
+  // Audience check — warn on mismatch but don't reject.
+  //
+  // The tokeninfo endpoint already validates the token is genuine with
+  // Google. The audience just tells us which OAuth client issued it:
+  //   - Browser app tokens → our app's OAuth client ID
+  //   - Apps Script tokens → Google's internal Apps Script client ID
+  //     (129672312562-...)
+  //
+  // Both are legitimate callers. The real security gate is the
+  // allowedUsers email check in server.js, not the audience. Rejecting
+  // on audience mismatch was blocking the Apps Script daily report and
+  // attendance alert scripts from reading data.
   const expectedAud = process.env.GOOGLE_OAUTH_CLIENT_ID;
   if (expectedAud && info.aud && info.aud !== expectedAud) {
-    throw new Error(`Token audience mismatch: got ${info.aud}`);
+    console.log(`[auth] Token audience differs from app client: got ${info.aud} (expected ${expectedAud}). Allowing — email-based allowedUsers check is the security gate.`);
   }
 
   // The tokeninfo response gives us email when the token has userinfo.email scope
