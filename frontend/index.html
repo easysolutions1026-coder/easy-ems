@@ -8320,7 +8320,7 @@
                              phones. whitespace-nowrap on each button keeps
                              labels from breaking mid-word ("Pay Requests"
                              etc. stay on one line). -->
-                        <div class="flex flex-wrap gap-1 overflow-x-auto -mx-1 px-1">
+                        <div id="desktopNavTabs" class="flex flex-wrap gap-1 overflow-x-auto -mx-1 px-1">
                             <button onclick="switchView('dashboard')" class="px-3 py-2 rounded-lg whitespace-nowrap ${currentView === 'dashboard' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}">Dashboard</button>
                             ${_canAccess('transactions')?`<button onclick="switchView('transactions')" class="px-3 py-2 rounded-lg whitespace-nowrap ${currentView === 'transactions' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}">Transactions</button>`:''}
                             ${_canAccess('expenses')||_canAccess('direxp')||_canAccess('projexp')||_canAccess('pettycash')?`<button onclick="switchView(window._lastExpenseSubview||'expenses')" class="px-3 py-2 rounded-lg whitespace-nowrap ${['expenses','direxp','projexp','pettycash'].includes(currentView) ? 'bg-orange-100 text-orange-700' : 'text-gray-600 hover:bg-gray-100'}" title="Business, Director, Project & Petty Cash expenses">💸 Expenses${(()=>{const u=(pettyCashTransactions||[]).filter(t=>t.txnType==='EXPENSE'&&!t.verified).length;return u>0?` <span class="ml-1 px-1.5 py-0.5 bg-amber-500 text-white rounded-full text-xs font-bold">${u}</span>`:'';})()}</button>`:''}
@@ -8338,6 +8338,87 @@
                         </div>
                     </div>
                 </nav>
+                <!-- ── Mobile bottom navigation ──────────────────────────
+                     Fixed bar at the bottom of the screen on phones (< 768px).
+                     Shows 5 primary tabs as compact icon+label buttons, plus a
+                     "More" hamburger that expands the full tab list as a
+                     bottom-sheet overlay. The desktop top nav row is hidden on
+                     mobile (the header/logo bar stays). Main content gets
+                     bottom padding so nothing hides behind the fixed bar. -->
+                <style>
+                    @media (max-width: 767px) {
+                        /* Hide the desktop tab row on mobile */
+                        #desktopNavTabs { display: none !important; }
+                        /* Reduce main padding on mobile */
+                        #mainContent { padding: 12px 10px 90px 10px !important; }
+                        /* Bottom nav bar */
+                        #mobileBottomNav {
+                            display: flex !important;
+                            position: fixed; bottom: 0; left: 0; right: 0; z-index: 9998;
+                            background: #fff; border-top: 1px solid #e5e7eb;
+                            box-shadow: 0 -2px 10px rgba(0,0,0,0.08);
+                            padding: 4px 0 env(safe-area-inset-bottom, 4px) 0;
+                        }
+                        #mobileBottomNav button {
+                            flex: 1; display: flex; flex-direction: column; align-items: center;
+                            justify-content: center; gap: 1px; padding: 6px 2px;
+                            background: none; border: none; cursor: pointer;
+                            font-size: 10px; color: #6b7280; min-width: 0;
+                        }
+                        #mobileBottomNav button .mb-icon { font-size: 20px; line-height: 1; }
+                        #mobileBottomNav button.mb-active { color: #4f46e5; font-weight: 700; }
+                        /* "More" overlay */
+                        #mobileMoreSheet {
+                            display: none; position: fixed; bottom: 0; left: 0; right: 0;
+                            z-index: 9999; background: #fff; border-top-left-radius: 16px;
+                            border-top-right-radius: 16px; box-shadow: 0 -4px 20px rgba(0,0,0,0.15);
+                            padding: 12px 16px env(safe-area-inset-bottom, 12px) 16px;
+                            max-height: 70vh; overflow-y: auto;
+                        }
+                        #mobileMoreSheet.open { display: block; }
+                        #mobileMoreBackdrop {
+                            display: none; position: fixed; inset: 0; z-index: 9998;
+                            background: rgba(0,0,0,0.3);
+                        }
+                        #mobileMoreBackdrop.open { display: block; }
+                        #mobileMoreSheet button {
+                            display: block; width: 100%; text-align: left;
+                            padding: 12px 14px; border: none; background: none;
+                            font-size: 15px; color: #374151; border-radius: 8px;
+                            cursor: pointer;
+                        }
+                        #mobileMoreSheet button:hover, #mobileMoreSheet button:active {
+                            background: #f3f4f6;
+                        }
+                        #mobileMoreSheet button.mb-active {
+                            background: #eef2ff; color: #4338ca; font-weight: 600;
+                        }
+                    }
+                    @media (min-width: 768px) {
+                        #mobileBottomNav, #mobileMoreSheet, #mobileMoreBackdrop { display: none !important; }
+                    }
+                </style>
+                <div id="mobileBottomNav" style="display:none">
+                    <button onclick="switchView('dashboard')" class="${currentView==='dashboard'?'mb-active':''}"><span class="mb-icon">📊</span>Home</button>
+                    <button onclick="switchView('transactions')" class="${currentView==='transactions'?'mb-active':''}"><span class="mb-icon">💰</span>Txns</button>
+                    <button onclick="switchView(window._lastExpenseSubview||'expenses')" class="${['expenses','direxp','projexp','pettycash'].includes(currentView)?'mb-active':''}"><span class="mb-icon">💸</span>Expenses</button>
+                    <button onclick="switchView('staff')" class="${currentView==='staff'?'mb-active':''}"><span class="mb-icon">👥</span>Staff</button>
+                    <button onclick="switchView('mis')" class="${currentView==='mis'?'mb-active':''}"><span class="mb-icon">📈</span>MIS</button>
+                    <button onclick="_mobileToggleMore()"><span class="mb-icon">☰</span>More</button>
+                </div>
+                <div id="mobileMoreBackdrop" onclick="_mobileCloseMore()"></div>
+                <div id="mobileMoreSheet">
+                    <div style="text-align:center;margin-bottom:8px"><div style="width:40px;height:4px;background:#d1d5db;border-radius:2px;margin:0 auto"></div></div>
+                    ${_canAccess('funds')?`<button onclick="switchView('funds');_mobileCloseMore()" class="${currentView==='funds'?'mb-active':''}">💰 Funds</button>`:''}
+                    ${_canAccess('payreq')?`<button onclick="switchView('payreq');_mobileCloseMore()" class="${currentView==='payreq'?'mb-active':''}">💼 Pay Requests</button>`:''}
+                    ${_canAccess('bank')?`<button onclick="switchView('bank');_mobileCloseMore()" class="${currentView==='bank'?'mb-active':''}">🏦 Bank</button>`:''}
+                    ${_canAccess('tax')?`<button onclick="switchView('tax');_mobileCloseMore()" class="${currentView==='tax'?'mb-active':''}">🧾 Tax</button>`:''}
+                    ${_canAccess('parties')?`<button onclick="switchView('parties');_mobileCloseMore()" class="${currentView==='parties'?'mb-active':''}">🏢 Parties</button>`:''}
+                    ${_canAccess('docs')?`<button onclick="switchView('docs');_mobileCloseMore()" class="${currentView==='docs'?'mb-active':''}">📄 Documents</button>`:''}
+                    ${_canAccess('docs')?`<button onclick="switchView('letters');_mobileCloseMore()" class="${currentView==='letters'?'mb-active':''}">✉️ Letters</button>`:''}
+                    ${_canAccess('worklogs')?`<button onclick="switchView('worklogs');_mobileCloseMore()" class="${currentView==='worklogs'?'mb-active':''}">📋 Work Logs</button>`:''}
+                    ${_canAccess('settings')||!_bmsSession?`<button onclick="switchView('settings');_mobileCloseMore()" class="${currentView==='settings'?'mb-active':''}">⚙️ Settings</button>`:''}
+                </div>
                 <main class="max-w-7xl mx-auto px-6 py-8" id="mainContent"></main>
                 <footer class="max-w-7xl mx-auto px-6 py-6 mt-8 border-t border-gray-200 text-center">
                     <p class="text-xs text-gray-500">© ${new Date().getFullYear()} EASY EMS - Engineering Management System. All rights reserved.</p>
@@ -8352,6 +8433,17 @@
 
         // Map of view IDs to friendly section labels — used for the browser tab title.
         // Keys must match the actual IDs passed to switchView().
+
+        // Mobile nav helpers
+        function _mobileToggleMore() {
+            document.getElementById('mobileMoreSheet')?.classList.toggle('open');
+            document.getElementById('mobileMoreBackdrop')?.classList.toggle('open');
+        }
+        function _mobileCloseMore() {
+            document.getElementById('mobileMoreSheet')?.classList.remove('open');
+            document.getElementById('mobileMoreBackdrop')?.classList.remove('open');
+        }
+
         const VIEW_LABELS = {
             dashboard:     'Dashboard',
             transactions:  'Transactions',
