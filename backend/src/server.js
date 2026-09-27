@@ -254,6 +254,9 @@ techRouter.post('/readiness', async (req, res) => {
         }
       } else {
         staff.attendance.push({
+          attID: 'ATT' + Date.now(),
+          staffID: staff.staffID,
+          staffName: staff.name,
           ...attendance,
           _autoByTechSS: true,
           enteredAt: new Date().toISOString()

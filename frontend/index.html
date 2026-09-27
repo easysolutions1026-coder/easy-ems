@@ -27179,7 +27179,7 @@ ${'─'.repeat(50)}
                 existing.status = 'UnApprovedLeave';
                 existing._autoByTechSS = false;
             } else {
-                s.attendance.push({ date: today, status: 'UnApprovedLeave', _autoByTechSS: false, enteredAt: new Date().toISOString() });
+                s.attendance.push({ attID: 'ATT' + Date.now(), date: today, status: 'UnApprovedLeave', staffID: s.staffID, staffName: s.name, _autoByTechSS: false, enteredAt: new Date().toISOString() });
             }
             _showToast(`⚠️ ${s.name} marked as Unapproved Leave (not marked by 09:00)`, '#dc2626');
             await saveData('staff');
@@ -27206,7 +27206,9 @@ ${'─'.repeat(50)}
                 att._autoByTechSS = false;
             } else {
                 s.attendance.push({
+                    attID: 'ATT' + Date.now(),
                     date: today, status: 'UnApprovedLeave',
+                    staffID: s.staffID, staffName: s.name,
                     noShowPenalty: true, _autoByTechSS: false,
                     enteredAt: new Date().toISOString()
                 });
