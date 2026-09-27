@@ -141,19 +141,16 @@ techRouter.post('/login', async (req, res) => {
       });
     }
 
-    // Read staff collection from DB
-    const staffRow = await prisma.collection.findUnique({ where: { name: 'staff' } });
-    const allStaff = staffRow?.data || [];
-    const staff = allStaff.find(s => s.staffID === staffID && s.status === 'Active');
-
-    if (!staff) {
+    // Read staff record from DB
+    const row = await prisma.staff.findUnique({ where: { staffID } });
+    if (!row || row.status !== 'Active') {
       return res.status(404).json({ error: 'STAFF_NOT_FOUND' });
     }
+    const staff = row.data || {};
 
     // PIN check
     const storedPin = String(staff.pin || staff.techPin || '');
     if (storedPin !== String(pin)) {
-      // Increment failure counter
       const current = _techPinFailures.get(staffID) || { count: 0, lockedUntil: null };
       current.count++;
       if (current.count >= TECH_PIN_MAX_ATTEMPTS) {
@@ -190,11 +187,13 @@ techRouter.post('/login', async (req, res) => {
 // dropdown on the login screen). No PIN needed — names aren't sensitive.
 techRouter.get('/staff-list', async (req, res) => {
   try {
-    const staffRow = await prisma.collection.findUnique({ where: { name: 'staff' } });
-    const allStaff = staffRow?.data || [];
-    const techs = allStaff
-      .filter(s => s.status === 'Active' && (s.staffType || '').toLowerCase().includes('tech'))
-      .map(s => ({ staffID: s.staffID, name: s.name, designation: s.designation || '' }));
+    const rows = await prisma.staff.findMany({
+      where: { status: 'Active' },
+      select: { staffID: true, name: true, staffType: true, designation: true }
+    });
+    const techs = rows
+      .filter(r => (r.staffType || '').toLowerCase().includes('tech'))
+      .map(r => ({ staffID: r.staffID, name: r.name, designation: r.designation || '' }));
     res.json(techs);
   } catch (err) {
     console.error('[tech/staff-list] error:', err);
@@ -218,12 +217,12 @@ techRouter.post('/readiness', async (req, res) => {
     }
 
     // Read + verify PIN
-    const staffRow = await prisma.collection.findUnique({ where: { name: 'staff' } });
-    const allStaff = staffRow?.data || [];
-    const idx = allStaff.findIndex(s => s.staffID === staffID && s.status === 'Active');
-    if (idx < 0) return res.status(404).json({ error: 'STAFF_NOT_FOUND' });
+    const row = await prisma.staff.findUnique({ where: { staffID } });
+    if (!row || row.status !== 'Active') {
+      return res.status(404).json({ error: 'STAFF_NOT_FOUND' });
+    }
+    const staff = row.data || {};
 
-    const staff = allStaff[idx];
     const storedPin = String(staff.pin || staff.techPin || '');
     if (storedPin !== String(pin)) {
       const current = _techPinFailures.get(staffID) || { count: 0, lockedUntil: null };
@@ -244,7 +243,6 @@ techRouter.post('/readiness', async (req, res) => {
     staff.techReadiness.push(readiness);
 
     // Update attendance — only if no office-set entry exists for this date
-    // (entries without _autoByTechSS were set by the office and take priority)
     if (attendance && attendance.date) {
       if (!Array.isArray(staff.attendance)) staff.attendance = [];
       const existing = staff.attendance.find(a => a.date === attendance.date);
@@ -254,7 +252,6 @@ techRouter.post('/readiness', async (req, res) => {
           existing._autoByTechSS = true;
           existing.updatedAt = new Date().toISOString();
         }
-        // If office already set it, don't touch
       } else {
         staff.attendance.push({
           ...attendance,
@@ -264,11 +261,10 @@ techRouter.post('/readiness', async (req, res) => {
       }
     }
 
-    // Save back
-    allStaff[idx] = staff;
-    await prisma.collection.update({
-      where: { name: 'staff' },
-      data: { data: allStaff, updatedAt: new Date() }
+    // Save back — update the data JSONB column
+    await prisma.staff.update({
+      where: { staffID },
+      data: { data: staff, updatedAt: new Date() }
     });
 
     // Return updated own record
