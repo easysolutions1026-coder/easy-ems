@@ -2165,7 +2165,8 @@
                             pfPct: +(s.techPFPct ?? 12),
                             esicPct: +(s.techESICPct ?? 0.75),
                             tdsAmt: null,
-                            staffID: s.staffID
+                            staffID: s.staffID,
+                            attendanceRaw: s.attendance || []
                         };
                         const w = calcTechWage(state);
                         const d = calcTechDeductions(w.gross, state.basic, w.fixedAllow, 0, state);
@@ -2274,7 +2275,8 @@
                             pfPct: +(s.techPFPct ?? 12),
                             esicPct: +(s.techESICPct ?? 0.75),
                             tdsAmt: null,
-                            staffID: s.staffID
+                            staffID: s.staffID,
+                            attendanceRaw: s.attendance || []
                         };
                         const w = calcTechWage(state);
                         const d = calcTechDeductions(w.gross, state.basic, w.fixedAllow, 0, state);
@@ -3416,7 +3418,7 @@
             return d;
         }
         function calcTechWage(state){
-            const{att,basic:basicRaw,hraPct:hPct,daPct:dPct,gradePay:gpPct,variableAllow:varA=0,periodYear,periodMonth}=state;
+            const{att,basic:basicRaw,hraPct:hPct,daPct:dPct,gradePay:gpPct,variableAllow:varA=0,periodYear,periodMonth,attendanceRaw}=state;
             const basic=+basicRaw||0;
             // Fixed allowance = HRA(50%) + DA(65%) + GradePay(30%) of basic
             const hra=+(basic*(+hPct||50)/100).toFixed(2);
@@ -3468,10 +3470,22 @@
             // Leave deductions
             // Approved leave: 50% of daily wage per day deducted
             const alDeduct=+((c.ApprovedLeave||0)*dailyWage*0.5).toFixed(2);
-            // Unapproved leave: configurable multiplier × daily wage per day deducted
-            // Default 2× = no pay + one full day penalty. Settable via Settings.
+            // Unapproved leave: split into regular and no-show.
+            // Regular UL = configurable multiplier (default 1× = just no pay for that day).
+            // No-show = always 2× (daily wage + one full day penalty) — tech marked Ready
+            // but didn't report to allocated project.
             const ulMultiplier = parseFloat(settings?.unapprovedAbsenceMultiplier) || 2;
-            const ulDeduct=+((c.UnApprovedLeave||0)*dailyWage*ulMultiplier).toFixed(2);
+            // Count no-show days from attendance entries with noShowPenalty flag
+            // within the current pay period (26th prev month → 25th this month).
+            const _periodDates = getTechWagePeriodDates(periodYear, periodMonth);
+            const _periodDateSet = new Set(_periodDates.map(d => d.toISOString().split('T')[0]));
+            const noShowDays = (attendanceRaw || []).filter(a =>
+                a.status === 'UnApprovedLeave' && a.noShowPenalty && _periodDateSet.has(a.date)
+            ).length;
+            const regularULDays = Math.max(0, (c.UnApprovedLeave||0) - noShowDays);
+            const ulDeductRegular = +(regularULDays * dailyWage * ulMultiplier).toFixed(2);
+            const ulDeductNoShow  = +(noShowDays * dailyWage * 2).toFixed(2);
+            const ulDeduct = +(ulDeductRegular + ulDeductNoShow).toFixed(2);
             // Gross = all earned wages + allowances - leave deductions
             // Variable is already embedded in dailyWage so not added separately
 
@@ -3520,7 +3534,8 @@
                 {sec:'Threshold',name:`Days 21+ allowance (${daysAbove20} days × DW×0.5×1.3 = DW×0.65)`,days:daysAbove20,rate:+(dailyWage*0.65).toFixed(2),amt:t20,show:daysAbove20>0},
                 {sec:'Allowance',name:'Travel Allowance (incl. in Gross — subject to TDS)',days:null,rate:+(+state.travelAllow||4000),amt:+(+state.travelAllow||4000),show:true},
                 {sec:'Deduct',name:`Approved Leave Deduction (50% × ${c.ApprovedLeave||0} days)`,days:c.ApprovedLeave||0,rate:+(dailyWage*0.5).toFixed(2),amt:-alDeduct,show:(c.ApprovedLeave||0)>0},
-                {sec:'Deduct',name:`Unapproved Leave Deduction (${ulMultiplier}× DW × ${c.UnApprovedLeave||0} days)`,days:c.UnApprovedLeave||0,rate:+(dailyWage*ulMultiplier).toFixed(2),amt:-ulDeduct,show:(c.UnApprovedLeave||0)>0},
+                {sec:'Deduct',name:`Unapproved Leave (${ulMultiplier}× DW × ${regularULDays} days)`,days:regularULDays,rate:+(dailyWage*ulMultiplier).toFixed(2),amt:-ulDeductRegular,show:regularULDays>0},
+                {sec:'Deduct',name:`No-Show Penalty (2× DW × ${noShowDays} days — Ready but didn't report)`,days:noShowDays,rate:+(dailyWage*2).toFixed(2),amt:-ulDeductNoShow,show:noShowDays>0},
                 {sec:'OT',name:`OT Ex-Gratia (${totalOTHours.toFixed(1)}h beyond 22:00 × DW/10×2 = ${otRate.toFixed(2)}/hr)`,days:null,rate:+otRate.toFixed(2),amt:otAmt,show:otAmt>0},
             ].filter(r=>r.show);
             return{c,eng,sbd,basic,hra,da,gp,fixedAllow,daysInMonth,dailyWage,standbyWage,rows,gross,varA:+varA||0,daysAbove15,daysIn1520,daysAbove20,t15,t20,otAmt,otRate,hourlyRate,totalOTHours,otBreakdown};
@@ -22742,6 +22757,121 @@
                 </div>`;
             })()}
 
+            ${(() => {
+                // ── Technician Readiness Review Panel ──────────────────
+                // Shows pending leave requests and not-well reports from
+                // technicians who used the self-service PIN login today.
+                // Office can approve/reject each, set paidTillDate for
+                // extended sick leave, or flag no-shows.
+                const today = new Date().toISOString().split('T')[0];
+                const monthPrefix = today.substring(0, 7);
+                const maxPaidSick = parseInt(settings?.techMaxPaidSickDays) || 2;
+
+                // Collect all pending readiness entries from all techs
+                const pendingItems = [];
+                const todayReady = [];
+                (staff || []).forEach(s => {
+                    if (s.staffType !== 'Technician') return;
+                    const entries = s.techReadiness || [];
+                    const todayEntry = entries.find(r => r.date === today);
+                    if (!todayEntry) {
+                        // Not marked today — potential unapproved absence
+                        todayReady.push({ staff: s, status: 'UNMARKED', entry: null });
+                        return;
+                    }
+                    if (todayEntry.status === 'READY') {
+                        todayReady.push({ staff: s, status: 'READY', entry: todayEntry });
+                    }
+                    if (todayEntry.status === 'LEAVE_REQUEST' || todayEntry.status === 'NOT_WELL') {
+                        const sickThisMonth = entries.filter(r => r.date && r.date.startsWith(monthPrefix) && r.status === 'NOT_WELL').length;
+                        pendingItems.push({
+                            staff: s,
+                            entry: todayEntry,
+                            sickThisMonth,
+                            exceedsLimit: todayEntry.status === 'NOT_WELL' && sickThisMonth > maxPaidSick
+                        });
+                    }
+                });
+
+                if (!pendingItems.length && !todayReady.length) return '';
+
+                const pendingHTML = pendingItems.length ? pendingItems.map(p => {
+                    const e = p.entry;
+                    const isNW = e.status === 'NOT_WELL';
+                    const statusBg = isNW ? '#fff7ed' : '#ede9fe';
+                    const statusColor = isNW ? '#9a3412' : '#5b21b6';
+                    const statusIcon = isNW ? '🤒' : '📋';
+                    const statusLabel = isNW ? 'Not Well' : 'Leave Request';
+                    const approved = e.officeStatus === 'APPROVED';
+                    const rejected = e.officeStatus === 'REJECTED';
+
+                    return `<div class="border rounded-xl p-3 mb-2" style="background:${statusBg};border-color:${statusColor}30">
+                        <div class="flex justify-between items-start mb-2">
+                            <div>
+                                <span class="font-bold text-sm" style="color:${statusColor}">${statusIcon} ${p.staff.name}</span>
+                                <span class="text-[10px] text-gray-500 ml-2">${p.staff.designation || ''} · ${p.staff.staffID}</span>
+                                <span class="ml-2 text-xs font-semibold px-2 py-0.5 rounded-full" style="background:${statusColor}20;color:${statusColor}">${statusLabel}</span>
+                            </div>
+                            <div class="text-[10px] text-gray-500">${e.markedAt ? new Date(e.markedAt).toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit'}) : ''}</div>
+                        </div>
+                        ${e.reason ? `<p class="text-xs text-gray-700 mb-1"><strong>Reason:</strong> ${e.reason}</p>` : ''}
+                        ${isNW ? `
+                            ${e.temperature ? `<span class="text-[10px] bg-white rounded px-2 py-0.5 mr-1">🌡 ${e.temperature}°F</span>` : ''}
+                            ${e.bloodPressure ? `<span class="text-[10px] bg-white rounded px-2 py-0.5 mr-1">💉 ${e.bloodPressure}</span>` : ''}
+                            ${e.medication ? `<span class="text-[10px] bg-white rounded px-2 py-0.5 mr-1">💊 ${e.medication}</span>` : ''}
+                            ${e.doctorAdvice ? `<p class="text-[10px] text-gray-600 mt-1">👨‍⚕️ ${e.doctorAdvice}</p>` : ''}
+                            <p class="text-[10px] mt-1 ${p.exceedsLimit ? 'text-red-600 font-bold' : 'text-amber-700'}">
+                                Sick days this month: ${p.sickThisMonth} of ${maxPaidSick} paid limit
+                                ${p.exceedsLimit ? ' ⚠️ EXCEEDED — no pay unless approved below' : ''}
+                            </p>
+                        ` : `
+                            ${e.leaveFrom ? `<p class="text-[10px] text-gray-600">📅 ${e.leaveFrom} to ${e.leaveTo || e.leaveFrom}</p>` : ''}
+                            ${e.leaveLocation ? `<p class="text-[10px] text-gray-600">📍 ${e.leaveLocation}</p>` : ''}
+                            ${e.alternateContactName ? `<p class="text-[10px] text-gray-600">📞 ${e.alternateContactName}${e.alternateContactPhone ? ' — ' + e.alternateContactPhone : ''}</p>` : ''}
+                        `}
+                        ${e.nextReportingDate ? `<p class="text-[10px] text-gray-600">📅 Next reporting: <strong>${e.nextReportingDate}</strong></p>` : ''}
+                        <div class="flex items-center gap-2 mt-2 flex-wrap">
+                            ${approved ? `<span class="text-xs font-bold text-green-700 bg-green-100 px-3 py-1 rounded-lg">✓ Approved</span>`
+                            : rejected ? `<span class="text-xs font-bold text-red-700 bg-red-100 px-3 py-1 rounded-lg">✕ Rejected</span>`
+                            : `<button onclick="_approveReadiness('${p.staff.staffID}','${e.date}')" class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-green-600 text-white hover:bg-green-700" style="cursor:pointer">✓ Approve</button>
+                               <button onclick="_rejectReadiness('${p.staff.staffID}','${e.date}')" class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-red-100 text-red-700 hover:bg-red-200 border border-red-300" style="cursor:pointer">✕ Reject → Unapproved Leave</button>`}
+                            ${isNW && p.exceedsLimit && !approved && !rejected ? `
+                                <span class="text-[10px] text-gray-500">Paid till:</span>
+                                <input type="date" value="${e.paidTillDate || ''}" onchange="_setPaidTillDate('${p.staff.staffID}','${e.date}',this.value)" class="text-xs px-2 py-1 border rounded" style="max-width:140px"/>
+                            ` : ''}
+                        </div>
+                    </div>`;
+                }).join('') : '';
+
+                // Today's readiness summary — who's Ready, who's unmarked
+                const readySummaryHTML = todayReady.length ? `
+                    <div class="mt-3 pt-3 border-t border-gray-200">
+                        <p class="text-xs font-semibold text-gray-600 mb-2">Today's Readiness (${today})</p>
+                        <div class="flex flex-wrap gap-2">
+                            ${todayReady.map(r => {
+                                const color = r.status === 'READY' ? '#15803d' : '#dc2626';
+                                const icon = r.status === 'READY' ? '✅' : '⚠️';
+                                const label = r.status === 'READY' ? 'Ready' : 'Not Marked';
+                                return `<span class="text-[10px] font-medium px-2 py-1 rounded-lg" style="background:${color}10;color:${color};border:1px solid ${color}30">
+                                    ${icon} ${r.staff.name} — ${label}
+                                    ${r.status === 'UNMARKED' ? `<button onclick="_markUnmarkedAsUnapproved('${r.staff.staffID}')" class="ml-1 text-[9px] underline" style="cursor:pointer;color:#dc2626">Mark U/L</button>` : ''}
+                                    ${r.status === 'READY' ? `<button onclick="_flagNoShow('${r.staff.staffID}')" class="ml-1 text-[9px] underline" style="cursor:pointer;color:#dc2626" title="Ready but didn't report to allocated project">Flag No-Show</button>` : ''}
+                                </span>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                ` : '';
+
+                return `<div class="bg-gradient-to-br from-amber-50 to-orange-50 border-2 border-amber-300 rounded-2xl p-4 mb-6">
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="font-bold text-amber-900">👷 Technician Readiness Review</h3>
+                        <span class="text-xs text-amber-700">${pendingItems.filter(p => !p.entry.officeStatus || p.entry.officeStatus === 'PENDING').length} pending</span>
+                    </div>
+                    ${pendingHTML || '<p class="text-xs text-gray-500 italic">No pending leave or not-well requests today.</p>'}
+                    ${readySummaryHTML}
+                </div>`;
+            })()}
+
             <!-- Sub-tabs — shown based on role permissions (Settings → Role Permissions) -->
             ${(() => {
                 const allowedTabs = ['list','attendance','documents','payslip'].filter(t => _canAccessSub('staff', t));
@@ -26977,6 +27107,126 @@ ${'─'.repeat(50)}
             _concurEndEdit();
             closeStaffModal();
             renderView();
+        }
+
+        // ── Technician Readiness Review Actions ─────────────────────
+        // Called from the review panel in the Staff section. Each
+        // function updates the techReadiness entry + attendance on the
+        // staff record, saves, and re-renders the staff view.
+
+        async function _approveReadiness(staffID, date) {
+            const s = staff.find(x => x.staffID === staffID);
+            if (!s) return;
+            const entry = (s.techReadiness || []).find(r => r.date === date);
+            if (!entry) return;
+            entry.officeStatus = 'APPROVED';
+            entry.reviewedAt = new Date().toISOString();
+            // For Leave Request: attendance stays as ApprovedLeave (already set by tech)
+            // For Not Well: attendance stays as NotWell (wage calc handles paid/unpaid via limit)
+            _showToast(`✓ ${s.name}'s ${entry.status === 'NOT_WELL' ? 'sick leave' : 'leave request'} approved`, '#15803d');
+            await saveData('staff');
+            renderStaff(document.getElementById('mainContent'));
+        }
+
+        async function _rejectReadiness(staffID, date) {
+            const s = staff.find(x => x.staffID === staffID);
+            if (!s) return;
+            const entry = (s.techReadiness || []).find(r => r.date === date);
+            if (!entry) return;
+            entry.officeStatus = 'REJECTED';
+            entry.reviewedAt = new Date().toISOString();
+            // On rejection, change attendance from ApprovedLeave/NotWell → UnApprovedLeave
+            if (Array.isArray(s.attendance)) {
+                const att = s.attendance.find(a => a.date === date);
+                if (att) {
+                    att.status = 'UnApprovedLeave';
+                    att._autoByTechSS = false;   // office override
+                }
+            }
+            _showToast(`✕ ${s.name}'s request rejected → Unapproved Leave`, '#dc2626');
+            await saveData('staff');
+            renderStaff(document.getElementById('mainContent'));
+        }
+
+        async function _setPaidTillDate(staffID, date, paidTillDate) {
+            const s = staff.find(x => x.staffID === staffID);
+            if (!s) return;
+            const entry = (s.techReadiness || []).find(r => r.date === date);
+            if (!entry) return;
+            entry.paidTillDate = paidTillDate;
+            _showToast(`Paid standby wage extended till ${paidTillDate} for ${s.name}`, '#0d7c66');
+            await saveData('staff');
+        }
+
+        async function _markUnmarkedAsUnapproved(staffID) {
+            const s = staff.find(x => x.staffID === staffID);
+            if (!s) return;
+            const today = new Date().toISOString().split('T')[0];
+            // Add readiness entry
+            if (!s.techReadiness) s.techReadiness = [];
+            s.techReadiness = s.techReadiness.filter(r => r.date !== today);
+            s.techReadiness.push({
+                date: today,
+                status: 'UNMARKED',
+                markedAt: new Date().toISOString(),
+                officeStatus: 'AUTO_UNAPPROVED',
+                reason: 'Not marked by 09:00 — auto unapproved absence'
+            });
+            // Add attendance
+            if (!s.attendance) s.attendance = [];
+            const existing = s.attendance.find(a => a.date === today);
+            if (existing) {
+                existing.status = 'UnApprovedLeave';
+                existing._autoByTechSS = false;
+            } else {
+                s.attendance.push({ date: today, status: 'UnApprovedLeave', _autoByTechSS: false, enteredAt: new Date().toISOString() });
+            }
+            _showToast(`⚠️ ${s.name} marked as Unapproved Leave (not marked by 09:00)`, '#dc2626');
+            await saveData('staff');
+            renderStaff(document.getElementById('mainContent'));
+        }
+
+        async function _flagNoShow(staffID) {
+            if (!confirm('This technician marked Ready but did not report to the allocated project. This will:\n\n• Mark attendance as Unapproved Leave with 2× deduction\n• Issue a warning\n• Add 30% weightage on promotion/increment proposal\n\nContinue?')) return;
+            const s = staff.find(x => x.staffID === staffID);
+            if (!s) return;
+            const today = new Date().toISOString().split('T')[0];
+            // Update readiness
+            const entry = (s.techReadiness || []).find(r => r.date === today);
+            if (entry) {
+                entry.officeStatus = 'NO_SHOW';
+                entry.reviewedAt = new Date().toISOString();
+            }
+            // Mark attendance as UnApprovedLeave + noShowPenalty flag
+            if (!s.attendance) s.attendance = [];
+            const att = s.attendance.find(a => a.date === today);
+            if (att) {
+                att.status = 'UnApprovedLeave';
+                att.noShowPenalty = true;
+                att._autoByTechSS = false;
+            } else {
+                s.attendance.push({
+                    date: today, status: 'UnApprovedLeave',
+                    noShowPenalty: true, _autoByTechSS: false,
+                    enteredAt: new Date().toISOString()
+                });
+            }
+            // Issue warning
+            if (!s.warnings) s.warnings = [];
+            s.warnings.push({
+                date: today,
+                type: 'NO_SHOW',
+                description: 'Marked Ready but did not report to allocated project',
+                warningNumber: s.warnings.filter(w => w.type === 'NO_SHOW').length + 1,
+                acknowledged: false
+            });
+            const totalNoShows = s.warnings.filter(w => w.type === 'NO_SHOW').length;
+            _showToast(`🚨 ${s.name}: No-Show flagged — Warning #${totalNoShows} issued (2× deduction applied)`, '#dc2626', 5000);
+            if (totalNoShows >= 2) {
+                alert(`⚠️ ${s.name} has received ${totalNoShows} no-show warnings.\n\nPer policy, 2+ warnings trigger disciplinary action or termination review.\n\nThis also carries 30% weightage on promotion/increment proposals.`);
+            }
+            await saveData('staff');
+            renderStaff(document.getElementById('mainContent'));
         }
 
         function editStaff(id) { const s = staff.find(x => x.staffID === id); if (s) openStaffModal(s); }
