@@ -2625,6 +2625,24 @@
                     continue;
                 }
 
+                // ── EMI PAUSE: office can set loan.pauseUntil = '2026-12'
+                // to skip deductions through Dec 2026. The loan extends
+                // accordingly — installments don't get consumed during the
+                // pause. The employee can still make manual repayments
+                // during this period (partial lump-sum payments land in
+                // manualRepayments[] and reduce the balance without consuming
+                // an EMI slot, exactly as before).
+                if (loan.pauseUntil) {
+                    const [pY, pM] = loan.pauseUntil.split('-').map(Number);
+                    const pauseKey = pY * 12 + pM;
+                    if (periodKey <= pauseKey) {
+                        out.push({ loan, deductionAmount: 0, deferred: false,
+                                   reason: 'EMI paused until ' + loan.pauseUntil +
+                                           (loan.pauseReason ? ' — ' + loan.pauseReason : '') });
+                        continue;
+                    }
+                }
+
                 // Already deducted this period? (idempotency — re-running compute shouldn't double-count)
                 const alreadyLogged = (loan.deductionLog || []).some(d =>
                     parseInt(d.month) === month && parseInt(d.year) === year
@@ -12141,7 +12159,7 @@
                     <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${e.description||''}">${e.description||'—'}</div>
                     ${_ledgerBadge(e.ledgerAccountId)}
                 </td>
-                <td class="px-3 py-2 text-right font-semibold" title="Original amount payable on the bill (before payments). Payment status is shown separately in the Status column.">${fmt(e.netPayable ?? e.balanceAmt ?? e.billAmtINR)}</td>
+                <td class="px-3 py-2 text-right font-semibold" title="Amount payable to the vendor after all deductions (PF/PT/ESIC/TDS/Credit Note). Shows the outstanding balance when payments have been made.">${fmt(e.balanceAmt ?? e.netPayable ?? e.billAmtINR)}</td>
                 <td class="px-3 py-2 text-center">
                     <span class="px-2 py-0.5 rounded-full text-xs ${statusCls}">${e.payStatus}</span>
                     ${(() => {
@@ -25704,6 +25722,23 @@ ${'─'.repeat(50)}
                                 </select>
                                 <input type="number" min="2020" max="2100" step="1" value="${l.firstDeductYear || new Date().getFullYear()}" onchange="updateStaffLoanField(${idx},'firstDeductYear',parseInt(this.value))" class="w-16 px-1 py-1 border rounded text-xs" />
                             </div>
+                        </div>
+                        <!-- EMI Pause — allows office to temporarily skip salary
+                             deductions for N months. Employee can still make
+                             manual repayments during the pause. The loan term
+                             extends automatically since skipped months don't
+                             consume installment slots. -->
+                        <div>
+                            <label class="block text-[10px] font-semibold text-gray-600 mb-0.5">⏸️ Pause EMI Until <span class="font-normal text-gray-400">(optional)</span></label>
+                            <div class="flex gap-1 items-center">
+                                <input type="month" value="${l.pauseUntil || ''}"
+                                    onchange="updateStaffLoanField(${idx},'pauseUntil',this.value)"
+                                    class="flex-1 px-2 py-1 border rounded text-xs"
+                                    placeholder="YYYY-MM" />
+                                ${l.pauseUntil ? `<button onclick="updateStaffLoanField(${idx},'pauseUntil','');updateStaffLoanField(${idx},'pauseReason','')" class="text-[10px] text-red-600 hover:underline px-1" title="Resume EMI deductions">✕ Clear</button>` : ''}
+                            </div>
+                            ${l.pauseUntil ? `<input type="text" value="${(l.pauseReason||'').replace(/"/g,'&quot;')}" placeholder="Reason for pause (e.g. employee request, partial repayment instead)" onchange="updateStaffLoanField(${idx},'pauseReason',this.value)" class="w-full mt-1 px-2 py-1 border rounded text-xs" />
+                            <p class="text-[9px] text-amber-600 mt-0.5">⏸️ EMI paused — no salary deduction until ${l.pauseUntil}. Manual repayments still reduce balance.</p>` : ''}
                         </div>
                     </div>
                     <div class="grid grid-cols-4 gap-2 text-[11px] mb-2">
