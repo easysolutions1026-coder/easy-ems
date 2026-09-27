@@ -2376,6 +2376,16 @@
                     Sign in with Google
                 </button>
                 <p class="text-xs mt-4" style="color:var(--muted)">Field personnel access only</p>
+
+                <div style="border-top:1px solid #e5e7eb;margin:20px 0 16px;position:relative">
+                    <span style="position:absolute;top:-10px;left:50%;transform:translateX(-50%);background:#fff;padding:0 12px;font-size:11px;color:#9ca3af">or</span>
+                </div>
+                <button onclick="_techSelfServiceLogin()" class="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-semibold text-sm transition-all"
+                    style="background:#fff7ed;color:#9a3412;border:2px solid #fed7aa;cursor:pointer"
+                    onmouseover="this.style.background='#ffedd5'" onmouseout="this.style.background='#fff7ed'">
+                    👷 Technician Self-Service (PIN Login)
+                </button>
+                <p class="text-[10px] mt-2" style="color:var(--muted)">Daily readiness, leave requests, attendance view</p>
             </div>
         </div>`;
     }
@@ -8441,6 +8451,478 @@
     async function dayEntryPDF(wlID, entryID) {
         return wlPDF(wlID, entryID);
     }
+    // ════════════════════════════════════════════════════════════════
+    // TECHNICIAN SELF-SERVICE MODULE
+    // ════════════════════════════════════════════════════════════════
+    // Separate login flow (PIN-based, no Google auth needed) for
+    // technicians to mark daily readiness, request leave, report
+    // not-well status, and view their own attendance (read-only).
+    //
+    // Data flows:
+    //   Tech marks readiness → writes to staff.attendance[] via Cloud
+    //   Run API (same array the office uses) → attendance status auto-
+    //   updates → wage calc picks it up on the next payslip run.
+    //
+    // The readiness record also creates a techReadiness entry on the
+    // staff record for office review (leave approval, not-well tracking).
+    // ════════════════════════════════════════════════════════════════
+
+    let _techSS = null;   // { staffID, pin, name, staffRec } — logged-in technician
+    const TECH_API = (typeof CLOUD_RUN_BASE !== 'undefined' ? CLOUD_RUN_BASE : 'https://ems-backend-43lhgkm2la-el.a.run.app') + '/api/tech/';
+
+    // ── PIN LOGIN SCREEN ──────────────────────────────────────────
+    async function _techSelfServiceLogin() {
+        // Fetch technician names (no auth needed — just names + IDs)
+        let techs = [];
+        try {
+            const res = await fetch(TECH_API + 'staff-list');
+            if (res.ok) techs = await res.json();
+        } catch (e) { console.warn('Tech staff-list fetch error:', e); }
+        if (!techs.length) {
+            alert('Could not load technician list. Check your internet connection and try again.');
+            return;
+        }
+        document.getElementById('app').innerHTML = `
+        <div class="min-h-screen flex flex-col items-center justify-center p-6" style="background:linear-gradient(160deg,#0f2b4c 0%,#164e63 60%,#9a3412 100%)">
+            <div class="card p-8 w-full max-w-sm shadow-2xl">
+                <div class="text-center mb-6">
+                    <div style="font-size:48px;margin-bottom:4px">👷</div>
+                    <h1 class="text-xl font-bold" style="color:var(--navy)">Technician Self-Service</h1>
+                    <p class="text-xs" style="color:var(--muted)">Daily readiness · Leave · Attendance</p>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-xs font-semibold mb-1" style="color:var(--navy)">Select Your Name</label>
+                    <select id="techSSName" class="w-full px-3 py-2.5 border-2 rounded-xl text-sm" style="border-color:var(--border)">
+                        <option value="">— Select —</option>
+                        ${techs.map(s => `<option value="${s.staffID}">${s.name}${s.designation ? ' · ' + s.designation : ''}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-xs font-semibold mb-1" style="color:var(--navy)">Enter PIN (4-digit)</label>
+                    <input type="password" id="techSSPin" maxlength="4" inputmode="numeric" pattern="[0-9]*"
+                        class="w-full px-3 py-2.5 border-2 rounded-xl text-sm text-center tracking-[0.5em] text-lg font-bold"
+                        style="border-color:var(--border)" placeholder="• • • •"
+                        onkeydown="if(event.key==='Enter')_techSSVerify()"/>
+                </div>
+                <div id="techSSError" class="text-red-600 text-xs text-center mb-3 hidden"></div>
+                <button onclick="_techSSVerify()" class="w-full px-4 py-3 rounded-xl font-semibold text-sm text-white" style="background:#ea580c;cursor:pointer">
+                    🔐 Login
+                </button>
+                <button onclick="renderLogin()" class="btn-secondary w-full text-xs mt-3">← Back to Main Login</button>
+            </div>
+        </div>`;
+        document.getElementById('techSSName').focus();
+    }
+
+    async function _techSSVerify() {
+        const sel = document.getElementById('techSSName');
+        const pin = document.getElementById('techSSPin');
+        const err = document.getElementById('techSSError');
+        if (!sel.value) { err.textContent = 'Please select your name'; err.classList.remove('hidden'); return; }
+        if (!pin.value || pin.value.length !== 4) { err.textContent = 'Enter your 4-digit PIN'; err.classList.remove('hidden'); return; }
+        try {
+            const res = await fetch(TECH_API + 'login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ staffID: sel.value, pin: pin.value })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                const msg = data.error === 'INVALID_PIN' ? 'Incorrect PIN. Contact office if you forgot your PIN.'
+                          : data.error === 'ACCOUNT_LOCKED' ? data.detail || 'Too many attempts. Try again later.'
+                          : data.error === 'STAFF_NOT_FOUND' ? 'Staff not found.'
+                          : 'Login failed. Try again.';
+                err.textContent = msg;
+                err.classList.remove('hidden');
+                pin.value = '';
+                pin.focus();
+                return;
+            }
+            _techSS = { staffID: sel.value, pin: pin.value, name: data.staff.name, staffRec: data.staff };
+            _techSSRenderDashboard();
+        } catch (e) {
+            err.textContent = 'Network error — check internet connection';
+            err.classList.remove('hidden');
+        }
+    }
+
+    // ── DASHBOARD ─────────────────────────────────────────────────
+    function _techSSRenderDashboard() {
+        const s = _techSS.staffRec;
+        const today = new Date().toISOString().split('T')[0];
+        const now = new Date();
+        const todayAtt = (s.attendance || []).find(a => a.date === today);
+        const readiness = (s.techReadiness || []).find(r => r.date === today);
+        const hour = now.getHours();
+        const canMarkReadiness = hour < 9 || !readiness;   // before 09:00, or not yet marked
+        const monthLabel = now.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+
+        // Count sick days this month
+        const monthPrefix = today.substring(0, 7);
+        const sickDaysThisMonth = (s.techReadiness || []).filter(r =>
+            r.date && r.date.startsWith(monthPrefix) && r.status === 'NOT_WELL'
+        ).length;
+        const maxPaidSick = 2;   // fallback; actual comes from settings
+
+        document.getElementById('app').innerHTML = `
+        <div class="min-h-screen" style="background:#f8fafc">
+            <!-- Header -->
+            <header style="background:#9a3412;padding:14px 16px;position:sticky;top:0;z-index:30">
+                <div class="flex items-center justify-between max-w-lg mx-auto">
+                    <div class="flex items-center gap-2">
+                        <span style="font-size:22px">👷</span>
+                        <div>
+                            <h1 class="text-white font-bold text-sm">${_techSS.name}</h1>
+                            <p class="text-orange-200 text-[10px]">Technician Self-Service</p>
+                        </div>
+                    </div>
+                    <button onclick="_techSSLogout()" class="text-orange-200 text-xs hover:text-white">Logout ↗</button>
+                </div>
+            </header>
+
+            <div class="max-w-lg mx-auto p-4 space-y-4">
+                <!-- Today's Status Card -->
+                <div class="card p-4">
+                    <h2 class="font-bold text-sm mb-3" style="color:var(--navy)">📅 Today — ${now.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' })}</h2>
+                    <div class="flex gap-3 mb-3">
+                        <div class="flex-1 rounded-xl p-3 text-center" style="background:${readiness ? (readiness.status === 'READY' ? '#dcfce7' : readiness.status === 'NOT_WELL' ? '#fff7ed' : '#ede9fe') : '#f1f5f9'}">
+                            <p class="text-[10px] font-semibold text-gray-500 mb-1">Readiness</p>
+                            <p class="text-sm font-bold" style="color:${readiness ? (readiness.status === 'READY' ? '#15803d' : readiness.status === 'NOT_WELL' ? '#9a3412' : '#5b21b6') : '#6b7280'}">
+                                ${readiness ? (readiness.status === 'READY' ? '✅ Ready' : readiness.status === 'NOT_WELL' ? '🤒 Not Well' : '📋 Leave Requested') : (hour >= 9 ? '⚠️ Not Marked' : '⏳ Pending')}
+                            </p>
+                        </div>
+                        <div class="flex-1 rounded-xl p-3 text-center" style="background:${todayAtt ? '#dbeafe' : '#f1f5f9'}">
+                            <p class="text-[10px] font-semibold text-gray-500 mb-1">Attendance</p>
+                            <p class="text-sm font-bold" style="color:${todayAtt ? '#1d4ed8' : '#6b7280'}">
+                                ${todayAtt ? todayAtt.status : '—'}
+                            </p>
+                        </div>
+                    </div>
+                    ${sickDaysThisMonth > 0 ? `<p class="text-[11px] text-amber-700 bg-amber-50 rounded px-2 py-1 mb-3">🤒 Sick days this month: <strong>${sickDaysThisMonth}</strong> of ${maxPaidSick} paid limit${sickDaysThisMonth > maxPaidSick ? ' — <span class="text-red-600">exceeded, no pay beyond limit</span>' : ''}</p>` : ''}
+
+                    ${canMarkReadiness ? `
+                    <!-- Readiness Buttons -->
+                    <div class="space-y-2">
+                        <button onclick="_techSSMarkReady()" class="w-full px-4 py-3 rounded-xl font-semibold text-sm text-white flex items-center justify-center gap-2" style="background:#15803d;cursor:pointer">
+                            ✅ I am Ready for Duty
+                        </button>
+                        <div class="grid grid-cols-2 gap-2">
+                            <button onclick="_techSSShowLeaveForm()" class="px-3 py-2.5 rounded-xl font-semibold text-xs flex items-center justify-center gap-1" style="background:#ede9fe;color:#5b21b6;border:1px solid #c4b5fd;cursor:pointer">
+                                📋 Request Leave
+                            </button>
+                            <button onclick="_techSSShowNotWellForm()" class="px-3 py-2.5 rounded-xl font-semibold text-xs flex items-center justify-center gap-1" style="background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;cursor:pointer">
+                                🤒 Not Well
+                            </button>
+                        </div>
+                    </div>` : `
+                    <div class="text-center py-2">
+                        <p class="text-xs text-green-700 font-semibold">✓ Readiness already marked for today</p>
+                        ${readiness ? `<p class="text-[10px] text-gray-500 mt-1">Marked at ${readiness.markedAt ? new Date(readiness.markedAt).toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit'}) : '—'}</p>` : ''}
+                    </div>`}
+                </div>
+
+                <!-- Month Attendance View (read-only) -->
+                <div class="card p-4">
+                    <h2 class="font-bold text-sm mb-3" style="color:var(--navy)">📊 Attendance — ${monthLabel}</h2>
+                    ${_techSSRenderMonthGrid(s, now.getFullYear(), now.getMonth() + 1)}
+                </div>
+
+                <!-- Recent Readiness Log -->
+                <div class="card p-4">
+                    <h2 class="font-bold text-sm mb-3" style="color:var(--navy)">📜 Recent Readiness Log</h2>
+                    ${_techSSRenderReadinessLog(s)}
+                </div>
+            </div>
+        </div>`;
+    }
+
+    // Month attendance grid — read-only calendar view
+    function _techSSRenderMonthGrid(staff, year, month) {
+        const daysInMonth = new Date(year, month, 0).getDate();
+        const atts = (staff.attendance || []).filter(a => {
+            if (!a.date) return false;
+            const [y, m] = a.date.split('-').map(Number);
+            return y === year && m === month;
+        });
+        const attMap = {};
+        atts.forEach(a => { attMap[parseInt(a.date.split('-')[2])] = a.status; });
+
+        const ATT_COLORS = {
+            Working: '#15803d', StandBy: '#b45309', Outstation: '#1d4ed8',
+            Anchorage: '#0e7490', Sailing: '#4338ca', ApprovedLeave: '#7c3aed',
+            UnApprovedLeave: '#dc2626', NotWell: '#ea580c'
+        };
+        const ATT_SHORT = {
+            Working: 'W', StandBy: 'SB', Outstation: 'OUT',
+            Anchorage: 'ANC', Sailing: 'SAL', ApprovedLeave: 'A/L',
+            UnApprovedLeave: 'U/L', NotWell: 'N/W'
+        };
+
+        let html = '<div class="grid grid-cols-7 gap-1 text-center text-[10px]">';
+        ['S','M','T','W','T','F','S'].forEach(d => { html += `<div class="font-bold text-gray-400 py-1">${d}</div>`; });
+        const firstDay = new Date(year, month - 1, 1).getDay();
+        for (let i = 0; i < firstDay; i++) html += '<div></div>';
+        for (let d = 1; d <= daysInMonth; d++) {
+            const status = attMap[d] || '';
+            const color = ATT_COLORS[status] || '#d1d5db';
+            const label = ATT_SHORT[status] || (d <= new Date().getDate() && month === new Date().getMonth() + 1 && year === new Date().getFullYear() ? '—' : '');
+            html += `<div class="rounded py-1.5" style="background:${status ? color + '20' : '#f9fafb'};color:${status ? color : '#9ca3af'};font-weight:${status ? '700' : '400'}" title="${status || 'No record'}">
+                <div style="font-size:9px;color:#9ca3af">${d}</div>
+                <div>${label}</div>
+            </div>`;
+        }
+        html += '</div>';
+
+        // Summary counts
+        const counts = {};
+        atts.forEach(a => { counts[a.status] = (counts[a.status] || 0) + 1; });
+        if (Object.keys(counts).length) {
+            html += '<div class="flex flex-wrap gap-2 mt-3">';
+            Object.entries(counts).forEach(([status, count]) => {
+                html += `<span class="text-[10px] font-semibold px-2 py-0.5 rounded" style="background:${(ATT_COLORS[status]||'#999')}20;color:${ATT_COLORS[status]||'#999'}">${ATT_SHORT[status] || status}: ${count}d</span>`;
+            });
+            html += '</div>';
+        }
+        return html;
+    }
+
+    // Recent readiness log — last 10 entries
+    function _techSSRenderReadinessLog(staff) {
+        const entries = (staff.techReadiness || []).slice().sort((a, b) => (b.date || '').localeCompare(a.date || '')).slice(0, 10);
+        if (!entries.length) return '<p class="text-xs text-gray-400 italic">No readiness records yet.</p>';
+        return entries.map(r => {
+            const statusLabel = r.status === 'READY' ? '✅ Ready' : r.status === 'NOT_WELL' ? '🤒 Not Well' : '📋 Leave';
+            const statusColor = r.status === 'READY' ? '#15803d' : r.status === 'NOT_WELL' ? '#9a3412' : '#5b21b6';
+            const approvalBadge = r.officeStatus === 'APPROVED' ? '<span class="text-[9px] bg-green-100 text-green-700 px-1 rounded ml-1">Approved</span>'
+                : r.officeStatus === 'REJECTED' ? '<span class="text-[9px] bg-red-100 text-red-700 px-1 rounded ml-1">Rejected</span>'
+                : (r.status !== 'READY' ? '<span class="text-[9px] bg-amber-100 text-amber-700 px-1 rounded ml-1">Pending</span>' : '');
+            return `<div class="flex items-center justify-between py-2 border-b border-gray-100">
+                <div>
+                    <span class="text-xs font-semibold" style="color:${statusColor}">${statusLabel}</span>${approvalBadge}
+                    ${r.reason ? `<p class="text-[10px] text-gray-500 mt-0.5">${r.reason}</p>` : ''}
+                </div>
+                <div class="text-right">
+                    <p class="text-[10px] text-gray-600 font-medium">${r.date || '—'}</p>
+                    <p class="text-[9px] text-gray-400">${r.markedAt ? new Date(r.markedAt).toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit'}) : ''}</p>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    // ── MARK READY ────────────────────────────────────────────────
+    async function _techSSMarkReady() {
+        const today = new Date().toISOString().split('T')[0];
+        const readiness = {
+            date: today,
+            status: 'READY',
+            markedAt: new Date().toISOString(),
+            officeStatus: '',
+            reason: ''
+        };
+        await _techSSSave(readiness, null, '✅ Readiness marked — Ready for duty');
+    }
+
+    // ── LEAVE REQUEST FORM ────────────────────────────────────────
+    function _techSSShowLeaveForm() {
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('app').innerHTML = `
+        <div class="min-h-screen" style="background:#f8fafc">
+            <header style="background:#5b21b6;padding:14px 16px;position:sticky;top:0;z-index:30">
+                <div class="flex items-center justify-between max-w-lg mx-auto">
+                    <div class="flex items-center gap-2">
+                        <span style="font-size:22px">📋</span>
+                        <h1 class="text-white font-bold text-sm">Request Leave</h1>
+                    </div>
+                    <button onclick="_techSSRenderDashboard()" class="text-purple-200 text-xs">← Back</button>
+                </div>
+            </header>
+            <div class="max-w-lg mx-auto p-4">
+                <div class="card p-4 space-y-4">
+                    <div>
+                        <label class="block text-xs font-semibold mb-1" style="color:var(--navy)">Reason / Purpose <span class="text-red-500">*</span></label>
+                        <textarea id="tsLeaveReason" rows="2" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="e.g. Family function, personal work, etc."></textarea>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-semibold mb-1" style="color:var(--navy)">From Date <span class="text-red-500">*</span></label>
+                            <input type="date" id="tsLeaveFrom" value="${today}" class="w-full px-3 py-2 border rounded-lg text-sm"/>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold mb-1" style="color:var(--navy)">To Date <span class="text-red-500">*</span></label>
+                            <input type="date" id="tsLeaveTo" value="${today}" class="w-full px-3 py-2 border rounded-lg text-sm"/>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold mb-1" style="color:var(--navy)">Where are you going?</label>
+                        <input type="text" id="tsLeaveLocation" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="e.g. Trichy, native place"/>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-semibold mb-1" style="color:var(--navy)">Alternate Contact Name</label>
+                            <input type="text" id="tsLeaveAltName" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="e.g. Mr. Kumar"/>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold mb-1" style="color:var(--navy)">Alternate Phone</label>
+                            <input type="tel" id="tsLeaveAltPhone" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="9876543210" inputmode="numeric"/>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold mb-1" style="color:var(--navy)">Next Reporting Date <span class="text-red-500">*</span></label>
+                        <input type="date" id="tsLeaveNextDate" class="w-full px-3 py-2 border rounded-lg text-sm"/>
+                    </div>
+                    <button onclick="_techSSSubmitLeave()" class="w-full px-4 py-3 rounded-xl font-semibold text-sm text-white" style="background:#5b21b6;cursor:pointer">
+                        📋 Submit Leave Request
+                    </button>
+                </div>
+            </div>
+        </div>`;
+    }
+
+    async function _techSSSubmitLeave() {
+        const reason = document.getElementById('tsLeaveReason').value.trim();
+        const from = document.getElementById('tsLeaveFrom').value;
+        const to = document.getElementById('tsLeaveTo').value;
+        const nextDate = document.getElementById('tsLeaveNextDate').value;
+        if (!reason) { alert('Please enter a reason'); return; }
+        if (!from || !to || !nextDate) { alert('Please fill all date fields'); return; }
+
+        const today = new Date().toISOString().split('T')[0];
+        const readiness = {
+            date: today,
+            status: 'LEAVE_REQUEST',
+            markedAt: new Date().toISOString(),
+            officeStatus: 'PENDING',
+            reason: reason,
+            leaveFrom: from,
+            leaveTo: to,
+            leaveLocation: document.getElementById('tsLeaveLocation').value.trim(),
+            alternateContactName: document.getElementById('tsLeaveAltName').value.trim(),
+            alternateContactPhone: document.getElementById('tsLeaveAltPhone').value.trim(),
+            nextReportingDate: nextDate
+        };
+        const attendance = { date: today, status: 'ApprovedLeave' };
+        await _techSSSave(readiness, attendance, '📋 Leave request submitted — pending office approval');
+    }
+
+    // ── NOT WELL FORM ─────────────────────────────────────────────
+    function _techSSShowNotWellForm() {
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('app').innerHTML = `
+        <div class="min-h-screen" style="background:#f8fafc">
+            <header style="background:#9a3412;padding:14px 16px;position:sticky;top:0;z-index:30">
+                <div class="flex items-center justify-between max-w-lg mx-auto">
+                    <div class="flex items-center gap-2">
+                        <span style="font-size:22px">🤒</span>
+                        <h1 class="text-white font-bold text-sm">Report Not Well</h1>
+                    </div>
+                    <button onclick="_techSSRenderDashboard()" class="text-orange-200 text-xs">← Back</button>
+                </div>
+            </header>
+            <div class="max-w-lg mx-auto p-4">
+                <div class="card p-4 space-y-4">
+                    <div>
+                        <label class="block text-xs font-semibold mb-1" style="color:var(--navy)">Type of Illness <span class="text-red-500">*</span></label>
+                        <input type="text" id="tsNWIllness" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="e.g. Fever, cold, body pain"/>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-semibold mb-1" style="color:var(--navy)">Temperature (°F)</label>
+                            <input type="number" id="tsNWTemp" step="0.1" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="e.g. 101.2"/>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold mb-1" style="color:var(--navy)">Blood Pressure</label>
+                            <input type="text" id="tsNWBP" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="e.g. 130/85"/>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold mb-1" style="color:var(--navy)">Medication (if any)</label>
+                        <input type="text" id="tsNWMed" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="e.g. Paracetamol, Crocin"/>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-semibold mb-1" style="color:var(--navy)">Hospital / Clinic</label>
+                            <input type="text" id="tsNWHospital" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="(if visited)"/>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold mb-1" style="color:var(--navy)">Doctor's Advice</label>
+                            <input type="text" id="tsNWDoctor" class="w-full px-3 py-2 border rounded-lg text-sm" placeholder="e.g. Rest for 2 days"/>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold mb-1" style="color:var(--navy)">Next Reporting Date (expected) <span class="text-red-500">*</span></label>
+                        <input type="date" id="tsNWNextDate" class="w-full px-3 py-2 border rounded-lg text-sm"/>
+                    </div>
+                    <button onclick="_techSSSubmitNotWell()" class="w-full px-4 py-3 rounded-xl font-semibold text-sm text-white" style="background:#ea580c;cursor:pointer">
+                        🤒 Submit Not Well Report
+                    </button>
+                </div>
+            </div>
+        </div>`;
+    }
+
+    async function _techSSSubmitNotWell() {
+        const illness = document.getElementById('tsNWIllness').value.trim();
+        const nextDate = document.getElementById('tsNWNextDate').value;
+        if (!illness) { alert('Please describe the illness'); return; }
+        if (!nextDate) { alert('Please enter the expected next reporting date'); return; }
+
+        const today = new Date().toISOString().split('T')[0];
+        const readiness = {
+            date: today,
+            status: 'NOT_WELL',
+            markedAt: new Date().toISOString(),
+            officeStatus: 'PENDING',
+            reason: illness,
+            illnessType: illness,
+            temperature: document.getElementById('tsNWTemp').value.trim(),
+            bloodPressure: document.getElementById('tsNWBP').value.trim(),
+            medication: document.getElementById('tsNWMed').value.trim(),
+            hospitalName: document.getElementById('tsNWHospital').value.trim(),
+            doctorAdvice: document.getElementById('tsNWDoctor').value.trim(),
+            nextReportingDate: nextDate
+        };
+        const attendance = { date: today, status: 'NotWell' };
+        await _techSSSave(readiness, attendance, '🤒 Not Well report submitted — office will review');
+    }
+
+    // ── SAVE VIA /api/tech/readiness ENDPOINT ───────────────────
+    // Sends readiness + optional attendance to the backend. The
+    // backend verifies PIN, updates the staff record atomically,
+    // and returns the updated own-record so the dashboard refreshes
+    // with live data. No Google auth token needed.
+    async function _techSSSave(readiness, attendance, toastMsg) {
+        try {
+            const res = await fetch(TECH_API + 'readiness', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    staffID: _techSS.staffID,
+                    pin: _techSS.pin,
+                    readiness: readiness,
+                    attendance: attendance
+                })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                _showToast('⚠️ Could not save — ' + (data.detail || data.error || 'try again'), '#dc2626');
+                _techSSRenderDashboard();
+                return;
+            }
+            // Update local state with server response
+            _techSS.staffRec = data.staff;
+            _showToast(toastMsg, '#15803d');
+        } catch (e) {
+            console.error('Tech SS save error:', e);
+            _showToast('⚠️ Network error — check internet and try again', '#dc2626');
+        }
+        _techSSRenderDashboard();
+    }
+
+    function _techSSLogout() {
+        _techSS = null;
+        renderLogin();
+    }
+
     window.gapiLoaded = gapiLoaded;
     window.gisLoaded  = gisLoaded;
     renderLogin();

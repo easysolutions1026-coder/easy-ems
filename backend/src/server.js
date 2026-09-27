@@ -100,6 +100,199 @@ function enforceRoleAccess(req, res, next) {
 
   next();
 }
+
+// ════════════════════════════════════════════════════════════════
+// TECHNICIAN SELF-SERVICE API — PIN-based auth, no Google OAuth.
+//
+// These endpoints let technicians mark daily readiness, submit
+// leave/not-well requests, and view their own attendance using
+// only their staffID + 4-digit PIN. No Google account needed.
+//
+// Security model:
+//   - PIN is verified against the staff record in the database.
+//   - Rate-limited: 5 failed PIN attempts per staffID → 30-min lock.
+//   - Only the technician's OWN attendance and readiness data is
+//     accessible — no cross-staff reads, no financial data.
+//   - Writes are limited to techReadiness[] and attendance[] arrays
+//     on the staff record. All other fields are read-only.
+// ════════════════════════════════════════════════════════════════
+
+const _techPinFailures = new Map();  // staffID → { count, lockedUntil }
+const TECH_PIN_MAX_ATTEMPTS = 5;
+const TECH_PIN_LOCK_MINS = 30;
+
+const techRouter = express.Router();
+
+// POST /api/tech/login — verify PIN, return staff record (own data only)
+techRouter.post('/login', async (req, res) => {
+  try {
+    const { staffID, pin } = req.body || {};
+    if (!staffID || !pin) {
+      return res.status(400).json({ error: 'MISSING_FIELDS', detail: 'staffID and pin required' });
+    }
+
+    // Rate limit check
+    const fail = _techPinFailures.get(staffID);
+    if (fail && fail.lockedUntil && Date.now() < fail.lockedUntil) {
+      const minsLeft = Math.ceil((fail.lockedUntil - Date.now()) / 60000);
+      return res.status(429).json({
+        error: 'ACCOUNT_LOCKED',
+        detail: `Too many failed attempts. Try again in ${minsLeft} minute(s).`
+      });
+    }
+
+    // Read staff collection from DB
+    const staffRow = await prisma.collection.findUnique({ where: { name: 'staff' } });
+    const allStaff = staffRow?.data || [];
+    const staff = allStaff.find(s => s.staffID === staffID && s.status === 'Active');
+
+    if (!staff) {
+      return res.status(404).json({ error: 'STAFF_NOT_FOUND' });
+    }
+
+    // PIN check
+    const storedPin = String(staff.pin || staff.techPin || '');
+    if (storedPin !== String(pin)) {
+      // Increment failure counter
+      const current = _techPinFailures.get(staffID) || { count: 0, lockedUntil: null };
+      current.count++;
+      if (current.count >= TECH_PIN_MAX_ATTEMPTS) {
+        current.lockedUntil = Date.now() + TECH_PIN_LOCK_MINS * 60 * 1000;
+        current.count = 0;
+      }
+      _techPinFailures.set(staffID, current);
+      return res.status(401).json({ error: 'INVALID_PIN' });
+    }
+
+    // PIN correct — clear failures
+    _techPinFailures.delete(staffID);
+
+    // Return only the tech's own record (strip sensitive fields)
+    const safeStaff = {
+      staffID: staff.staffID,
+      name: staff.name,
+      staffType: staff.staffType,
+      designation: staff.designation,
+      attendance: staff.attendance || [],
+      techReadiness: staff.techReadiness || [],
+      registeredMobile: staff.registeredMobile || '',
+      warnings: staff.warnings || [],
+    };
+
+    res.json({ ok: true, staff: safeStaff });
+  } catch (err) {
+    console.error('[tech/login] error:', err);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
+// GET /api/tech/staff-list — return technician names + IDs only (for the
+// dropdown on the login screen). No PIN needed — names aren't sensitive.
+techRouter.get('/staff-list', async (req, res) => {
+  try {
+    const staffRow = await prisma.collection.findUnique({ where: { name: 'staff' } });
+    const allStaff = staffRow?.data || [];
+    const techs = allStaff
+      .filter(s => s.status === 'Active' && (s.staffType || '').toLowerCase().includes('tech'))
+      .map(s => ({ staffID: s.staffID, name: s.name, designation: s.designation || '' }));
+    res.json(techs);
+  } catch (err) {
+    console.error('[tech/staff-list] error:', err);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
+// POST /api/tech/readiness — submit daily readiness (Ready / Leave / NotWell)
+// Body: { staffID, pin, readiness: { date, status, ... }, attendance: { date, status, ... } }
+techRouter.post('/readiness', async (req, res) => {
+  try {
+    const { staffID, pin, readiness, attendance } = req.body || {};
+    if (!staffID || !pin || !readiness) {
+      return res.status(400).json({ error: 'MISSING_FIELDS' });
+    }
+
+    // Rate limit check
+    const fail = _techPinFailures.get(staffID);
+    if (fail && fail.lockedUntil && Date.now() < fail.lockedUntil) {
+      return res.status(429).json({ error: 'ACCOUNT_LOCKED' });
+    }
+
+    // Read + verify PIN
+    const staffRow = await prisma.collection.findUnique({ where: { name: 'staff' } });
+    const allStaff = staffRow?.data || [];
+    const idx = allStaff.findIndex(s => s.staffID === staffID && s.status === 'Active');
+    if (idx < 0) return res.status(404).json({ error: 'STAFF_NOT_FOUND' });
+
+    const staff = allStaff[idx];
+    const storedPin = String(staff.pin || staff.techPin || '');
+    if (storedPin !== String(pin)) {
+      const current = _techPinFailures.get(staffID) || { count: 0, lockedUntil: null };
+      current.count++;
+      if (current.count >= TECH_PIN_MAX_ATTEMPTS) {
+        current.lockedUntil = Date.now() + TECH_PIN_LOCK_MINS * 60 * 1000;
+        current.count = 0;
+      }
+      _techPinFailures.set(staffID, current);
+      return res.status(401).json({ error: 'INVALID_PIN' });
+    }
+    _techPinFailures.delete(staffID);
+
+    // Update techReadiness — replace today's entry or add new
+    if (!Array.isArray(staff.techReadiness)) staff.techReadiness = [];
+    const rDate = readiness.date;
+    staff.techReadiness = staff.techReadiness.filter(r => r.date !== rDate);
+    staff.techReadiness.push(readiness);
+
+    // Update attendance — only if no office-set entry exists for this date
+    // (entries without _autoByTechSS were set by the office and take priority)
+    if (attendance && attendance.date) {
+      if (!Array.isArray(staff.attendance)) staff.attendance = [];
+      const existing = staff.attendance.find(a => a.date === attendance.date);
+      if (existing) {
+        if (existing._autoByTechSS) {
+          existing.status = attendance.status;
+          existing._autoByTechSS = true;
+          existing.updatedAt = new Date().toISOString();
+        }
+        // If office already set it, don't touch
+      } else {
+        staff.attendance.push({
+          ...attendance,
+          _autoByTechSS: true,
+          enteredAt: new Date().toISOString()
+        });
+      }
+    }
+
+    // Save back
+    allStaff[idx] = staff;
+    await prisma.collection.update({
+      where: { name: 'staff' },
+      data: { data: allStaff, updatedAt: new Date() }
+    });
+
+    // Return updated own record
+    res.json({
+      ok: true,
+      staff: {
+        staffID: staff.staffID,
+        name: staff.name,
+        staffType: staff.staffType,
+        designation: staff.designation,
+        attendance: staff.attendance || [],
+        techReadiness: staff.techReadiness || [],
+        warnings: staff.warnings || [],
+      }
+    });
+  } catch (err) {
+    console.error('[tech/readiness] error:', err);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
+// Mount tech routes — NO requireGoogleAuth on this path
+app.use('/api/tech', techRouter);
+
 // API routes (must come before static)
 app.use('/api', requireGoogleAuth);
 app.use('/api/data', enforceRoleAccess, dataRoutes);
