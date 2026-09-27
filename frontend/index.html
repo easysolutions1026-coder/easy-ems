@@ -2055,8 +2055,9 @@
             Sailing:         {label:'Sailing',         short:'SAL', color:'#4338ca',bg:'#e0e7ff',text:'#312e81',engaged:true},
             ApprovedLeave:   {label:'Approved Leave',  short:'A/L', color:'#7c3aed',bg:'#ede9fe',text:'#4c1d95',engaged:false},
             UnApprovedLeave: {label:'Unapproved Leave',short:'U/L', color:'#dc2626',bg:'#fee2e2',text:'#7f1d1d',engaged:false},
+            NotWell:         {label:'Not Well',        short:'N/W', color:'#ea580c',bg:'#fff7ed',text:'#9a3412',engaged:false},
         };
-        const ATT_ORDER=['','Working','StandBy','Outstation','Anchorage','Sailing','ApprovedLeave','UnApprovedLeave'];
+        const ATT_ORDER=['','Working','StandBy','Outstation','Anchorage','Sailing','ApprovedLeave','UnApprovedLeave','NotWell'];
         const ENGAGED_TYPES=['Working','Outstation','Anchorage','Sailing'];
 
         let techWageState={staffID:'',periodMonth:new Date().getMonth()+1,periodYear:new Date().getFullYear(),otHours:[],
@@ -3436,6 +3437,13 @@
             const ancP=+(c.Anchorage*dailyWage).toFixed(2);
             const salP=+(c.Sailing*dailyWage).toFixed(2);
             const sbyP=+(sbd*standbyWage).toFixed(2);
+            // Not Well: first N days/month (default 2) → standbyWage, beyond → ₹0 (no pay).
+            // Office can override the limit per-case via the loan/leave management UI.
+            // The setting techMaxPaidSickDays lives on settings (editable); fallback = 2.
+            const maxPaidSickDays = parseInt(settings?.techMaxPaidSickDays) || 2;
+            const nwDays = c.NotWell || 0;
+            const nwPaidDays = Math.min(nwDays, maxPaidSickDays);
+            const nwP = +(nwPaidDays * standbyWage).toFixed(2);
             // Allowances as % of daily wage
             const outstPct=(+r.outstationPct||20)/100, sailPct=(+r.sailingPct||30)/100, ancPct=(+r.anchoragePct||30)/100;
             const outA=+(c.Outstation*dailyWage*outstPct).toFixed(2);
@@ -3460,8 +3468,10 @@
             // Leave deductions
             // Approved leave: 50% of daily wage per day deducted
             const alDeduct=+((c.ApprovedLeave||0)*dailyWage*0.5).toFixed(2);
-            // Unapproved leave: 100% of daily wage per day deducted
-            const ulDeduct=+((c.UnApprovedLeave||0)*dailyWage).toFixed(2);
+            // Unapproved leave: configurable multiplier × daily wage per day deducted
+            // Default 2× = no pay + one full day penalty. Settable via Settings.
+            const ulMultiplier = parseFloat(settings?.unapprovedAbsenceMultiplier) || 2;
+            const ulDeduct=+((c.UnApprovedLeave||0)*dailyWage*ulMultiplier).toFixed(2);
             // Gross = all earned wages + allowances - leave deductions
             // Variable is already embedded in dailyWage so not added separately
 
@@ -3491,7 +3501,7 @@
                 return ENGAGED_TYPES.includes(attType) ? s + (parseFloat(h) || 0) : s;
             }, 0);
 
-            const grossBase=wP+outP+ancP+salP+sbyP+outA+ancA+salA+t15+t20;
+            const grossBase=wP+outP+ancP+salP+sbyP+nwP+outA+ancA+salA+t15+t20;
             const travelInGross=+(+state.travelAllow||4000); // Travel allowance (user-entered) included in gross and subject to TDS
             // gross = wages + threshold allowances + OT + travel (all subject to TDS)
             // PF and ESIC basis = basic + fixedAllowance only (unchanged)
@@ -3502,6 +3512,7 @@
                 {sec:'Wage',name:'Anchorage days',days:c.Anchorage,rate:+dailyWage.toFixed(2),amt:ancP,show:c.Anchorage>0},
                 {sec:'Wage',name:'Sailing days',days:c.Sailing,rate:+dailyWage.toFixed(2),amt:salP,show:c.Sailing>0},
                 {sec:'Wage',name:`Stand By (Standby wage)`,days:sbd,rate:+standbyWage.toFixed(2),amt:sbyP,show:sbd>0},
+                {sec:'Wage',name:`Not Well — paid (${nwPaidDays} of ${nwDays}d, limit ${maxPaidSickDays}/month)`,days:nwPaidDays,rate:+standbyWage.toFixed(2),amt:nwP,show:nwDays>0},
                 {sec:'Allowance',name:`Outstation Allow (${+r.outstationPct||20}% of Daily Wage)`,days:c.Outstation,rate:+(dailyWage*outstPct).toFixed(2),amt:outA,show:c.Outstation>0},
                 {sec:'Allowance',name:`Sailing Allow (${+r.sailingPct||30}% of Daily Wage)`,days:c.Sailing,rate:+(dailyWage*sailPct).toFixed(2),amt:salA,show:c.Sailing>0},
                 {sec:'Allowance',name:`Anchorage Allow (${+r.anchoragePct||30}% of Daily Wage)`,days:c.Anchorage,rate:+(dailyWage*ancPct).toFixed(2),amt:ancA,show:c.Anchorage>0},
@@ -3509,7 +3520,7 @@
                 {sec:'Threshold',name:`Days 21+ allowance (${daysAbove20} days × DW×0.5×1.3 = DW×0.65)`,days:daysAbove20,rate:+(dailyWage*0.65).toFixed(2),amt:t20,show:daysAbove20>0},
                 {sec:'Allowance',name:'Travel Allowance (incl. in Gross — subject to TDS)',days:null,rate:+(+state.travelAllow||4000),amt:+(+state.travelAllow||4000),show:true},
                 {sec:'Deduct',name:`Approved Leave Deduction (50% × ${c.ApprovedLeave||0} days)`,days:c.ApprovedLeave||0,rate:+(dailyWage*0.5).toFixed(2),amt:-alDeduct,show:(c.ApprovedLeave||0)>0},
-                {sec:'Deduct',name:`Unapproved Leave Deduction (100% × ${c.UnApprovedLeave||0} days)`,days:c.UnApprovedLeave||0,rate:+dailyWage.toFixed(2),amt:-ulDeduct,show:(c.UnApprovedLeave||0)>0},
+                {sec:'Deduct',name:`Unapproved Leave Deduction (${ulMultiplier}× DW × ${c.UnApprovedLeave||0} days)`,days:c.UnApprovedLeave||0,rate:+(dailyWage*ulMultiplier).toFixed(2),amt:-ulDeduct,show:(c.UnApprovedLeave||0)>0},
                 {sec:'OT',name:`OT Ex-Gratia (${totalOTHours.toFixed(1)}h beyond 22:00 × DW/10×2 = ${otRate.toFixed(2)}/hr)`,days:null,rate:+otRate.toFixed(2),amt:otAmt,show:otAmt>0},
             ].filter(r=>r.show);
             return{c,eng,sbd,basic,hra,da,gp,fixedAllow,daysInMonth,dailyWage,standbyWage,rows,gross,varA:+varA||0,daysAbove15,daysIn1520,daysAbove20,t15,t20,otAmt,otRate,hourlyRate,totalOTHours,otBreakdown};
@@ -19268,6 +19279,20 @@
                             <input type="number" id="settLateGrace" value="${settings.lateGraceMins || 10}" min="0" max="60" class="w-full px-4 py-2 border rounded-lg" placeholder="10"/>
                         </div>
                         <div>
+                            <label class="block text-sm font-semibold mb-2">🤒 Max Paid Sick Days / Month (Technicians)</label>
+                            <input type="number" id="settMaxPaidSickDays" value="${settings.techMaxPaidSickDays || 2}" min="0" max="30" class="w-full px-4 py-2 border rounded-lg" placeholder="2"/>
+                            <p class="text-xs text-gray-400 mt-1">First N "Not Well" days per month → Standby wage. Beyond → no pay (unless office overrides per case).</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold mb-2">⚠️ Unapproved Absence Deduction Multiplier</label>
+                            <select id="settUnapprovedMultiplier" class="w-full px-4 py-2 border rounded-lg">
+                                <option value="1" ${(settings.unapprovedAbsenceMultiplier||2)==1?'selected':''}>1× (no pay, no penalty)</option>
+                                <option value="1.5" ${(settings.unapprovedAbsenceMultiplier||2)==1.5?'selected':''}>1.5× (half-day penalty)</option>
+                                <option value="2" ${(settings.unapprovedAbsenceMultiplier||2)==2?'selected':''}>2× (full day penalty — default)</option>
+                            </select>
+                            <p class="text-xs text-gray-400 mt-1">Deduction per unapproved absence day. 2× = daily wage deducted + one additional day's wage as penalty.</p>
+                        </div>
+                        <div>
                             <label class="block text-sm font-semibold mb-2">🏆 Punctuality Incentive — Perfect (₹) <span class="text-xs text-gray-400 font-normal">0 late days</span></label>
                             <input type="number" id="settPunctualityPerfect" value="${settings.punctualityIncentivePerfect || 0}" min="0" step="50" class="w-full px-4 py-2 border rounded-lg" placeholder="e.g. 300"/>
                             <p class="text-xs text-gray-400 mt-1">Added to salary when staff has 0 late days that month</p>
@@ -22564,6 +22589,8 @@
                     saturdayStart:    document.getElementById('settSatStart')?.value     || settings.saturdayStart    || '09:30',
                     saturdayEnd:      document.getElementById('settSatEnd')?.value       || settings.saturdayEnd      || '13:30',
                     lateGraceMins:    parseInt(document.getElementById('settLateGrace')?.value)||10,
+                    techMaxPaidSickDays: parseInt(document.getElementById('settMaxPaidSickDays')?.value) || 2,
+                    unapprovedAbsenceMultiplier: parseFloat(document.getElementById('settUnapprovedMultiplier')?.value) || 2,
                     punctualityIncentivePerfect: parseFloat(document.getElementById('settPunctualityPerfect')?.value)||0,
                     punctualityIncentiveGood:    parseFloat(document.getElementById('settPunctualityGood')?.value)||0,
                     wfhBacklogDays:   parseInt(document.getElementById('settWFHBacklog')?.value)||30,
@@ -22767,6 +22794,9 @@
                                 <input type="date" id="sDOJ" class="w-full px-3 py-2 border rounded-lg text-sm"/></div>
                             <div><label class="block text-xs font-semibold text-gray-600 mb-1">Mobile</label>
                                 <input type="text" id="sMobile" class="w-full px-3 py-2 border rounded-lg text-sm"/></div>
+                            <div><label class="block text-xs font-semibold text-gray-600 mb-1">🔐 Self-Service PIN <span class="text-gray-400 font-normal">(4-digit)</span></label>
+                                <input type="text" id="sPin" maxlength="4" inputmode="numeric" pattern="[0-9]{4}" placeholder="e.g. 1234" class="w-full px-3 py-2 border rounded-lg text-sm tracking-widest"/>
+                                <p class="text-[10px] text-gray-400 mt-0.5">Used for Technician Self-Service login (daily readiness, leave, attendance view)</p></div>
                             <div><label class="block text-xs font-semibold text-gray-600 mb-1">Email</label>
                                 <input type="email" id="sEmail" class="w-full px-3 py-2 border rounded-lg text-sm"/></div>
                             <div><label class="block text-xs font-semibold text-gray-600 mb-1">Basic Salary (₹)</label>
@@ -23184,8 +23214,9 @@
             Sailing:         {label:'Sailing',          short:'SAL', color:'#4338ca', bg:'#e0e7ff', text:'#312e81'},
             ApprovedLeave:   {label:'Approved Leave',   short:'A/L', color:'#7c3aed', bg:'#ede9fe', text:'#4c1d95'},
             UnApprovedLeave: {label:'Unapproved Leave', short:'U/L', color:'#dc2626', bg:'#fee2e2', text:'#7f1d1d'},
+            NotWell:         {label:'Not Well',         short:'N/W', color:'#ea580c', bg:'#fff7ed', text:'#9a3412'},
         };
-        const ATT_CYCLE=['','Working','StandBy','Outstation','Anchorage','Sailing','ApprovedLeave','UnApprovedLeave'];
+        const ATT_CYCLE=['','Working','StandBy','Outstation','Anchorage','Sailing','ApprovedLeave','UnApprovedLeave','NotWell'];
 
         function _attPeriodDates(year,month){
             // Pay period: 26th prev month → 25th current month (inclusive, variable length)
@@ -26451,6 +26482,7 @@ ${'─'.repeat(50)}
                 document.getElementById('sGender').value = s.gender||'Male';
                 document.getElementById('sDOJ').value        = s.doj||'';
                 document.getElementById('sMobile').value     = s.mobile||'';
+                document.getElementById('sPin').value        = s.pin||'';
                 document.getElementById('sEmail').value      = s.email||'';
                 // Employee Code
                 const empCodeEl = document.getElementById('sEmpCode');
@@ -26866,6 +26898,7 @@ ${'─'.repeat(50)}
                 gender:         document.getElementById('sGender').value || 'Male',
                 doj:            document.getElementById('sDOJ').value,
                 mobile:         document.getElementById('sMobile').value,
+                pin:            document.getElementById('sPin').value.trim(),
                 email:          document.getElementById('sEmail').value,
                 basicSalary:    parseFloat(document.getElementById('sBasicSalary').value)||0,
                 // dailyWage and standbyWage auto-computed for technicians
