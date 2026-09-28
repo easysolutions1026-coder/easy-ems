@@ -6,7 +6,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { setupPushRoutes } from '../push-service.js';
+import { setupPushRoutes } from './push-service.js';
 
 import { prisma } from './db/prisma.js';
 import { verifyGoogleToken } from './auth/google-oauth.js';
