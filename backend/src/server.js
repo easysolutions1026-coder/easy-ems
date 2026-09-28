@@ -33,6 +33,16 @@ app.use(cors({
 app.use(express.json({ limit: '25mb' }));
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
+// Strip /imse-ems prefix from custom domain requests
+app.use((req, res, next) => {
+  if (req.url.startsWith('/imse-ems/')) {
+    req.url = req.url.replace('/imse-ems', '');
+  } else if (req.url === '/imse-ems') {
+    req.url = '/';
+  }
+  next();
+});
+
 // Health checks
 app.get('/healthz', (req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
 app.get('/readyz', async (req, res) => {
@@ -321,11 +331,6 @@ app.use('/shim', express.static(path.join(frontendDir, 'shared'), staticOptions)
 app.get('/field', function(req, res) {
   res.sendFile(path.join(frontendDir, 'field_app.html'));
 });
-// Custom domain prefix routes (easy-solutions.in/imse-ems/...)
-app.get('/imse-ems/field', function(req, res) {
-  res.sendFile(path.join(frontendDir, 'field_app.html'));
-});
-app.use('/imse-ems', express.static(frontendDir, staticOptions));
 app.use('/', express.static(frontendDir, staticOptions));
 
 // Global error handler

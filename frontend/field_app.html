@@ -8476,7 +8476,7 @@
     // ════════════════════════════════════════════════════════════════
 
     let _techSS = null;   // { staffID, pin, name, staffRec } — logged-in technician
-    const TECH_API = '/api/tech/';
+    const TECH_API = '/imse-ems/api/tech/';
 
     // ── PIN LOGIN SCREEN ──────────────────────────────────────────
     async function _techSelfServiceLogin() {
@@ -8983,7 +8983,7 @@ async function initPushNotifications(technicianId) {
   }
 
   // Send subscription to your backend
-  await fetch('/api/push/subscribe', {
+  await fetch('/imse-ems/api/push/subscribe', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ subscription, technicianId })
