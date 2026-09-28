@@ -9,7 +9,7 @@ webpush.setVapidDetails(
 const subscriptions = new Map();
 
 // Handle push API routes
-function handlePushRoutes(req, res) {
+function setupPushRoutes(req, res) {
   let body = '';
   req.on('data', chunk => body += chunk);
   req.on('end', () => {
