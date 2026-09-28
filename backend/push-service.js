@@ -3,21 +3,49 @@
 // Express + ES modules version
 // ════════════════════════════════════════════════════════════════
 
-import webpush from 'web-push';
+let webpush = null;
+let pushReady = false;
+const subscriptions = new Map();
 
-// ── STEP 1: Replace these with your actual VAPID keys ─────────
-// Generate them by running:  npx web-push generate-vapid-keys
-webpush.setVapidDetails(
-  'mailto:admin@imsetech.com',
-  'BJKPctkYlzveOIrbSNSLR5sas_e_oa5OIbg3Dlgu_YvcV7lhWKUPL_MKGZJQZjoNZSWNDkITlLcjoT5-hq46Hs4',
-  'heaadxWkIE942er4wixPCBsm7sEE3dlvRb-x5XwQEOo'
-);
+// Lazy init — only runs when first push route is hit or a notification is sent
+function ensurePushReady() {
+  if (pushReady) return true;
+  try {
+    // Dynamic import already done at setupPushRoutes time
+    if (!webpush) return false;
 
-// ── Subscription store (replace with Prisma/Cloud SQL later) ──
-const subscriptions = new Map();  // staffID → push subscription object
+    const publicKey = process.env.VAPID_PUBLIC_KEY || '';
+    const privateKey = process.env.VAPID_PRIVATE_KEY || '';
+
+    if (!publicKey || !privateKey) {
+      console.warn('[push] VAPID keys not set — push notifications disabled');
+      return false;
+    }
+
+    webpush.setVapidDetails(
+      'mailto:admin@imsetech.com',
+      publicKey,
+      privateKey
+    );
+    pushReady = true;
+    console.log('[push] VAPID configured — push notifications enabled');
+    return true;
+  } catch (err) {
+    console.error('[push] VAPID setup failed:', err.message);
+    return false;
+  }
+}
 
 // ── Express routes ────────────────────────────────────────────
-function setupPushRoutes(app) {
+async function setupPushRoutes(app) {
+  try {
+    const wp = await import('web-push');
+    webpush = wp.default || wp;
+    console.log('[push] web-push loaded');
+  } catch (err) {
+    console.warn('[push] web-push not available:', err.message);
+    // Server still starts — push just won't work
+  }
 
   // Save subscription from technician's device
   app.post('/api/push/subscribe', (req, res) => {
@@ -30,19 +58,19 @@ function setupPushRoutes(app) {
     res.json({ success: true });
   });
 
-  // Test endpoint — send a test notification
+  // Test endpoint
   app.post('/api/push/test', async (req, res) => {
     const { technicianId } = req.body || {};
     if (!technicianId) {
       return res.status(400).json({ error: 'Missing technicianId' });
     }
     try {
-      await sendPushToTechnician(technicianId, {
+      const sent = await sendPushToTechnician(technicianId, {
         title: 'IMSE Field App',
         body: 'Test notification — push is working!',
         tag: 'test'
       });
-      res.json({ success: true });
+      res.json({ success: sent });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -51,6 +79,10 @@ function setupPushRoutes(app) {
 
 // ── Send to one technician ────────────────────────────────────
 async function sendPushToTechnician(technicianId, payload) {
+  if (!ensurePushReady()) {
+    console.log('[push] Not ready — skipping notification');
+    return false;
+  }
   const sub = subscriptions.get(technicianId);
   if (!sub) {
     console.log(`[push] No subscription for: ${technicianId}`);
@@ -71,6 +103,7 @@ async function sendPushToTechnician(technicianId, payload) {
 
 // ── Send to ALL technicians ───────────────────────────────────
 async function sendPushToAll(payload) {
+  if (!ensurePushReady()) return;
   for (const [techId, sub] of subscriptions) {
     try {
       await webpush.sendNotification(sub, JSON.stringify(payload));
@@ -83,13 +116,12 @@ async function sendPushToAll(payload) {
 }
 
 // ── Ready-made alert functions ────────────────────────────────
-
 async function notifyJobAssigned(technicianId, jobTitle) {
   await sendPushToTechnician(technicianId, {
     title: 'New Job Assigned',
     body: 'You have been assigned: ' + jobTitle,
     tag: 'job-assigned',
-    url: '/field'
+    url: '/imse-ems/field'
   });
 }
 
@@ -98,7 +130,7 @@ async function notifyFundApproved(technicianId, amount) {
     title: 'Fund Request Approved',
     body: 'Your request of Rs.' + amount + ' has been approved',
     tag: 'fund-approved',
-    url: '/field'
+    url: '/imse-ems/field'
   });
 }
 
@@ -107,7 +139,7 @@ async function notifyUrgentAll(message) {
     title: 'Urgent Alert',
     body: message,
     tag: 'urgent',
-    url: '/field'
+    url: '/imse-ems/field'
   });
 }
 
