@@ -1,22 +1,4 @@
-﻿# Incremental migration — appends prod records missing from Cloud SQL
-# Existing Cloud SQL entries are never modified. See dedup rules below.
-#
-# Usage:
-#   .\scripts\migrate-from-prod.ps1 -OAuthToken "<token>"
-#
-# Dry run first (recommended — shows what would happen without writing):
-#   .\scripts\migrate-from-prod.ps1 -OAuthToken "<token>" -DryRun
-#
-# Test one collection first:
-#   .\scripts\migrate-from-prod.ps1 -OAuthToken "<token>" -Only directorExpenses
-#
-# Get the OAuth token:
-#   1. Sign in to Cloud Run app
-#   2. F12 -> Application -> Session Storage -> the cloudrun URL
-#   3. Click _bmsOAuth -> in the right pane, find "token": "..."
-#   4. Copy the token value (without quotes)
-
-param(
+﻿param(
     [Parameter(Mandatory=$true)]
     [string]$OAuthToken,
     [string]$Backend = 'https://ems-backend-43lhgkm2la-el.a.run.app',
@@ -27,38 +9,33 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# Per-collection ID field. Records with no value in this field are skipped
-# (they can't be safely deduplicated). Settings and auditLog handled separately.
 $ID_FIELDS = @{
     'transactions'           = 'txnID'
     'parties'                = 'partyID'
     'expenses'               = 'expID'
-    'bankAccounts'           = 'id'
+    'bankAccounts'           = 'accountID'
     'staff'                  = 'staffID'
-    'projectExpenses'        = 'expID'
-    'workLogs'               = 'workLogID'
-    'payslips'               = 'payslipID'
+    'projectExpenses'        = @('peID', 'projExpID')
+    'workLogs'               = 'wlID'
+    'payslips'               = @('payslipID', 'psID')
     'directorExpenses'       = 'deID'
-    'fundRequests'           = 'frID'
-    'fundPools'              = 'fpID'
+    'fundRequests'           = @('frID', 'requestID')
+    'fundPools'              = 'poolID'
     'paymentRequests'        = 'prID'
     'appUsers'               = 'userID'
-    'pettyCashOffices'       = 'id'
-    'pettyCashTransactions'  = 'pcID'
-    'pettyCashStatements'    = 'id'
-    'gstCashLedgerSnapshots' = 'month'
-    'companyDocuments'       = 'id'
-    'coverLetters'           = 'id'
-    'returnableToolsLetters' = 'id'
-    'arInvoices'             = 'invoiceID'
-    'bankReconciliations'    = 'id'
+    'pettyCashOffices'       = 'officeID'
+    'pettyCashTransactions'  = 'txnID'
+    'pettyCashStatements'    = @('stmtID', 'statementID')
+    'gstCashLedgerSnapshots' = 'snapshotID'
+    'companyDocuments'       = 'docID'
+    'coverLetters'           = 'letterID'
+    'returnableToolsLetters' = 'letterID'
+    'arInvoices'             = 'arID'
+    'bankReconciliations'    = 'reconID'
     'otherIncome'            = 'incomeID'
-    'chartOfAccounts'        = 'id'
+    'chartOfAccounts'        = 'accountCode'
 }
 
-# Load order roughly matches referential dependency (users, master data,
-# then transactional). Not strictly required since dedup works by ID
-# regardless of order.
 $COLLECTIONS = @(
     'appUsers', 'parties', 'bankAccounts', 'chartOfAccounts',
     'staff', 'projectExpenses', 'workLogs', 'payslips',
@@ -75,7 +52,6 @@ $COLLECTIONS = @(
 if ($Only) {
     if ($COLLECTIONS -notcontains $Only) {
         Write-Host "Unknown collection: $Only"
-        Write-Host ('Valid options: ' + ($COLLECTIONS -join ', '))
         exit 1
     }
     $COLLECTIONS = @($Only)
@@ -84,12 +60,12 @@ if ($Only) {
 
 $mode = if ($DryRun) { 'DRY RUN (no writes)' } else { 'LIVE (writes to Cloud SQL)' }
 Write-Host ''
-Write-Host ('============================================================')
+Write-Host ('=' * 60)
 Write-Host ('Migration mode: ' + $mode)
 Write-Host ('Backend:        ' + $Backend)
 Write-Host ('Migration dir:  ' + $MigrationDir)
 Write-Host ('Collections:    ' + $COLLECTIONS.Count)
-Write-Host ('============================================================')
+Write-Host ('=' * 60)
 
 $headers = @{
     'Authorization' = ('Bearer ' + $OAuthToken)
@@ -98,8 +74,6 @@ $headers = @{
 
 function Get-RecordHash {
     param([Parameter(Mandatory=$true)]$Record)
-    # Compact JSON of the record, then SHA1 hex. Stable enough for dedup
-    # within a single migration run. Depth 20 covers our nested structures.
     $json = $Record | ConvertTo-Json -Depth 20 -Compress
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
     $hash = [System.Security.Cryptography.SHA1]::Create().ComputeHash($bytes)
@@ -112,7 +86,6 @@ foreach ($col in $COLLECTIONS) {
     Write-Host ''
     Write-Host ('--- ' + $col + ' ---')
 
-    # Locate local file (staff uses stripped variant)
     $fileName = if ($col -eq 'staff') { 'staff-stripped.json' } else { ($col + '.json') }
     $localFile = Join-Path $MigrationDir $fileName
 
@@ -124,7 +97,6 @@ foreach ($col in $COLLECTIONS) {
         continue
     }
 
-    # 1. Fetch current Cloud SQL contents
     try {
         $remoteJson = Invoke-WebRequest -Uri ($Backend + '/api/data/' + $col) `
                                         -Headers $headers -Method Get -UseBasicParsing
@@ -139,7 +111,6 @@ foreach ($col in $COLLECTIONS) {
         continue
     }
 
-    # 2. Load local file
     $localText = [System.IO.File]::ReadAllText($localFile, [System.Text.Encoding]::UTF8)
     $local = $localText | ConvertFrom-Json
     if ($null -eq $local) { $local = @() }
@@ -148,16 +119,15 @@ foreach ($col in $COLLECTIONS) {
     Write-Host ('  Remote: ' + $remote.Count + ' records')
     Write-Host ('  Local:  ' + $local.Count + ' records')
 
-    # 3. Compute set of remote records for dedup
     $remoteKeys = @{}
     if ($col -eq 'auditLog') {
-        # Composite dedup — audit entries have no reliable unique ID field
         foreach ($r in $remote) {
             $remoteKeys[(Get-RecordHash $r)] = $true
         }
-    } else {
-        $idField = $ID_FIELDS[$col]
-        if (-not $idField) {
+        } 
+    else {
+        $idFields = @($ID_FIELDS[$col])   # wrap single value or array into array
+        if (-not $idFields -or $idFields.Count -eq 0) {
             Write-Host '  SKIP: no ID field mapping'
             $results += [PSCustomObject]@{
                 Collection = $col; Status = 'skip: no ID map'; Remote = $remote.Count; Local = $local.Count; Added = 0
@@ -165,27 +135,32 @@ foreach ($col in $COLLECTIONS) {
             continue
         }
         foreach ($r in $remote) {
-            $v = $r.$idField
-            if ($null -ne $v -and "$v".Length -gt 0) { $remoteKeys[[string]$v] = $true }
+            $v = $null
+            foreach ($f in $idFields) {
+                if ($r.$f -ne $null -and "$($r.$f)".Length -gt 0) { $v = $r.$f; break }
+            }
+            if ($null -ne $v) { $remoteKeys[[string]$v] = $true }
         }
     }
 
-    # 4. Find new records in local
     $newRecords = @()
     $orphaned = 0
     foreach ($r in $local) {
         if ($col -eq 'auditLog') {
             $key = Get-RecordHash $r
         } else {
-            $v = $r.($ID_FIELDS[$col])
-            if ($null -eq $v -or "$v".Length -eq 0) { $orphaned++; continue }
+            $idFields = @($ID_FIELDS[$col])
+            $v = $null
+            foreach ($f in $idFields) {
+                if ($r.$f -ne $null -and "$($r.$f)".Length -gt 0) { $v = $r.$f; break }
+            }
+            if ($null -eq $v) { $orphaned++; continue }
             $key = [string]$v
         }
         if (-not $remoteKeys.ContainsKey($key)) {
             $newRecords += $r
         }
     }
-
     Write-Host ('  New to add:    ' + $newRecords.Count)
     if ($orphaned -gt 0) {
         Write-Host ('  Skipped (no ID field): ' + $orphaned)
@@ -206,7 +181,6 @@ foreach ($col in $COLLECTIONS) {
         continue
     }
 
-    # 5. Merge and POST full array back
     $merged = @($remote) + $newRecords
     $body = $merged | ConvertTo-Json -Depth 20 -Compress
     $bodySizeMB = [Math]::Round(([System.Text.Encoding]::UTF8.GetByteCount($body) / 1MB), 2)
@@ -228,18 +202,17 @@ foreach ($col in $COLLECTIONS) {
     }
 }
 
-# Summary
 Write-Host ''
-Write-Host ('============================================================')
+Write-Host ('=' * 60)
 Write-Host 'MIGRATION SUMMARY'
-Write-Host ('============================================================')
+Write-Host ('=' * 60)
 $results | Format-Table -AutoSize
 
 $totalAdded = ($results | Measure-Object -Property Added -Sum).Sum
 $errors = @($results | Where-Object { $_.Status -like 'error*' })
 
 Write-Host ('Total records added: ' + $totalAdded)
-if ($DryRun) { Write-Host '(DRY RUN — no writes performed)' }
+if ($DryRun) { Write-Host '(DRY RUN)' }
 if ($errors.Count -gt 0) {
     Write-Host ('Errors: ' + $errors.Count) -ForegroundColor Red
     exit 1
