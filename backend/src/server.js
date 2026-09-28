@@ -321,6 +321,11 @@ app.use('/shim', express.static(path.join(frontendDir, 'shared'), staticOptions)
 app.get('/field', function(req, res) {
   res.sendFile(path.join(frontendDir, 'field_app.html'));
 });
+// Custom domain prefix routes (easy-solutions.in/imse-ems/...)
+app.get('/imse-ems/field', function(req, res) {
+  res.sendFile(path.join(frontendDir, 'field_app.html'));
+});
+app.use('/imse-ems', express.static(frontendDir, staticOptions));
 app.use('/', express.static(frontendDir, staticOptions));
 
 // Global error handler

@@ -38,12 +38,12 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     self.registration.showNotification(data.title, {
       body: data.body,
-      icon: '/icons/icon-192.png',
-      badge: '/icons/icon-192.png',
+      icon: '/imse-ems/icons/icon-192.png',
+      badge: '/imse-ems/icons/icon-192.png',
       vibrate: [200, 100, 200],
       tag: data.tag || 'imse-default',
       renotify: true,
-      data: { url: data.url || '/field_app.html' }
+      data: { url: data.url || '/imse-ems/field' }
     })
   );
 });
@@ -51,11 +51,11 @@ self.addEventListener('push', (event) => {
 // Notification click: open the app
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const targetUrl = event.notification.data?.url || '/field_app.html';
+  const targetUrl = event.notification.data?.url || '/imse-ems/field';
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
       for (const client of windowClients) {
-        if (client.url.includes('field_app') && 'focus' in client) {
+        if (client.url.includes('field') && 'focus' in client) {
           client.focus();
           client.navigate(targetUrl);
           return;

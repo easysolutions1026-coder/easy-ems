@@ -2,15 +2,13 @@
 <html lang="en">
 <head>
     <!-- PWA Support -->
-    <link rel="manifest" href="/manifest.json">
+    <link rel="manifest" href="/imse-ems/manifest.json">
     <meta name="theme-color" content="#1a56db">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="IMSE Field App">
-    <link rel="manifest" href="/imse-ems/manifest.json">
     <link rel="apple-touch-icon" href="/imse-ems/icons/icon-192.png">
-    <link rel="apple-touch-icon" href="/icons/icon-192.png">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
     <title>IMSE Field App</title>
@@ -8944,7 +8942,7 @@
 // ---- PWA: Register Service Worker ----
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/service-worker.js',{ scope: '/imse-ems/' })
+    navigator.serviceWorker.register('/imse-ems/service-worker.js', { scope: '/imse-ems/' })
       .then((reg) => console.log('SW registered'))
       .catch((err) => console.error('SW failed:', err));
   });
