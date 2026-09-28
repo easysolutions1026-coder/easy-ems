@@ -291,7 +291,7 @@ techRouter.post('/readiness', async (req, res) => {
 });
 
 // Mount tech routes — NO requireGoogleAuth on this path
-setupPushRoutes(app);
+await setupPushRoutes(app);
 app.use('/api/tech', techRouter);
 
 // API routes (must come before static)
