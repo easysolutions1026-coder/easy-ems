@@ -1,10 +1,10 @@
 const CACHE_VERSION = 'imse-field-v1';
 
 const ASSETS_TO_CACHE = [
-  '/field_app.html',
-  '/manifest.json',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png'
+  '/imse-ems/field',
+  '/imse-ems/manifest.json',
+  '/imse-ems/icons/icon-192.png',
+  '/imse-ems/icons/icon-512.png'
 ];
 
 // Install: cache core assets
