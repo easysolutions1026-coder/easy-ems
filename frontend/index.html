@@ -36960,6 +36960,7 @@ Automated WFH alert — ${company} Attendance System.`;
             } catch (e) {
                 console.warn('Alerts load failed:', e);
                 if (!_alertsLoaded) window._alertsList = [];
+                _alertsLoaded = true;
             }
         }
 
