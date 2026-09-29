@@ -94,18 +94,15 @@
           }
         } catch (e) {}
       }
-      // 3. POST (new file create) — extract filename from FormData metadata
+      // 3. POST (new file create) — check if it's a known JSON collection
       if (url.indexOf('upload/drive/v3/files') !== -1 && init && init.method === 'POST' && init.body instanceof FormData) {
         try {
           var metaBlob = init.body.get('metadata');
           if (metaBlob) {
-            // Read metadata synchronously isn't possible, flag for async handling
             return { create: true, metaBlob: metaBlob };
           }
         } catch (e) {}
-        return { create: true };
       }
-      if (url.indexOf('upload/drive/v3/files') !== -1) return { create: true };
       return null;
     }
 
@@ -141,6 +138,7 @@
       }
 
       var write = parseWrite(url, init);
+      // PATCH (update) to a known collection → route to Cloud SQL
       if (write && write.update && init && init.body) {
         console.info('[Cloud Run] Drive write -> Cloud SQL:', write.collection);
         var token2 = getToken();
@@ -160,8 +158,10 @@
           });
         });
       }
-      // POST (create new file) — extract filename from metadata to find collection
-      if (write && write.create && write.metaBlob && init && init.body) {
+      // POST (create) — read metadata to decide: known .json → Cloud SQL, else → real Drive
+      // Capture input+init in closure so the Drive fallthrough works inside .then()
+      if (write && write.create && write.metaBlob) {
+        var _input = input, _init = init;
         var token3 = getToken();
         return write.metaBlob.text().then(function(metaText) {
           try {
@@ -170,7 +170,7 @@
             var col = fn ? FILE_TO_COLLECTION[fn] : null;
             if (col && col !== '__NOOP__') {
               console.info('[Cloud Run] Drive create -> Cloud SQL:', col, '(file:', fn, ')');
-              return extractJsonBody(init.body).then(function(payload) {
+              return extractJsonBody(_init.body).then(function(payload) {
                 return origFetch('/api/data/' + col, {
                   method: 'POST',
                   headers: {
@@ -187,8 +187,9 @@
               });
             }
           } catch(e) {}
-          // Unknown collection or parse error — fall through to real Drive
-          return origFetch.apply(this, arguments);
+          // Not a known collection (image upload, PDF, etc.) — pass through to real Drive
+          console.info('[Cloud Run] Drive upload pass-through (not a collection)');
+          return origFetch(_input, _init);
         });
       }
 
