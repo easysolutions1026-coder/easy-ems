@@ -22792,6 +22792,8 @@
                         todayReady.push({ staff: s, status: 'READY', entry: todayEntry });
                     }
                     if (todayEntry.status === 'LEAVE_REQUEST' || todayEntry.status === 'NOT_WELL') {
+                        // Only show if office hasn't acted yet
+                        if (todayEntry.officeStatus && todayEntry.officeStatus !== 'PENDING') return;
                         const sickThisMonth = entries.filter(r => r.date && r.date.startsWith(monthPrefix) && r.status === 'NOT_WELL').length;
                         pendingItems.push({
                             staff: s,
