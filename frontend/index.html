@@ -8387,7 +8387,7 @@
                             ${_canAccess('docs')?`<button onclick="switchView('docs')" class="px-3 py-2 rounded-lg whitespace-nowrap ${currentView === 'docs' ? 'bg-purple-100 text-purple-700' : 'text-gray-600 hover:bg-gray-100'}" title="Company documents, certificates, insurance policies">📄 Documents${(()=>{const c=_countDocsExpiringOrExpired();return c>0?` <span class="ml-1 px-1.5 py-0.5 bg-red-500 text-white rounded-full text-xs font-bold" title="${c} document(s) need attention">${c}</span>`:'';})()}</button>`:''}
                             ${_canAccess('docs')?`<button onclick="switchView('letters')" class="px-3 py-2 rounded-lg whitespace-nowrap ${currentView === 'letters' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}" title="Cover letters for invoices, Returnable Tools letters for site trips">✉️ Letters</button>`:''}
                             ${_canAccess('worklogs')?`<button onclick="switchView('worklogs')" class="px-3 py-2 rounded-lg whitespace-nowrap ${currentView === 'worklogs' ? 'bg-purple-100 text-purple-700' : 'text-gray-600 hover:bg-gray-100'}" title="Read-only view of project work logs added by field technicians">📋 Project Work Logs</button>`:''}
-                            ${_canAccess('alerts')?`<button onclick="switchView('alerts')" class="px-3 py-2 rounded-lg whitespace-nowrap ${currentView === 'alerts' ? 'bg-amber-100 text-amber-700' : 'text-gray-600 hover:bg-gray-100'}" title="Send alerts to field technicians and track responses">🔔 Alerts${(()=>{const p=(window._alertsList||[]).filter(a=>a.status==='active'&&(a.recipients||[]).some(r=>r.response==='pending')).length;return p>0?` <span class="ml-1 px-1.5 py-0.5 bg-amber-500 text-white rounded-full text-xs font-bold">${p}</span>`:'';})()}</button>`:''}
+                            ${_canAccess('alerts')?`<button onclick="switchView('alerts')" class="px-3 py-2 rounded-lg whitespace-nowrap ${currentView === 'alerts' ? 'bg-amber-100 text-amber-700' : 'text-gray-600 hover:bg-gray-100'}" title="Send alerts to field technicians and track responses">🔔 Alerts${(()=>{const p=(window._alertsList||[]).filter(a=>a.status==='active'&&(a.recipients||[]).some(r=>r.response==='sent')).length;return p>0?` <span class="ml-1 px-1.5 py-0.5 bg-amber-500 text-white rounded-full text-xs font-bold">${p}</span>`:'';})()}</button>`:''}
                             ${_canAccess('settings')||!_bmsSession?`<button onclick="switchView('settings')" class="px-3 py-2 rounded-lg whitespace-nowrap ${currentView === 'settings' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}">Settings</button>`:''}
                         </div>
                     </div>
@@ -8661,7 +8661,6 @@
             const perms = settings?.rolePermissions || DEFAULT_ROLE_PERMS;
             const result = {};
             Object.entries(perms).forEach(([role, views]) => {
-                // Auto-migrate: roles with 'worklogs' but missing 'alerts' get it added
                 if (Array.isArray(views) && views.includes('worklogs') && !views.includes('alerts') && !views.includes('*')) {
                     views.push('alerts');
                 }
@@ -36927,26 +36926,28 @@ Automated WFH alert — ${company} Attendance System.`;
 
         // ═══════════════════════════════════════════════════════════════════
         //  ALERTS — Send alerts to field technicians and track responses
+        //  Backend: /api/data/alerts (GET list, POST create, PATCH /:id)
         // ═══════════════════════════════════════════════════════════════════
 
         window._alertsList = window._alertsList || [];
         let _alertsLoaded = false;
 
         const ALERT_TYPES = {
-            newProject:    { label: 'New Project',    icon: '🆕', color: '#2563eb', responses: ['available','not-available'] },
-            jobAssigned:   { label: 'Job Assigned',   icon: '👷', color: '#7c3aed', responses: ['confirm','decline'] },
-            fundUpdate:    { label: 'Fund Update',    icon: '💰', color: '#059669', responses: ['acknowledged'] },
-            urgentSafety:  { label: 'Urgent / Safety',icon: '🚨', color: '#dc2626', responses: ['acknowledged'] },
-            announcement:  { label: 'Announcement',   icon: '📢', color: '#d97706', responses: ['acknowledged'] }
+            newProject:    { label: 'New Project',    icon: '🆕', color: '#2563eb' },
+            jobAssigned:   { label: 'Job Assigned',   icon: '👷', color: '#7c3aed' },
+            fundUpdate:    { label: 'Fund Update',    icon: '💰', color: '#059669' },
+            urgentSafety:  { label: 'Urgent / Safety',icon: '🚨', color: '#dc2626' },
+            announcement:  { label: 'Announcement',   icon: '📢', color: '#d97706' }
         };
 
+        // Backend stores recipient response as 'sent' (not responded yet)
         const ALERT_RESPONSE_META = {
             'available':     { label: 'Available',     icon: '✅', color: '#059669' },
             'not-available': { label: 'Not Available', icon: '❌', color: '#dc2626' },
             'confirm':       { label: 'Confirmed',     icon: '✅', color: '#059669' },
             'decline':       { label: 'Declined',      icon: '❌', color: '#dc2626' },
             'acknowledged':  { label: 'Acknowledged',  icon: '👍', color: '#2563eb' },
-            'pending':       { label: 'Pending',       icon: '⏳', color: '#9ca3af' }
+            'sent':          { label: 'Awaiting',      icon: '⏳', color: '#9ca3af' }
         };
 
         async function _alertsLoad() {
@@ -36972,7 +36973,9 @@ Automated WFH alert — ${company} Attendance System.`;
                     body: JSON.stringify(alertData)
                 });
                 if (!res.ok) { const t = await res.text(); throw new Error(t || 'HTTP ' + res.status); }
-                const created = await res.json();
+                const result = await res.json();
+                // Backend returns { ok, alert } — push the alert object
+                const created = result.alert || result;
                 window._alertsList.unshift(created);
                 return created;
             } catch (e) {
@@ -36981,14 +36984,16 @@ Automated WFH alert — ${company} Attendance System.`;
             }
         }
 
+        // Backend uses PATCH /:id with { status: 'closed' }
         async function _alertClose(alertId) {
             try {
-                const res = await fetch('/api/data/alerts/' + alertId + '/close', {
-                    method: 'POST',
-                    headers: { 'Authorization': 'Bearer ' + accessToken }
+                const res = await fetch('/api/data/alerts/' + alertId, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + accessToken },
+                    body: JSON.stringify({ status: 'closed' })
                 });
                 if (!res.ok) throw new Error('HTTP ' + res.status);
-                const a = window._alertsList.find(x => x.id === alertId);
+                const a = window._alertsList.find(x => x.alertID === alertId);
                 if (a) a.status = 'closed';
                 renderView();
                 _showToast('✅ Alert closed');
@@ -37010,15 +37015,12 @@ Automated WFH alert — ${company} Attendance System.`;
                     <h2 style="font-size:18px;font-weight:800;color:#1e1b4b;margin:0">🔔 Send Alert</h2>
                     <button onclick="document.getElementById('alertModal').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#9ca3af;padding:4px">✕</button>
                 </div>
-
                 <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Alert Type</label>
                 <select id="alertType" style="width:100%;padding:10px 12px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;margin-bottom:14px">
                     ${Object.entries(ALERT_TYPES).map(([k,v]) => `<option value="${k}">${v.icon} ${v.label}</option>`).join('')}
                 </select>
-
                 <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Message</label>
                 <textarea id="alertMessage" rows="3" placeholder="Describe the alert…" style="width:100%;padding:10px 12px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;resize:vertical;margin-bottom:14px;box-sizing:border-box"></textarea>
-
                 <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:6px">Recipients</label>
                 <div style="margin-bottom:8px">
                     <label style="font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;background:#fef3c7;padding:4px 10px;border-radius:8px;font-weight:600;color:#92400e">
@@ -37034,33 +37036,29 @@ Automated WFH alert — ${company} Attendance System.`;
                         </label>
                     `).join('')}
                 </div>
-
-                <button onclick="_alertSubmit()" style="width:100%;margin-top:18px;padding:12px;background:#f59e0b;color:#fff;border:none;border-radius:12px;font-weight:700;font-size:14px;cursor:pointer">
-                    📤 Send Alert
-                </button>
+                <button onclick="_alertSubmit()" style="width:100%;margin-top:18px;padding:12px;background:#f59e0b;color:#fff;border:none;border-radius:12px;font-weight:700;font-size:14px;cursor:pointer">📤 Send Alert</button>
             </div>`;
             document.body.appendChild(modal);
         }
 
         function _alertToggleBroadcast(checked) {
-            document.querySelectorAll('.alertRecipCb').forEach(cb => {
-                cb.checked = checked;
-                cb.disabled = checked;
-            });
+            document.querySelectorAll('.alertRecipCb').forEach(cb => { cb.checked = checked; cb.disabled = checked; });
         }
 
         async function _alertSubmit() {
             const type = document.getElementById('alertType').value;
             const message = document.getElementById('alertMessage').value.trim();
             if (!message) { _showToast('⚠️ Please enter a message', '#d97706'); return; }
+            const broadcast = document.getElementById('alertBroadcast').checked;
 
-            const recipientIDs = [];
-            const recipientNames = [];
-            document.querySelectorAll('.alertRecipCb:checked').forEach(cb => {
-                recipientIDs.push(cb.value);
-                recipientNames.push(cb.dataset.name || cb.value);
-            });
-            if (recipientIDs.length === 0) { _showToast('⚠️ Select at least one recipient', '#d97706'); return; }
+            // Backend expects recipients as [{ staffID, staffName }]
+            const recipients = [];
+            if (!broadcast) {
+                document.querySelectorAll('.alertRecipCb:checked').forEach(cb => {
+                    recipients.push({ staffID: cb.value, staffName: cb.dataset.name || cb.value });
+                });
+                if (recipients.length === 0) { _showToast('⚠️ Select at least one recipient', '#d97706'); return; }
+            }
 
             const btn = document.querySelector('#alertModal button[onclick="_alertSubmit()"]');
             const origLabel = btn.innerHTML;
@@ -37071,13 +37069,11 @@ Automated WFH alert — ${company} Attendance System.`;
                     type,
                     title: ALERT_TYPES[type]?.label || type,
                     message,
-                    recipientIDs,
-                    recipientNames,
-                    broadcast: document.getElementById('alertBroadcast').checked,
-                    sentBy: _bmsSession?.username || currentUser?.email || 'Office'
+                    recipients,
+                    broadcast
                 });
                 document.getElementById('alertModal').remove();
-                _showToast('✅ Alert sent to ' + recipientIDs.length + ' technician(s)');
+                _showToast('✅ Alert sent');
                 renderView();
             } catch (e) {
                 btn.innerHTML = origLabel; btn.disabled = false;
@@ -37090,18 +37086,15 @@ Automated WFH alert — ${company} Attendance System.`;
                 _alertsLoad().then(() => renderView());
                 return;
             }
-
             const alerts = window._alertsList || [];
             const filterStatus = window._alertFilterStatus || 'all';
             const filterType   = window._alertFilterType   || 'all';
-
             let filtered = alerts;
             if (filterStatus !== 'all') filtered = filtered.filter(a => a.status === filterStatus);
             if (filterType !== 'all')   filtered = filtered.filter(a => a.type === filterType);
             filtered.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-
             const activeCount = alerts.filter(a => a.status === 'active').length;
-            const pendingResponseCount = alerts.filter(a => a.status === 'active' && (a.recipients || []).some(r => r.response === 'pending')).length;
+            const awaitingCount = alerts.filter(a => a.status === 'active' && (a.recipients || []).some(r => r.response === 'sent')).length;
 
             content.innerHTML = `
             <div style="max-width:900px;margin:0 auto">
@@ -37110,7 +37103,7 @@ Automated WFH alert — ${company} Attendance System.`;
                         <h1 style="font-size:22px;font-weight:800;color:#1e1b4b;margin:0">🔔 Alerts</h1>
                         <p style="font-size:12px;color:#6b7280;margin:4px 0 0">Send alerts to field technicians and track responses</p>
                     </div>
-                    ${_canWrite() ? `<button onclick="_alertOpenModal()" style="padding:10px 20px;background:#f59e0b;color:#fff;border:none;border-radius:10px;font-weight:700;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:6px">📤 New Alert</button>` : ''}
+                    ${_canWrite() ? `<button onclick="_alertOpenModal()" style="padding:10px 20px;background:#f59e0b;color:#fff;border:none;border-radius:10px;font-weight:700;font-size:13px;cursor:pointer">📤 New Alert</button>` : ''}
                 </div>
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:18px">
                     <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:14px;text-align:center">
@@ -37122,7 +37115,7 @@ Automated WFH alert — ${company} Attendance System.`;
                         <div style="font-size:11px;color:#065f46;font-weight:600">Active</div>
                     </div>
                     <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:14px;text-align:center">
-                        <div style="font-size:22px;font-weight:800;color:#dc2626">${pendingResponseCount}</div>
+                        <div style="font-size:22px;font-weight:800;color:#dc2626">${awaitingCount}</div>
                         <div style="font-size:11px;color:#991b1b;font-weight:600">Awaiting Response</div>
                     </div>
                 </div>
@@ -37136,23 +37129,22 @@ Automated WFH alert — ${company} Attendance System.`;
                         <option value="all" ${filterType==='all'?'selected':''}>All Types</option>
                         ${Object.entries(ALERT_TYPES).map(([k,v]) => `<option value="${k}" ${filterType===k?'selected':''}>${v.icon} ${v.label}</option>`).join('')}
                     </select>
-                    <button onclick="_alertsLoad().then(()=>renderView())" style="padding:7px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:12px;background:#fff;cursor:pointer" title="Refresh">🔄 Refresh</button>
+                    <button onclick="_alertsLoad().then(()=>renderView())" style="padding:7px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:12px;background:#fff;cursor:pointer">🔄 Refresh</button>
                 </div>
                 ${filtered.length === 0 ? `
                     <div style="text-align:center;padding:50px 20px;color:#9ca3af">
                         <div style="font-size:40px;margin-bottom:8px">🔔</div>
                         <p style="font-size:14px;font-weight:600">No alerts${filterStatus!=='all'||filterType!=='all'?' matching filters':''}</p>
                         <p style="font-size:12px;margin-top:4px">Use "New Alert" to send one to your field technicians.</p>
-                    </div>
-                ` : filtered.map(a => _alertRenderCard(a)).join('')}
+                    </div>` : filtered.map(a => _alertRenderCard(a)).join('')}
             </div>`;
         }
 
         function _alertRenderCard(a) {
             const meta = ALERT_TYPES[a.type] || { label: a.type, icon: '🔔', color: '#6b7280' };
             const recipients = a.recipients || [];
-            const pendingCount = recipients.filter(r => r.response === 'pending').length;
-            const respondedCount = recipients.length - pendingCount;
+            const sentCount = recipients.filter(r => r.response === 'sent').length;
+            const respondedCount = recipients.length - sentCount;
             const isClosed = a.status === 'closed';
             const ts = a.createdAt ? new Date(a.createdAt).toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '';
 
@@ -37161,29 +37153,29 @@ Automated WFH alert — ${company} Attendance System.`;
                 <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px">
                     <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">
                         <span style="font-size:20px">${meta.icon}</span>
-                        <div style="min-width:0">
+                        <div>
                             <span style="font-size:10px;font-weight:700;color:#fff;background:${meta.color};padding:2px 8px;border-radius:6px;text-transform:uppercase;letter-spacing:.5px">${meta.label}</span>
                             <span style="font-size:10px;color:#9ca3af;margin-left:6px">${ts}</span>
                         </div>
                     </div>
                     <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
                         <span style="font-size:10px;font-weight:700;padding:3px 8px;border-radius:6px;${isClosed ? 'background:#f3f4f6;color:#6b7280' : 'background:#ecfdf5;color:#059669'}">${isClosed ? 'CLOSED' : 'ACTIVE'}</span>
-                        ${!isClosed && _canWrite() ? `<button onclick="_alertClose('${a.id}')" title="Close alert" style="background:none;border:1px solid #d1d5db;border-radius:6px;padding:3px 8px;font-size:10px;cursor:pointer;color:#6b7280">Close ✕</button>` : ''}
+                        ${!isClosed && _canWrite() ? `<button onclick="_alertClose('${a.alertID}')" title="Close" style="background:none;border:1px solid #d1d5db;border-radius:6px;padding:3px 8px;font-size:10px;cursor:pointer;color:#6b7280">Close ✕</button>` : ''}
                     </div>
                 </div>
                 <p style="font-size:13px;color:#1f2937;margin:0 0 12px;line-height:1.5;white-space:pre-wrap">${(a.message||'').replace(/</g,'&lt;')}</p>
-                <div style="font-size:10px;color:#9ca3af;margin-bottom:10px">Sent by: ${(a.sentBy||'Office').replace(/</g,'&lt;')}${a.broadcast ? ' · 📡 Broadcast' : ''}</div>
+                <div style="font-size:10px;color:#9ca3af;margin-bottom:10px">Sent by: ${(a.createdByName||a.createdBy||'Office').replace(/</g,'&lt;')}${a.broadcast ? ' · 📡 Broadcast' : ''}</div>
                 <div style="border-top:1px solid #f3f4f6;padding-top:10px">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
                         <span style="font-size:11px;font-weight:700;color:#374151">Recipients (${recipients.length})</span>
-                        <span style="font-size:10px;color:#6b7280">${respondedCount} responded · ${pendingCount} pending</span>
+                        <span style="font-size:10px;color:#6b7280">${respondedCount} responded · ${sentCount} awaiting</span>
                     </div>
                     <div style="display:flex;flex-wrap:wrap;gap:6px">
                         ${recipients.map(r => {
-                            const rm = ALERT_RESPONSE_META[r.response] || ALERT_RESPONSE_META['pending'];
-                            return `<div style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:8px;font-size:11px;font-weight:600;background:${rm.color}12;color:${rm.color};border:1px solid ${rm.color}30" title="${r.response !== 'pending' && r.respondedAt ? 'Responded: ' + new Date(r.respondedAt).toLocaleString('en-IN') : 'Awaiting response'}">
+                            const rm = ALERT_RESPONSE_META[r.response] || ALERT_RESPONSE_META['sent'];
+                            return `<div style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:8px;font-size:11px;font-weight:600;background:${rm.color}12;color:${rm.color};border:1px solid ${rm.color}30" title="${r.respondedAt ? 'Responded: ' + new Date(r.respondedAt).toLocaleString('en-IN') : 'Awaiting response'}">
                                 <span>${rm.icon}</span>
-                                <span>${(r.name || r.staffID || '').replace(/</g,'&lt;')}</span>
+                                <span>${(r.staffName || r.staffID || '').replace(/</g,'&lt;')}</span>
                                 <span style="font-size:9px;opacity:.7">${rm.label}</span>
                             </div>`;
                         }).join('')}

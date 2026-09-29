@@ -2432,7 +2432,7 @@
         <nav id="bottomNav">
             <button class="nav-pill ${currentView==='projexp'?'active':''}" onclick="switchView('projexp')">🧳 Expenses</button>
             <button class="nav-pill ${currentView==='worklogs'?'active':''}" onclick="switchView('worklogs')">📋 Logs</button>
-            <button class="nav-pill ${currentView==='alerts'?'active':''}" onclick="switchView('alerts')">🔔 Alerts${(()=>{const c=(window._fieldAlerts||[]).filter(a=>a._myResponse==='pending').length;return c>0?' <span style=\"background:#ef4444;color:#fff;font-size:9px;font-weight:800;padding:1px 5px;border-radius:8px;margin-left:2px\">'+c+'</span>':'';})()}</button>
+            <button class="nav-pill ${currentView==='alerts'?'active':''}" onclick="switchView('alerts')">🔔 Alerts${(()=>{const c=(window._fieldAlerts||[]).filter(a=>a.myResponse==='sent').length;return c>0?' <span style=\"background:#ef4444;color:#fff;font-size:9px;font-weight:800;padding:1px 5px;border-radius:8px;margin-left:2px\">'+c+'</span>':'';})()}</button>
             <button class="nav-pill" onclick="handleSignOut()" style="flex:0;padding:10px 12px">
                 <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
             </button>
@@ -2465,7 +2465,6 @@
             staffList       = Array.isArray(sf) ? sf.filter(s=>s.status==='Active') : staffList;
             // Refresh fund data too (catches admin approvals/disbursements while tech is offline)
             await loadFundData();
-            // Refresh alerts (pending only)
             try { await _fieldAlertsLoad(); } catch(e) { console.warn('Alert sync skipped:', e); }
             renderView();
             showToast('✅ Synced with Drive');
@@ -8483,6 +8482,7 @@
 
     // ════════════════════════════════════════════════════════════════
     //  ALERTS — Receive alerts from office, respond (pending only)
+    //  Backend: GET /api/tech/alerts?staffID=..., POST /api/tech/alerts/respond
     // ════════════════════════════════════════════════════════════════
 
     window._fieldAlerts = window._fieldAlerts || [];
@@ -8504,35 +8504,35 @@
         announcement: [{ key: 'acknowledged', label: '👍 Acknowledge', bg: '#2563eb' }]
     };
 
+    // Backend: GET /api/tech/alerts?staffID=...
     async function _fieldAlertsLoad() {
         if (!currentUser) return;
         try {
-            const res = await fetch('/api/tech/alerts', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ staffID: currentUser.staffID, pin: currentUser.pin })
-            });
+            const res = await fetch('/api/tech/alerts?staffID=' + encodeURIComponent(currentUser.staffID));
             if (!res.ok) throw new Error('HTTP ' + res.status);
             const data = await res.json();
-            window._fieldAlerts = (data || []).filter(a => a._myResponse === 'pending');
+            // Only show alerts where tech hasn't responded yet (response === 'sent')
+            window._fieldAlerts = (data || []).filter(a => a.myResponse === 'sent');
             _fieldAlertsLoaded = true;
         } catch (e) {
             console.warn('Field alerts load failed:', e);
+            _fieldAlertsLoaded = true;
         }
     }
 
-    async function _fieldAlertRespond(alertId, response) {
+    // Backend: POST /api/tech/alerts/respond { staffID, pin, alertID, response }
+    async function _fieldAlertRespond(alertID, response) {
         if (!currentUser) { showToast('⚠️ Not signed in'); return; }
         const btn = event?.target;
         if (btn) { btn.disabled = true; btn.textContent = '⏳…'; }
         try {
-            const res = await fetch('/api/tech/alerts/' + alertId + '/respond', {
+            const res = await fetch('/api/tech/alerts/respond', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ staffID: currentUser.staffID, pin: currentUser.pin, response })
+                body: JSON.stringify({ staffID: currentUser.staffID, pin: currentUser.pin, alertID, response })
             });
             if (!res.ok) { const t = await res.text(); throw new Error(t || 'HTTP ' + res.status); }
-            window._fieldAlerts = (window._fieldAlerts || []).filter(a => a.id !== alertId);
+            window._fieldAlerts = (window._fieldAlerts || []).filter(a => a.alertID !== alertID);
             showToast('✅ Response sent');
             renderApp();
         } catch (e) {
@@ -8547,9 +8547,7 @@
             _fieldAlertsLoad().then(() => renderView());
             return;
         }
-
         const alerts = window._fieldAlerts || [];
-
         if (alerts.length === 0) {
             el.innerHTML = `
             <div style="text-align:center;padding:50px 16px">
@@ -8560,7 +8558,6 @@
             </div>`;
             return;
         }
-
         el.innerHTML = `
         <div style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center">
             <h2 style="font-size:16px;font-weight:800;color:#1e1b4b;margin:0">🔔 Pending Alerts <span style="font-size:12px;font-weight:600;color:#dc2626">(${alerts.length})</span></h2>
@@ -8578,9 +8575,9 @@
                     <span style="font-size:10px;color:#9ca3af;margin-left:auto">${ts}</span>
                 </div>
                 <p style="font-size:13px;color:#1f2937;margin:0 0 10px;line-height:1.5;white-space:pre-wrap">${(a.message||'').replace(/</g,'&lt;')}</p>
-                <div style="font-size:10px;color:#9ca3af;margin-bottom:10px">From: ${(a.sentBy||'Office').replace(/</g,'&lt;')}</div>
+                <div style="font-size:10px;color:#9ca3af;margin-bottom:10px">From: ${(a.createdBy||'Office').replace(/</g,'&lt;')}</div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap">
-                    ${btns.map(b => `<button onclick="_fieldAlertRespond('${a.id}','${b.key}')" style="flex:1;min-width:100px;padding:10px;background:${b.bg};color:#fff;border:none;border-radius:10px;font-weight:700;font-size:12px;cursor:pointer">${b.label}</button>`).join('')}
+                    ${btns.map(b => `<button onclick="_fieldAlertRespond('${a.alertID}','${b.key}')" style="flex:1;min-width:100px;padding:10px;background:${b.bg};color:#fff;border:none;border-radius:10px;font-weight:700;font-size:12px;cursor:pointer">${b.label}</button>`).join('')}
                 </div>
             </div>`;
         }).join('')}`;
