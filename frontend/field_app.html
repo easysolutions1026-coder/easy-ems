@@ -8454,6 +8454,16 @@
     // ════════════════════════════════════════════════════════════════
     // TECHNICIAN SELF-SERVICE MODULE
     // ════════════════════════════════════════════════════════════════
+
+    // Toast helper compatible with the tech SS calls (accepts color + duration)
+    function _showToast(msg, color, duration) {
+        const t = document.getElementById('toast');
+        if (!t) { alert(msg); return; }
+        t.textContent = msg;
+        if (color) t.style.background = color;
+        t.classList.add('show');
+        setTimeout(() => { t.classList.remove('show'); t.style.background = ''; }, duration || 2500);
+    }
     // Separate login flow (PIN-based, no Google auth needed) for
     // technicians to mark daily readiness, request leave, report
     // not-well status, and view their own attendance (read-only).
