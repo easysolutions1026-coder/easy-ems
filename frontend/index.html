@@ -8621,6 +8621,7 @@
             { view:'docs',         label:'Documents' },
             { view:'letters',      label:'Letters' },
             { view:'worklogs',     label:'Project Work Logs' },
+            { view:'alerts',       label:'Alerts (send/track)' },
             { view:'settings',     label:'Settings' },
             { view:'auditlog',     label:'Audit Log' },
         ];
@@ -8660,6 +8661,10 @@
             const perms = settings?.rolePermissions || DEFAULT_ROLE_PERMS;
             const result = {};
             Object.entries(perms).forEach(([role, views]) => {
+                // Auto-migrate: roles with 'worklogs' but missing 'alerts' get it added
+                if (Array.isArray(views) && views.includes('worklogs') && !views.includes('alerts') && !views.includes('*')) {
+                    views.push('alerts');
+                }
                 result[role] = new Set(views);
             });
             return result;
