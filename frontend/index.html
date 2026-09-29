@@ -27124,7 +27124,7 @@ ${'─'.repeat(50)}
             // For Leave Request: attendance stays as ApprovedLeave (already set by tech)
             // For Not Well: attendance stays as NotWell (wage calc handles paid/unpaid via limit)
             _showToast(`✓ ${s.name}'s ${entry.status === 'NOT_WELL' ? 'sick leave' : 'leave request'} approved`, '#15803d');
-            await saveData('staff');
+            await saveData('staff', staff);
             renderStaff(document.getElementById('mainContent'));
         }
 
@@ -27144,7 +27144,7 @@ ${'─'.repeat(50)}
                 }
             }
             _showToast(`✕ ${s.name}'s request rejected → Unapproved Leave`, '#dc2626');
-            await saveData('staff');
+            await saveData('staff', staff);
             renderStaff(document.getElementById('mainContent'));
         }
 
@@ -27155,7 +27155,7 @@ ${'─'.repeat(50)}
             if (!entry) return;
             entry.paidTillDate = paidTillDate;
             _showToast(`Paid standby wage extended till ${paidTillDate} for ${s.name}`, '#0d7c66');
-            await saveData('staff');
+            await saveData('staff', staff);
         }
 
         async function _markUnmarkedAsUnapproved(staffID) {
@@ -27182,7 +27182,7 @@ ${'─'.repeat(50)}
                 s.attendance.push({ attID: 'ATT' + Date.now(), date: today, status: 'UnApprovedLeave', staffID: s.staffID, staffName: s.name, _autoByTechSS: false, enteredAt: new Date().toISOString() });
             }
             _showToast(`⚠️ ${s.name} marked as Unapproved Leave (not marked by 09:00)`, '#dc2626');
-            await saveData('staff');
+            await saveData('staff', staff);
             renderStaff(document.getElementById('mainContent'));
         }
 
@@ -27227,7 +27227,7 @@ ${'─'.repeat(50)}
             if (totalNoShows >= 2) {
                 alert(`⚠️ ${s.name} has received ${totalNoShows} no-show warnings.\n\nPer policy, 2+ warnings trigger disciplinary action or termination review.\n\nThis also carries 30% weightage on promotion/increment proposals.`);
             }
-            await saveData('staff');
+            await saveData('staff', staff);
             renderStaff(document.getElementById('mainContent'));
         }
 
