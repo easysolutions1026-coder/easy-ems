@@ -1,14 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <!-- PWA Support -->
-    <link rel="manifest" href="/imse-ems/manifest.json">
-    <meta name="theme-color" content="#1a56db">
-    <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="default">
-    <meta name="apple-mobile-web-app-title" content="IMSE Field App">
-    <link rel="apple-touch-icon" href="/imse-ems/icons/icon-192.png">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
     <title>IMSE Field App</title>
@@ -8476,7 +8468,7 @@
     // ════════════════════════════════════════════════════════════════
 
     let _techSS = null;   // { staffID, pin, name, staffRec } — logged-in technician
-    const TECH_API = '/imse-ems/api/tech/';
+    const TECH_API = '/api/tech/';
 
     // ── PIN LOGIN SCREEN ──────────────────────────────────────────
     async function _techSelfServiceLogin() {
@@ -8547,7 +8539,6 @@
                 return;
             }
             _techSS = { staffID: sel.value, pin: pin.value, name: data.staff.name, staffRec: data.staff };
-            initPushNotifications(sel.value);
             _techSSRenderDashboard();
         } catch (e) {
             err.textContent = 'Network error — check internet connection';
@@ -8636,6 +8627,13 @@
                     ${_techSSRenderMonthGrid(s, now.getFullYear(), now.getMonth() + 1)}
                 </div>
 
+                <!-- Wage Summary (read-only) -->
+                <div class="card p-4">
+                    <h2 class="font-bold text-sm mb-3" style="color:var(--navy)">💰 Wage Summary — ${monthLabel}</h2>
+                    <p class="text-[9px] text-gray-400 mb-3">Approximate estimate based on attendance. Final payslip may differ.</p>
+                    ${_techSSRenderWageSummary(s, now.getFullYear(), now.getMonth() + 1)}
+                </div>
+
                 <!-- Recent Readiness Log -->
                 <div class="card p-4">
                     <h2 class="font-bold text-sm mb-3" style="color:var(--navy)">📜 Recent Readiness Log</h2>
@@ -8716,6 +8714,169 @@
                 </div>
             </div>`;
         }).join('');
+    }
+
+    // ── WAGE SUMMARY — read-only estimated view ───────────────────
+    // Mirrors the main app's calcTechWage logic but simplified for
+    // display only. Uses attendance data + wage params from the staff
+    // record. No copy/print/share — just a visual reference.
+    function _techSSRenderWageSummary(staff, year, month) {
+        const basic = +(staff.techBasic || 0);
+        if (!basic) return '<p class="text-xs text-gray-400 italic">Wage parameters not set. Contact office.</p>';
+
+        const hraPct = +(staff.techHRAPct ?? 50);
+        const daPct  = +(staff.techDAPct ?? 65);
+        const gpPct  = +(staff.techGPPct ?? 30);
+        const varA   = +(staff.techVariable || 0);
+        const hra = +(basic * hraPct / 100).toFixed(2);
+        const da  = +(basic * daPct / 100).toFixed(2);
+        const gp  = +(basic * gpPct / 100).toFixed(2);
+        const fixedAllow = +(hra + da + gp).toFixed(2);
+        const dailyWage = +((basic + fixedAllow + varA) / 30).toFixed(4);
+        const standbyWage = +((basic + fixedAllow) / 30).toFixed(4);
+        const travelAmt = +(staff.travelAllow || 4000);
+
+        // Count attendance by status for this month
+        // Pay period: 26th prev month → 25th this month
+        const pm = month === 1 ? 12 : month - 1;
+        const py = month === 1 ? year - 1 : year;
+        const startDate = `${py}-${String(pm).padStart(2,'0')}-26`;
+        const endDate   = `${year}-${String(month).padStart(2,'0')}-25`;
+
+        const counts = {};
+        (staff.attendance || []).forEach(a => {
+            if (!a.date || a.date < startDate || a.date > endDate) return;
+            counts[a.status] = (counts[a.status] || 0) + 1;
+        });
+
+        const working = counts.Working || 0;
+        const standby = counts.StandBy || 0;
+        const outstation = counts.Outstation || 0;
+        const anchorage = counts.Anchorage || 0;
+        const sailing = counts.Sailing || 0;
+        const notWell = counts.NotWell || 0;
+        const approvedLeave = counts.ApprovedLeave || 0;
+        const unapprovedLeave = counts.UnApprovedLeave || 0;
+        const engaged = working + outstation + anchorage + sailing;
+        const maxPaidSick = 2;
+        const nwPaidDays = Math.min(notWell, maxPaidSick);
+
+        // Earnings
+        const wP = +(working * dailyWage).toFixed(2);
+        const outP = +(outstation * dailyWage).toFixed(2);
+        const outA = +(outstation * dailyWage * (+(staff.outstationPct ?? 20)) / 100).toFixed(2);
+        const ancP = +(anchorage * dailyWage).toFixed(2);
+        const ancA = +(anchorage * dailyWage * (+(staff.anchoragePct ?? 30)) / 100).toFixed(2);
+        const salP = +(sailing * dailyWage).toFixed(2);
+        const salA = +(sailing * dailyWage * (+(staff.sailingPct ?? 30)) / 100).toFixed(2);
+        const sbyP = +(standby * standbyWage).toFixed(2);
+        const nwP  = +(nwPaidDays * standbyWage).toFixed(2);
+
+        // Threshold bonus
+        let t15 = 0, t20 = 0;
+        if (engaged >= 21) {
+            t15 = +((5) * dailyWage * 0.5).toFixed(2);   // days 16-20
+            t20 = +((engaged - 20) * dailyWage * 0.65).toFixed(2); // days 21+
+        } else if (engaged >= 16) {
+            t15 = +((engaged - 15) * dailyWage * 0.5).toFixed(2);
+        }
+
+        const grossBase = wP + outP + ancP + salP + sbyP + nwP + outA + ancA + salA + t15 + t20;
+        // Leave deductions
+        const alDeduct = +(approvedLeave * dailyWage * 0.5).toFixed(2);
+        const ulDeduct = +(unapprovedLeave * dailyWage).toFixed(2);  // simplified — no no-show split here
+        const gross = +(grossBase - alDeduct - ulDeduct + travelAmt).toFixed(2);
+
+        // Deductions
+        const pfPct = +(staff.techPFPct ?? 12);
+        const pfBasis = basic + fixedAllow;
+        const pfAmt = +(pfBasis * pfPct / 100).toFixed(2);
+        const esicPct = +(staff.techESICPct ?? 0.75);
+        const esicWages = basic + fixedAllow + varA;
+        const esicAmt = esicWages > 21000 ? 0 : +(esicWages * esicPct / 100).toFixed(2);
+        const ptAmt = 200;
+        const tdsPct = 1;
+        const tdsAmt = +(gross * tdsPct / 100).toFixed(2);
+        const totalDed = +(pfAmt + esicAmt + ptAmt + tdsAmt).toFixed(2);
+        const netPay = +(gross - totalDed).toFixed(2);
+
+        const INR = n => '₹' + (+(n || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const periodLabel = `26 ${new Date(py, pm - 1).toLocaleDateString('en-IN',{month:'short'})} → 25 ${new Date(year, month - 1).toLocaleDateString('en-IN',{month:'short', year:'numeric'})}`;
+
+        // Build earnings rows
+        const earnings = [
+            working > 0    && { label: 'Working', days: working, rate: dailyWage, amt: wP },
+            outstation > 0 && { label: 'Outstation', days: outstation, rate: dailyWage, amt: outP },
+            outstation > 0 && { label: 'Outstation Allowance', days: outstation, rate: '', amt: outA },
+            anchorage > 0  && { label: 'Anchorage', days: anchorage, rate: dailyWage, amt: ancP },
+            anchorage > 0  && { label: 'Anchorage Allowance', days: anchorage, rate: '', amt: ancA },
+            sailing > 0    && { label: 'Sailing', days: sailing, rate: dailyWage, amt: salP },
+            sailing > 0    && { label: 'Sailing Allowance', days: sailing, rate: '', amt: salA },
+            standby > 0    && { label: 'Stand By', days: standby, rate: standbyWage, amt: sbyP },
+            nwPaidDays > 0 && { label: `Not Well (${nwPaidDays}/${notWell}d paid)`, days: nwPaidDays, rate: standbyWage, amt: nwP },
+            t15 > 0        && { label: 'Threshold Bonus (16-20d)', days: '', rate: '', amt: t15 },
+            t20 > 0        && { label: 'Threshold Bonus (21+d)', days: '', rate: '', amt: t20 },
+            { label: 'Travel Allowance', days: '', rate: '', amt: travelAmt },
+        ].filter(Boolean);
+
+        const deductions = [
+            { label: `PF ${pfPct}%`, amt: pfAmt },
+            esicAmt > 0 ? { label: `ESIC ${esicPct}%`, amt: esicAmt } : { label: 'ESIC', amt: 0, nil: true },
+            { label: 'PT', amt: ptAmt },
+            { label: `TDS ${tdsPct}%`, amt: tdsAmt },
+        ];
+
+        const leaveRows = [
+            approvedLeave > 0 && { label: `Approved Leave (${approvedLeave}d × 50%)`, amt: -alDeduct },
+            unapprovedLeave > 0 && { label: `Unapproved Leave (${unapprovedLeave}d)`, amt: -ulDeduct },
+        ].filter(Boolean);
+
+        return `
+        <p class="text-[10px] text-gray-500 mb-2">Period: <strong>${periodLabel}</strong> · Engaged: <strong style="color:#15803d">${engaged}d</strong> · Stand By: <strong style="color:#b45309">${standby}d</strong></p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:11px">
+            <!-- Earnings -->
+            <div style="border:1px solid #dbeafe;border-radius:10px;overflow:hidden">
+                <div style="background:#1d4ed8;padding:6px 10px;font-weight:700;font-size:10px;color:#fff">EARNINGS</div>
+                <table style="width:100%;border-collapse:collapse">
+                    ${earnings.map(r => `<tr style="border-bottom:1px solid #f1f5f9">
+                        <td style="padding:5px 8px;color:#374151;font-size:10px">${r.label}${r.days ? ` <span style="color:#9ca3af">(${r.days}d)</span>` : ''}</td>
+                        <td style="padding:5px 8px;text-align:right;font-weight:500;font-size:10px">${INR(r.amt)}</td>
+                    </tr>`).join('')}
+                    ${leaveRows.map(r => `<tr style="border-bottom:1px solid #fef2f2;background:#fef2f2">
+                        <td style="padding:5px 8px;color:#dc2626;font-size:10px">${r.label}</td>
+                        <td style="padding:5px 8px;text-align:right;font-weight:500;font-size:10px;color:#dc2626">${INR(r.amt)}</td>
+                    </tr>`).join('')}
+                    <tr style="background:#eff6ff">
+                        <td style="padding:6px 8px;font-weight:700;color:#1d4ed8;font-size:10px">GROSS</td>
+                        <td style="padding:6px 8px;text-align:right;font-weight:700;color:#1d4ed8;font-size:10px">${INR(gross)}</td>
+                    </tr>
+                </table>
+            </div>
+            <!-- Deductions -->
+            <div style="border:1px solid #fee2e2;border-radius:10px;overflow:hidden">
+                <div style="background:#dc2626;padding:6px 10px;font-weight:700;font-size:10px;color:#fff">DEDUCTIONS</div>
+                <table style="width:100%;border-collapse:collapse">
+                    ${deductions.map(r => `<tr style="border-bottom:1px solid #f1f5f9;${r.nil?'opacity:0.5':''}">
+                        <td style="padding:5px 8px;color:#374151;font-size:10px">${r.label}</td>
+                        <td style="padding:5px 8px;text-align:right;font-weight:500;font-size:10px">${r.nil ? 'NIL' : INR(r.amt)}</td>
+                    </tr>`).join('')}
+                    <tr style="background:#fef2f2">
+                        <td style="padding:6px 8px;font-weight:700;color:#dc2626;font-size:10px">TOTAL</td>
+                        <td style="padding:6px 8px;text-align:right;font-weight:700;color:#dc2626;font-size:10px">${INR(totalDed)}</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+        <!-- Net Pay -->
+        <div style="background:linear-gradient(135deg,#0f766e,#0891b2);border-radius:10px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+            <div>
+                <div style="color:#ccfbf1;font-size:10px;font-weight:500">Gross ${INR(gross)} − Deductions ${INR(totalDed)}</div>
+            </div>
+            <div>
+                <span style="color:#99f6e4;font-size:9px;margin-right:4px">NET PAY</span>
+                <span style="color:#f0fdfa;font-size:18px;font-weight:700">${INR(netPay)}</span>
+            </div>
+        </div>`;
     }
 
     // ── MARK READY ────────────────────────────────────────────────
@@ -8938,63 +9099,5 @@
 </script>
 <script src="https://accounts.google.com/gsi/client" onload="gisLoaded()" async></script>
 <script src="https://apis.google.com/js/api.js" onload="gapiLoaded()" async></script>
-<script>
-// ---- PWA: Register Service Worker ----
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/imse-ems/service-worker.js', { scope: '/imse-ems/' })
-      .then((reg) => console.log('SW registered'))
-      .catch((err) => console.error('SW failed:', err));
-  });
-}
-
-// ---- PUSH NOTIFICATIONS ----
-const VAPID_PUBLIC_KEY = 'BJKPctkYlzveOIrbSNSLR5sas_e_oa5OIbg3Dlgu_YvcV7lhWKUPL_MKGZJQZjoNZSWNDkITlLcjoT5-hq46Hs4';  // ← replace in Step 9
-
-function urlBase64ToUint8Array(base64String) {
-  const padding = '='.repeat((4 - base64String.length % 4) % 4);
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const rawData = atob(base64);
-  const arr = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; i++) arr[i] = rawData.charCodeAt(i);
-  return arr;
-}
-
-async function initPushNotifications(technicianId) {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-    console.log('Push not supported');
-    return;
-  }
-
-  const permission = await Notification.requestPermission();
-  if (permission !== 'granted') {
-    console.log('Notification permission denied');
-    return;
-  }
-
-  const registration = await navigator.serviceWorker.ready;
-  let subscription = await registration.pushManager.getSubscription();
-
-  if (!subscription) {
-    subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
-    });
-  }
-
-  // Send subscription to your backend
-  await fetch('/imse-ems/api/push/subscribe', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ subscription, technicianId })
-  });
-
-  console.log('Push notifications active');
-}
-
-// ---- CALL THIS AFTER TECHNICIAN LOGS IN ----
-// Example: initPushNotifications('tech-001');
-// Replace 'tech-001' with the actual logged-in technician's ID
-</script>
 </body>
 </html>

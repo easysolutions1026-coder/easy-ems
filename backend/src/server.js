@@ -6,7 +6,6 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { setupPushRoutes } from './push-service.js';
 
 import { prisma } from './db/prisma.js';
 import { verifyGoogleToken } from './auth/google-oauth.js';
@@ -32,16 +31,6 @@ app.use(cors({
 
 app.use(express.json({ limit: '25mb' }));
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
-
-// Strip /imse-ems prefix from custom domain requests
-app.use((req, res, next) => {
-  if (req.url.startsWith('/imse-ems/')) {
-    req.url = req.url.replace('/imse-ems', '');
-  } else if (req.url === '/imse-ems') {
-    req.url = '/';
-  }
-  next();
-});
 
 // Health checks
 app.get('/healthz', (req, res) => res.json({ ok: true, ts: new Date().toISOString() }));
@@ -185,6 +174,18 @@ techRouter.post('/login', async (req, res) => {
       techReadiness: staff.techReadiness || [],
       registeredMobile: staff.registeredMobile || '',
       warnings: staff.warnings || [],
+      // Wage parameters — for read-only wage summary display
+      techBasic: staff.techBasic || 0,
+      techHRAPct: staff.techHRAPct ?? 50,
+      techDAPct: staff.techDAPct ?? 65,
+      techGPPct: staff.techGPPct ?? 30,
+      techVariable: staff.techVariable || 0,
+      techPFPct: staff.techPFPct ?? 12,
+      techESICPct: staff.techESICPct ?? 0.75,
+      travelAllow: staff.travelAllow || 4000,
+      outstationPct: staff.outstationPct ?? 20,
+      sailingPct: staff.sailingPct ?? 30,
+      anchoragePct: staff.anchoragePct ?? 30,
     };
 
     res.json({ ok: true, staff: safeStaff });
@@ -292,6 +293,17 @@ techRouter.post('/readiness', async (req, res) => {
         attendance: staff.attendance || [],
         techReadiness: staff.techReadiness || [],
         warnings: staff.warnings || [],
+        techBasic: staff.techBasic || 0,
+        techHRAPct: staff.techHRAPct ?? 50,
+        techDAPct: staff.techDAPct ?? 65,
+        techGPPct: staff.techGPPct ?? 30,
+        techVariable: staff.techVariable || 0,
+        techPFPct: staff.techPFPct ?? 12,
+        techESICPct: staff.techESICPct ?? 0.75,
+        travelAllow: staff.travelAllow || 4000,
+        outstationPct: staff.outstationPct ?? 20,
+        sailingPct: staff.sailingPct ?? 30,
+        anchoragePct: staff.anchoragePct ?? 30,
       }
     });
   } catch (err) {
@@ -301,7 +313,6 @@ techRouter.post('/readiness', async (req, res) => {
 });
 
 // Mount tech routes — NO requireGoogleAuth on this path
-await setupPushRoutes(app);
 app.use('/api/tech', techRouter);
 
 // API routes (must come before static)
