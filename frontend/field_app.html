@@ -8576,7 +8576,10 @@
                             <p class="text-orange-200 text-[10px]">Technician Self-Service</p>
                         </div>
                     </div>
-                    <button onclick="_techSSLogout()" class="text-orange-200 text-xs hover:text-white">Logout ↗</button>
+                    <div class="flex items-center gap-3">
+                        <button onclick="_techSSRefresh()" class="text-orange-200 text-xs hover:text-white">🔄 Refresh</button>
+                        <button onclick="_techSSLogout()" class="text-orange-200 text-xs hover:text-white">Logout ↗</button>
+                    </div>
                 </div>
             </header>
 
@@ -9084,6 +9087,27 @@
         } catch (e) {
             console.error('Tech SS save error:', e);
             _showToast('⚠️ Network error — check internet and try again', '#dc2626');
+        }
+        _techSSRenderDashboard();
+    }
+
+    // Re-fetch the tech's data from server (picks up office approvals/rejections)
+    async function _techSSRefresh() {
+        try {
+            const res = await fetch(TECH_API + 'login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ staffID: _techSS.staffID, pin: _techSS.pin })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                _techSS.staffRec = data.staff;
+                _showToast('🔄 Data refreshed', '#0d7c66', 1500);
+            } else {
+                _showToast('⚠️ Could not refresh — try again', '#dc2626');
+            }
+        } catch (e) {
+            _showToast('⚠️ Network error', '#dc2626');
         }
         _techSSRenderDashboard();
     }
