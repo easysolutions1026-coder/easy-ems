@@ -324,8 +324,8 @@ app.use('/api/tech', techRouter);
 
 // API routes (must come before static)
 app.use('/api', requireGoogleAuth);
-app.use('/api/data', enforceRoleAccess, dataRoutes);
 app.use('/api/data/alerts', alertRoutes);
+app.use('/api/data', enforceRoleAccess, dataRoutes);
 
 // Static frontend with proper UTF-8 headers
 const frontendDir = '/app/frontend';
