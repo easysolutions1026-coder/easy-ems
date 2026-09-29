@@ -37069,6 +37069,7 @@ Automated WFH alert — ${company} Attendance System.`;
             try {
                 await _alertSend({
                     type,
+                    title: ALERT_TYPES[type]?.label || type,
                     message,
                     recipientIDs,
                     recipientNames,
