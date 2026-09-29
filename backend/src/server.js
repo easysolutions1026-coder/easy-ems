@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { prisma } from './db/prisma.js';
 import { verifyGoogleToken } from './auth/google-oauth.js';
 import dataRoutes from './routes/data.js';
+import alertRoutes, { getTechAlerts, respondToAlert } from './routes/alerts.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -314,12 +315,17 @@ techRouter.post('/readiness', async (req, res) => {
   }
 });
 
+// Tech alert routes — PIN-based, no Google auth
+techRouter.get('/alerts', getTechAlerts);
+techRouter.post('/alerts/respond', respondToAlert);
+
 // Mount tech routes — NO requireGoogleAuth on this path
 app.use('/api/tech', techRouter);
 
 // API routes (must come before static)
 app.use('/api', requireGoogleAuth);
 app.use('/api/data', enforceRoleAccess, dataRoutes);
+app.use('/api/data/alerts', alertRoutes);
 
 // Static frontend with proper UTF-8 headers
 const frontendDir = '/app/frontend';
