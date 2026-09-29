@@ -239,6 +239,15 @@
         if (b && typeof b.text === 'function') return b.text();
         return String(b);
       }).then(function(text) {
+        // Multipart body: find the last JSON block (object or array).
+        // The Drive upload FormData has metadata {name:...} then the
+        // actual data blob which may be an array [...] or an object {...}.
+        // Try array blocks first (staff, expenses, etc. are arrays),
+        // then fall back to object blocks (settings is an object).
+        var arrayBlocks = text.match(/\[[\s\S]*?\](?=\s*--|\s*$)/g) || [];
+        for (var i = arrayBlocks.length - 1; i >= 0; i--) {
+          try { var parsed = JSON.parse(arrayBlocks[i]); if (Array.isArray(parsed)) return parsed; } catch (e) {}
+        }
         var jsonBlocks = text.match(/\{[\s\S]*?\}(?=\s*--|\s*$)/g) || [];
         for (var i = jsonBlocks.length - 1; i >= 0; i--) {
           try { return JSON.parse(jsonBlocks[i]); } catch (e) {}
