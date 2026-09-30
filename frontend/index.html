@@ -9232,8 +9232,9 @@
             // Compute summaries
             const pending  = fundRequests.filter(r => r.status === 'Pending');
             const approved = fundRequests.filter(r => r.status === 'Approved');  // approved but not yet disbursed
-            const activePools = fundPools.filter(p => p.status === 'Active').sort((a,b) => (b.poolID||b.frID||'').localeCompare(a.poolID||a.frID||''));
-            const closedPools = fundPools.filter(p => p.status === 'Closed').sort((a,b) => (b.poolID||b.frID||'').localeCompare(a.poolID||a.frID||''));
+            const _poolSortNum = p => { const m = (p.poolID||'').match(/(\d+)$/); return m ? parseInt(m[1]) : 0; };
+            const activePools = fundPools.filter(p => p.status === 'Active').sort((a,b) => _poolSortNum(b) - _poolSortNum(a));
+            const closedPools = fundPools.filter(p => p.status === 'Closed').sort((a,b) => _poolSortNum(b) - _poolSortNum(a));
             const totalInField = activePools.reduce((s,p) => s + _computePoolBalance(p).balance, 0);
             const fyNow = _fyOf();
             const thisFYDisbursed = fundPools.filter(p => p.fy === fyNow).reduce((s,p) => s + (parseFloat(p.disbursedAmount)||0), 0);
