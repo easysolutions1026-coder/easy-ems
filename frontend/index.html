@@ -26805,6 +26805,15 @@ ${'─'.repeat(50)}
                     // Upload to Drive
                     const driveFileId = await uploadFileToDriveFolder(f, docsFolderId);
 
+                    // Make it viewable by anyone with the link (so mobile preview works without Google sign-in)
+                    try {
+                        await fetch('https://www.googleapis.com/drive/v3/files/' + driveFileId + '/permissions', {
+                            method: 'POST',
+                            headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ role: 'reader', type: 'anyone' })
+                        });
+                    } catch(e) { console.warn('Could not set public permission:', e); }
+
                     _staffDocsBuf.push({
                         id:          'DOC'+Date.now()+Math.floor(Math.random()*999),
                         type:        _staffDocGuessType(f.name),
