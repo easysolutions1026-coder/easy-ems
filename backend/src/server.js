@@ -189,6 +189,25 @@ techRouter.post('/login', async (req, res) => {
       outstationPct: staff.outstationPct ?? 20,
       sailingPct: staff.sailingPct ?? 30,
       anchoragePct: staff.anchoragePct ?? 30,
+      // Document fields — read-only display in field app
+      pan: staff.pan || '',
+      aadhar: staff.aadhar || '',
+      pfNumber: staff.pfNumber || '',
+      esicNumber: staff.esicNumber || '',
+      passport: staff.passport || '',
+      passportExpiry: staff.passportExpiry || null,
+      drivingLicence: staff.drivingLicence || '',
+      dlExpiry: staff.dlExpiry || null,
+      cdc: staff.cdc || '',
+      cdcExpiry: staff.cdcExpiry || null,
+      profCert: staff.profCert || '',
+      courseCert: staff.courseCert || '',
+      courseCertExpiry: staff.courseCertExpiry || null,
+      documents: (staff.documents || []).map(d => ({
+        id: d.id, type: d.type, label: d.label, fileName: d.fileName,
+        expiry: d.expiry || null, notes: d.notes || '',
+        mime: d.mime || '', size: d.size || 0
+      }))
     };
 
     res.json({ ok: true, staff: safeStaff });
@@ -324,8 +343,8 @@ app.use('/api/tech', techRouter);
 
 // API routes (must come before static)
 app.use('/api', requireGoogleAuth);
-app.use('/api/data/alerts', alertRoutes);
 app.use('/api/data', enforceRoleAccess, dataRoutes);
+app.use('/api/data/alerts', alertRoutes);
 
 // Static frontend with proper UTF-8 headers
 const frontendDir = '/app/frontend';
