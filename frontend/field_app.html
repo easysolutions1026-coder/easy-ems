@@ -955,8 +955,10 @@
                 </div>
                 <div>
                     <label style="font-size:11px;font-weight:600;color:#9f1239">Customer</label>
-                    <input type="text" id="gwCustomer" list="gwCustomerList" class="field-input" style="font-size:13px" placeholder="e.g. THE SHIPPING CORPORATION OF INDIA LTD"/>
-                    <datalist id="gwCustomerList"></datalist>
+                    <select id="gwCustomer" class="field-input" style="font-size:13px">
+                        <option value="">— Select Customer —</option>
+                    </select>
+                    <input type="text" id="gwCustomerOther" class="field-input" style="font-size:13px;display:none;margin-top:4px" placeholder="Enter customer name"/>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
                     <div>
@@ -7505,16 +7507,32 @@
         const projAuto = (wl.ref ? wl.ref + ' - ' : '') + (wl.project || wl.vessel || '');
 
         document.getElementById('gwProjectNo').value    = gw.projectNo    || projAuto || '';
-        document.getElementById('gwCustomer').value     = gw.customer     || wl.client || '';
 
-        // Populate the Customer datalist from unique client names across
-        // projectExpenses + workLogs. Gives a dropdown-like autocomplete
-        // while still allowing free text for new clients.
+        // Populate the Customer dropdown from unique client names across
+        // projectExpenses + workLogs, with an "Other" option for new clients.
         const clientSet = new Set();
         (projectExpenses || []).forEach(p => { if (p.clientName) clientSet.add(p.clientName); });
         (workLogs || []).forEach(w => { if (w.client) clientSet.add(w.client); });
-        const dlEl = document.getElementById('gwCustomerList');
-        if (dlEl) dlEl.innerHTML = [...clientSet].sort().map(c => `<option value="${c.replace(/"/g,'&quot;')}"/>`).join('');
+        const selEl = document.getElementById('gwCustomer');
+        const otherEl = document.getElementById('gwCustomerOther');
+        const clients = [...clientSet].sort();
+        const currentVal = gw.customer || wl.client || '';
+        selEl.innerHTML = '<option value="">— Select Customer —</option>'
+            + clients.map(c => `<option value="${c.replace(/"/g,'&quot;')}" ${c === currentVal ? 'selected' : ''}>${c}</option>`).join('')
+            + '<option value="__OTHER__">✏️ Other (type manually)</option>';
+        // If current value isn't in the list, select "Other" and show text input
+        if (currentVal && !clients.includes(currentVal)) {
+            selEl.value = '__OTHER__';
+            otherEl.value = currentVal;
+            otherEl.style.display = '';
+        } else {
+            otherEl.value = '';
+            otherEl.style.display = 'none';
+        }
+        selEl.onchange = function() {
+            otherEl.style.display = this.value === '__OTHER__' ? '' : 'none';
+            if (this.value !== '__OTHER__') otherEl.value = '';
+        };
         document.getElementById('gwDateFrom').value     = gw.dateFrom     || wl.workStartDate || '';
         document.getElementById('gwDateTo').value       = gw.dateTo       || wl.workEndDate || '';
         document.getElementById('gwRemarks').value      = gw.remarks      || '';
@@ -7552,7 +7570,7 @@
     function _collectGrowthOfWorkFromForm() {
         return {
             projectNo:    document.getElementById('gwProjectNo').value.trim(),
-            customer:     document.getElementById('gwCustomer').value.trim(),
+            customer:     (document.getElementById('gwCustomer').value === '__OTHER__' ? document.getElementById('gwCustomerOther').value.trim() : document.getElementById('gwCustomer').value.trim()),
             dateFrom:     document.getElementById('gwDateFrom').value,
             dateTo:       document.getElementById('gwDateTo').value,
             workItems:    _gwRows.map(r => ({
