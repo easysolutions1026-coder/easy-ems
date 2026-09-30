@@ -9075,7 +9075,8 @@
             html += attachedDocs.map((d, i) => {
                 const expired  = d.expiry && d.expiry < today;
                 const expiring = d.expiry && d.expiry <= warn30 && !expired;
-                return `<div onclick="_techSSViewDoc(${i})" style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer">
+                const hasDrive = !!d.driveFileId;
+                return `<div onclick="${hasDrive ? `window.open('https://drive.google.com/file/d/${d.driveFileId}/view','_blank')` : ''}" style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;${hasDrive ? 'cursor:pointer' : ''}">
                     <span style="font-size:16px">${(d.mime||'').startsWith('image/') ? '🖼️' : (d.mime||'') === 'application/pdf' ? '📕' : '📄'}</span>
                     <div style="flex:1;min-width:0">
                         <p style="font-size:11px;font-weight:600;color:#1f2937;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.label || d.fileName}</p>
@@ -9084,8 +9085,9 @@
                             ${d.expiry ? `<span style="margin-left:4px;color:${expired ? '#dc2626' : expiring ? '#d97706' : '#6b7280'};font-weight:${expired||expiring?'700':'400'}">Exp: ${d.expiry}${expired ? ' ⚠️' : expiring ? ' ⚠️' : ''}</span>` : ''}
                         </p>
                     </div>
-                    <span style="font-size:10px;color:#6b7280">👁</span>
+                    ${hasDrive ? '<span style="font-size:10px;color:#2563eb">☁️ View</span>' : ''}
                 </div>`;
+            }).join('');
             }).join('');
             html += '</div>';
         }
