@@ -8379,6 +8379,18 @@
                                 <!-- Lock banner -->
                                 <div id="lockBanner" style="display:none;font-size:11px;font-weight:600;padding:4px 12px;border-radius:8px;background:#fef9c3;border:1px solid #fde68a;color:#92400e;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
                                 <!-- User avatar + name -->
+                                ${_bmsSession ? `
+                                <div style="display:flex;align-items:center;gap:8px;background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:6px 12px">
+                                    <div style="width:28px;height:28px;border-radius:50%;background:linear-gradient(135deg,#f59e0b,#ef4444);display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:700">🔐</div>
+                                    <div style="line-height:1.2">
+                                        <div style="font-size:12px;font-weight:700;color:#15803d">${_bmsSession.name}</div>
+                                        <div style="font-size:9px;color:#6b7280">${_bmsSession.role} · <a href="javascript:void(0)" onclick="_logout()" style="color:#dc2626;text-decoration:none">Sign out</a></div>
+                                    </div>
+                                </div>
+                                <button onclick="switchView('auditlog')" class="p-2 hover:bg-gray-100 rounded-lg" title="Audit Log">
+                                    <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                                </button>
+                                ` : `
                                 <div style="display:flex;align-items:center;gap:8px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:10px;padding:6px 12px">
                                     ${currentUser?.picture
                                         ? `<img src="${currentUser.picture}" style="width:28px;height:28px;border-radius:50%;object-fit:cover" referrerpolicy="no-referrer"/>`
@@ -8388,16 +8400,7 @@
                                         <div style="font-size:10px;color:#64748b">${currentUser?.email||''}</div>
                                     </div>
                                 </div>
-                                ${_bmsSession ? `
-                                <div style="display:flex;align-items:center;gap:8px;background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:6px 10px">
-                                    <div>
-                                        <div style="font-size:11px;font-weight:700;color:#15803d">🔐 ${_bmsSession.name}</div>
-                                        <div style="font-size:9px;color:#6b7280">${_bmsSession.role} · <a href="javascript:void(0)" onclick="_logout()" style="color:#dc2626;text-decoration:none">Sign out</a></div>
-                                    </div>
-                                </div>
-                                <button onclick="switchView('auditlog')" class="p-2 hover:bg-gray-100 rounded-lg" title="Audit Log">
-                                    <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-                                </button>` : ''}
+                                `}
                                 <button onclick="handleSignOut()" class="p-2 hover:bg-gray-100 rounded-lg" title="Sign Out">
                                     <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
                                 </button>
