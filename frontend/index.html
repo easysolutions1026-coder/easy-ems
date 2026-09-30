@@ -26785,27 +26785,40 @@ ${'─'.repeat(50)}
 
         async function staffDocsAddFiles(inputEl) {
             const files = Array.from(inputEl.files || []);
+            if (!files.length) return;
+
+            // Get or create a StaffDocs subfolder in Drive
+            let docsFolderId;
+            try {
+                docsFolderId = await getOrCreateSubFolder('StaffDocs');
+            } catch (e) {
+                alert('Could not create StaffDocs folder in Drive: ' + e.message);
+                return;
+            }
+
             for (const f of files) {
-                if (f.size > 3*1024*1024) { alert(`"${f.name}" is larger than 3MB and will be skipped.`); continue; }
+                if (f.size > 5*1024*1024) { alert(`"${f.name}" is larger than 5MB and will be skipped.`); continue; }
                 try {
-                    const dataUrl = await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=()=>rej(new Error('Read failed'));r.readAsDataURL(f);});
+                    // Upload to Drive
+                    const driveFileId = await uploadFileToDriveFolder(f, docsFolderId);
+
                     _staffDocsBuf.push({
-                        id:        'DOC'+Date.now()+Math.floor(Math.random()*999),
-                        type:      _staffDocGuessType(f.name),
-                        label:     f.name.replace(/\.[^.]+$/,'').slice(0,40),
-                        fileName:  f.name,
-                        mime:      f.type || 'application/octet-stream',
-                        size:      f.size,
-                        dataUrl,
-                        uploadedAt:new Date().toISOString(),
-                        expiry:    '',
-                        notes:     '',
+                        id:          'DOC'+Date.now()+Math.floor(Math.random()*999),
+                        type:        _staffDocGuessType(f.name),
+                        label:       f.name.replace(/\.[^.]+$/,'').slice(0,40),
+                        fileName:    f.name,
+                        mime:        f.type || 'application/octet-stream',
+                        size:        f.size,
+                        driveFileId,
+                        uploadedAt:  new Date().toISOString(),
+                        expiry:      '',
+                        notes:       '',
                     });
                 } catch(err) {
-                    alert(`Could not read "${f.name}": `+err.message);
+                    alert(`Could not upload "${f.name}": `+err.message);
                 }
             }
-            inputEl.value = '';   // reset so same file can be re-picked later
+            inputEl.value = '';
             staffDocsRender();
         }
         function _staffDocGuessType(name) {
@@ -26929,11 +26942,15 @@ ${'─'.repeat(50)}
             _staffDocsBuf.splice(i,1);
             staffDocsRender();
         }
-        // Open the doc in a new tab (works for image + pdf data URLs)
+        // Open the doc — prefer Drive link, fallback to data URL
         function staffDocsView(docId) {
             const d = _staffDocsBuf.find(x => x.id === docId);
             if (!d) return;
-            // Convert data URL to blob URL for cleaner display + downloadable filename
+            if (d.driveFileId) {
+                window.open('https://drive.google.com/file/d/' + d.driveFileId + '/view', '_blank');
+                return;
+            }
+            if (!d.dataUrl) { alert('Document not available for preview. Re-upload to fix.'); return; }
             try {
                 const byteString = atob(d.dataUrl.split(',')[1]);
                 const ab = new ArrayBuffer(byteString.length);
@@ -26943,12 +26960,10 @@ ${'─'.repeat(50)}
                 const url = URL.createObjectURL(blob);
                 const w = window.open(url, '_blank');
                 if (!w) {
-                    // Pop-up blocked — fall back to download
                     const a = document.createElement('a'); a.href=url; a.download=d.fileName; a.click();
                 }
                 setTimeout(()=>URL.revokeObjectURL(url), 60000);
             } catch(err) {
-                // Fallback: just open the data URL directly
                 window.open(d.dataUrl, '_blank');
             }
         }
@@ -26965,7 +26980,10 @@ ${'─'.repeat(50)}
                 : docs.map((d) => {
                     const isImg = (d.mime||'').startsWith('image/');
                     const isPdf = (d.mime||'')==='application/pdf';
-                    const preview = isImg
+                    const hasDrive = !!d.driveFileId;
+                    const preview = hasDrive
+                        ? `<div class="w-full h-32 flex items-center justify-center bg-blue-50 text-4xl cursor-pointer" title="Click View to open in Google Drive">${isImg ? '🖼️' : isPdf ? '📕' : '📄'}<span class="ml-2 text-sm text-blue-500">☁️ Drive</span></div>`
+                        : isImg && d.dataUrl
                         ? `<img src="${d.dataUrl}" class="w-full h-32 object-cover"/>`
                         : isPdf
                         ? `<div class="w-full h-32 flex items-center justify-center bg-red-50 text-5xl">📕</div>`
@@ -27022,6 +27040,11 @@ ${'─'.repeat(50)}
         function staffDocsViewFromRecord(staffID, docID) {
             const s = staff.find(x => x.staffID === staffID); if (!s) return;
             const d = (s.documents||[]).find(x => x.id === docID); if (!d) return;
+            if (d.driveFileId) {
+                window.open('https://drive.google.com/file/d/' + d.driveFileId + '/view', '_blank');
+                return;
+            }
+            if (!d.dataUrl) { _showToast('⚠️ Document not available — re-upload to fix', '#d97706'); return; }
             try {
                 const byteString = atob(d.dataUrl.split(',')[1]);
                 const ab = new ArrayBuffer(byteString.length);
@@ -27037,6 +27060,11 @@ ${'─'.repeat(50)}
         function staffDocsDownloadFromRecord(staffID, docID) {
             const s = staff.find(x => x.staffID === staffID); if (!s) return;
             const d = (s.documents||[]).find(x => x.id === docID); if (!d) return;
+            if (d.driveFileId) {
+                window.open('https://drive.google.com/uc?id=' + d.driveFileId + '&export=download', '_blank');
+                return;
+            }
+            if (!d.dataUrl) { _showToast('⚠️ Document not available — re-upload to fix', '#d97706'); return; }
             const a = document.createElement('a'); a.href = d.dataUrl;
             a.download = d.fileName || ((d.label||'document') + '.bin');
             document.body.appendChild(a); a.click(); a.remove();
@@ -27142,9 +27170,11 @@ ${'─'.repeat(50)}
                 techTDS:parseFloat(document.getElementById('sTechTDS')?.value)||0,
                 attendance:currentStaff?.attendance || [],
                 wageRevisions:  currentStaff?.wageRevisions || [],
-                // Document attachments (clean — strip transient _editing flag)
+                // Document attachments (clean — strip transient _editing flag and dataUrl for Drive-backed docs)
                 documents: _staffDocsBuf.map(d => {
-                    const c = {...d}; delete c._editing; return c;
+                    const c = {...d}; delete c._editing;
+                    if (c.driveFileId) delete c.dataUrl; // file lives in Drive, don't bloat JSON
+                    return c;
                 }),
                 // Bank Details — used for fund disbursement (technicians) and salary credit
                 bankDetails: {

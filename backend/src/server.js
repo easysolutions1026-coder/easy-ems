@@ -207,7 +207,7 @@ techRouter.post('/login', async (req, res) => {
         id: d.id, type: d.type, label: d.label, fileName: d.fileName,
         expiry: d.expiry || null, notes: d.notes || '',
         mime: d.mime || '', size: d.size || 0,
-        dataUrl: d.dataUrl || null
+        driveFileId: d.driveFileId || null
       }))
     };
 
