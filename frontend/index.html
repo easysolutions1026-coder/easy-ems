@@ -127,6 +127,9 @@
       'gstCashLedgerSnapshots.json': 'gstCashLedgerSnapshots',
       'companyDocuments.json': 'companyDocuments',
       'directorExpenses.json': 'directorExpenses',
+      'coverLetters.json': 'coverLetters',
+      'otherIncome.json': 'otherIncome',
+      'returnableToolsLetters.json': 'returnableToolsLetters',
       '_locks.json': '__NOOP__'
     };
 
@@ -168,11 +171,26 @@
       return { collection: id.slice(SYNTHETIC_PREFIX.length) };
     }
 
-    function parseWrite(url) {
-      if (url.indexOf('upload/drive/v3/files') !== -1) return { create: true };
+    function parseWrite(url, init) {
       var m = url.match(/upload\/drive\/v3\/files\/([^?]+)\?/);
       if (m && m[1].indexOf(SYNTHETIC_PREFIX) === 0) {
         return { update: true, collection: m[1].slice(SYNTHETIC_PREFIX.length) };
+      }
+      if (m && init && init.method === 'PATCH') {
+        try {
+          var cache = window._driveFileIdCache || {};
+          for (var fn in FILE_TO_COLLECTION) {
+            if (cache[fn] === m[1] && FILE_TO_COLLECTION[fn] !== '__NOOP__') {
+              return { update: true, collection: FILE_TO_COLLECTION[fn] };
+            }
+          }
+        } catch (e) {}
+      }
+      if (url.indexOf('upload/drive/v3/files') !== -1 && init && init.method === 'POST' && init.body instanceof FormData) {
+        try {
+          var metaBlob = init.body.get('metadata');
+          if (metaBlob) return { create: true, metaBlob: metaBlob };
+        } catch (e) {}
       }
       return null;
     }
@@ -180,12 +198,6 @@
     var origFetch = window.fetch;
     window.fetch = function(input, init) {
       var url = typeof input === 'string' ? input : (input && input.url) || '';
-
-      // Sheets calls pass through to Google directly. The prior stub is
-      // removed now that per-user Sheets export is supported end-to-end
-      // from Cloud Run (frontend-direct, using the OAuth token's
-      // spreadsheets scope). Drive JSON reads/writes are still gated
-      // below and re-routed to /api/data/*.
 
       var disc = parseDiscovery(url);
       if (disc) {
@@ -208,7 +220,7 @@
         });
       }
 
-      var write = parseWrite(url);
+      var write = parseWrite(url, init);
       if (write && write.update && init && init.body) {
         console.info('[Cloud Run] Drive write -> Cloud SQL:', write.collection);
         var token2 = getToken();
@@ -228,22 +240,55 @@
           });
         });
       }
+      if (write && write.create && write.metaBlob) {
+        var _input = input, _init = init;
+        var token3 = getToken();
+        return write.metaBlob.text().then(function(metaText) {
+          try {
+            var meta = JSON.parse(metaText);
+            var fn = meta.name;
+            var col = fn ? FILE_TO_COLLECTION[fn] : null;
+            if (col && col !== '__NOOP__') {
+              console.info('[Cloud Run] Drive create -> Cloud SQL:', col, '(file:', fn, ')');
+              return extractJsonBody(_init.body).then(function(payload) {
+                return origFetch('/api/data/' + col, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': token3 ? 'Bearer ' + token3 : ''
+                  },
+                  body: JSON.stringify(payload)
+                }).then(function(r) {
+                  return jsonResponse({
+                    id: SYNTHETIC_PREFIX + col,
+                    modifiedTime: new Date().toISOString()
+                  });
+                });
+              });
+            }
+          } catch(e) {}
+          console.info('[Cloud Run] Drive upload pass-through (not a collection)');
+          return origFetch(_input, _init);
+        });
+      }
 
       return origFetch.apply(this, arguments);
     };
 
     function extractJsonBody(body) {
       return Promise.resolve(body).then(function(b) {
+        if (b instanceof FormData) {
+          var filePart = b.get('file');
+          if (filePart instanceof Blob) return filePart.text();
+          var metaPart = b.get('metadata');
+          if (metaPart instanceof Blob) return metaPart.text();
+          return '[]';
+        }
         if (typeof b === 'string') return b;
         if (b instanceof Blob) return b.text();
         if (b && typeof b.text === 'function') return b.text();
         return String(b);
       }).then(function(text) {
-        // Multipart body: find the last JSON block (object or array).
-        // The Drive upload FormData has metadata {name:...} then the
-        // actual data blob which may be an array [...] or an object {...}.
-        // Try array blocks first (staff, expenses, etc. are arrays),
-        // then fall back to object blocks (settings is an object).
         var arrayBlocks = text.match(/\[[\s\S]*?\](?=\s*--|\s*$)/g) || [];
         for (var i = arrayBlocks.length - 1; i >= 0; i--) {
           try { var parsed = JSON.parse(arrayBlocks[i]); if (Array.isArray(parsed)) return parsed; } catch (e) {}
@@ -255,9 +300,6 @@
         try { return JSON.parse(text); } catch (e) { return []; }
       });
     }
-
-    // syncToGoogleSheets is no longer stubbed — the real function in
-    // index.html handles the export directly against sheets.googleapis.com.
 
     console.info('[Cloud Run] Drive JSON isolation active — Cloud SQL storage, direct Sheets writes');
   })();
