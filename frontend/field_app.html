@@ -9063,14 +9063,19 @@
             html += '</div>';
         }
 
-        // Attached files list
+        // Attached files — collapsible
         if (attachedDocs.length) {
-            html += `<p style="font-size:11px;font-weight:700;color:#374151;margin:0 0 6px">📎 Attached Files (${attachedDocs.length})</p>`;
-            html += '<div style="display:flex;flex-direction:column;gap:6px">';
-            html += attachedDocs.map(d => {
+            html += `<div onclick="var l=this.nextElementSibling;var v=l.style.display==='none';l.style.display=v?'flex':'none';this.querySelector('.techDocsChevron').textContent=v?'▼':'▶'" style="cursor:pointer;user-select:none">
+                <p style="font-size:11px;font-weight:700;color:#374151;margin:0 0 6px;display:flex;align-items:center;gap:4px">
+                    📎 Attached Files (${attachedDocs.length}) <span class="techDocsChevron" style="font-size:9px;color:#9ca3af">▶</span>
+                    <span style="font-size:9px;color:#9ca3af;font-weight:400;margin-left:4px">Tap to expand</span>
+                </p>
+            </div>`;
+            html += '<div style="display:none;flex-direction:column;gap:6px">';
+            html += attachedDocs.map((d, i) => {
                 const expired  = d.expiry && d.expiry < today;
                 const expiring = d.expiry && d.expiry <= warn30 && !expired;
-                return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px">
+                return `<div onclick="_techSSViewDoc(${i})" style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer">
                     <span style="font-size:16px">${(d.mime||'').startsWith('image/') ? '🖼️' : (d.mime||'') === 'application/pdf' ? '📕' : '📄'}</span>
                     <div style="flex:1;min-width:0">
                         <p style="font-size:11px;font-weight:600;color:#1f2937;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.label || d.fileName}</p>
@@ -9079,12 +9084,45 @@
                             ${d.expiry ? `<span style="margin-left:4px;color:${expired ? '#dc2626' : expiring ? '#d97706' : '#6b7280'};font-weight:${expired||expiring?'700':'400'}">Exp: ${d.expiry}${expired ? ' ⚠️' : expiring ? ' ⚠️' : ''}</span>` : ''}
                         </p>
                     </div>
+                    <span style="font-size:10px;color:#6b7280">👁</span>
                 </div>`;
             }).join('');
             html += '</div>';
         }
 
         return html;
+    }
+
+    // ── VIEW DOCUMENT (full-screen overlay) ──────────────────────
+    function _techSSViewDoc(index) {
+        if (!_techSS || !_techSS.staffRec) return;
+        const docs = _techSS.staffRec.documents || [];
+        const d = docs[index];
+        if (!d || !d.dataUrl) {
+            showToast('⚠️ Document not available for preview');
+            return;
+        }
+        const isImg = (d.mime||'').startsWith('image/');
+        const isPdf = (d.mime||'') === 'application/pdf';
+        const overlay = document.createElement('div');
+        overlay.id = 'techDocViewer';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;flex-direction:column;align-items:center;padding:12px';
+        overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+        overlay.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;width:100%;max-width:700px;margin-bottom:8px">
+                <div style="color:#fff;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.label || d.fileName}</div>
+                <button onclick="document.getElementById('techDocViewer').remove()" style="background:rgba(255,255,255,.15);border:none;color:#fff;font-size:18px;width:36px;height:36px;border-radius:50%;cursor:pointer">✕</button>
+            </div>
+            <div style="flex:1;width:100%;max-width:700px;overflow:auto;display:flex;align-items:center;justify-content:center">
+                ${isImg ? `<img src="${d.dataUrl}" style="max-width:100%;max-height:100%;object-fit:contain;border-radius:8px"/>` :
+                  isPdf ? `<iframe src="${d.dataUrl}" style="width:100%;height:100%;border:none;border-radius:8px;background:#fff"></iframe>` :
+                  `<div style="text-align:center;color:#fff;padding:40px">
+                      <div style="font-size:48px;margin-bottom:12px">📄</div>
+                      <p style="font-size:13px">Preview not available for this file type.</p>
+                      <p style="font-size:11px;color:#9ca3af;margin-top:4px">${d.fileName} · ${d.type||'Other'}</p>
+                  </div>`}
+            </div>`;
+        document.body.appendChild(overlay);
     }
 
     // ── LEAVE REQUEST FORM ────────────────────────────────────────
