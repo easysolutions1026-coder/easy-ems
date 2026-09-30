@@ -8755,6 +8755,12 @@
                     ${_techSSRenderWageSummary(s, now.getFullYear(), now.getMonth() + 1)}
                 </div>
 
+                <!-- My Documents (read-only) -->
+                <div class="card p-4">
+                    <h2 class="font-bold text-sm mb-3" style="color:var(--navy)">📄 My Documents</h2>
+                    ${_techSSRenderDocuments(s)}
+                </div>
+
                 <!-- Recent Readiness Log -->
                 <div class="card p-4">
                     <h2 class="font-bold text-sm mb-3" style="color:var(--navy)">📜 Recent Readiness Log</h2>
@@ -9011,6 +9017,74 @@
             reason: ''
         };
         await _techSSSave(readiness, null, '✅ Readiness marked — Ready for duty');
+    }
+
+    // ── MY DOCUMENTS (read-only) ────────────────────────────────
+    function _techSSRenderDocuments(s) {
+        const today = new Date().toISOString().split('T')[0];
+        const warn30 = new Date(Date.now() + 30*24*3600000).toISOString().split('T')[0];
+
+        // ID & certificate fields from the staff record
+        const idDocs = [
+            { label: 'PAN Card',        val: s.pan,             expiry: null },
+            { label: 'Aadhar',          val: s.aadhar,          expiry: null },
+            { label: 'PF Number',       val: s.pfNumber,        expiry: null },
+            { label: 'ESIC Number',     val: s.esicNumber,      expiry: null },
+            { label: 'Passport',        val: s.passport,        expiry: s.passportExpiry },
+            { label: 'Driving Licence', val: s.drivingLicence,  expiry: s.dlExpiry },
+            { label: 'CDC',             val: s.cdc,             expiry: s.cdcExpiry },
+            { label: 'Prof. Certificate', val: s.profCert,      expiry: null },
+            { label: 'Course Cert',     val: s.courseCert,      expiry: s.courseCertExpiry },
+        ].filter(d => d.val);
+
+        // Attached document files
+        const attachedDocs = (s.documents || []);
+
+        if (!idDocs.length && !attachedDocs.length) {
+            return '<p style="color:#9ca3af;font-size:12px;text-align:center;padding:12px">No documents on file. Contact your office to update.</p>';
+        }
+
+        let html = '';
+
+        // ID cards grid
+        if (idDocs.length) {
+            html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:12px">';
+            html += idDocs.map(d => {
+                const expired  = d.expiry && d.expiry < today;
+                const expiring = d.expiry && d.expiry <= warn30 && !expired;
+                const borderColor = expired ? '#fca5a5' : expiring ? '#fde68a' : '#e5e7eb';
+                const bgColor = expired ? '#fef2f2' : expiring ? '#fffbeb' : '#f9fafb';
+                return `<div style="background:${bgColor};border:1px solid ${borderColor};border-radius:10px;padding:10px">
+                    <p style="font-size:10px;color:#6b7280;margin:0 0 2px">${d.label}</p>
+                    <p style="font-size:12px;font-weight:700;color:#1f2937;margin:0">${d.val}</p>
+                    ${d.expiry ? `<p style="font-size:10px;margin:4px 0 0;color:${expired ? '#dc2626' : expiring ? '#d97706' : '#9ca3af'};font-weight:${expired||expiring?'700':'400'}">Exp: ${d.expiry}${expired ? ' ⚠️ EXPIRED' : expiring ? ' ⚠️ Soon' : ''}</p>` : ''}
+                </div>`;
+            }).join('');
+            html += '</div>';
+        }
+
+        // Attached files list
+        if (attachedDocs.length) {
+            html += `<p style="font-size:11px;font-weight:700;color:#374151;margin:0 0 6px">📎 Attached Files (${attachedDocs.length})</p>`;
+            html += '<div style="display:flex;flex-direction:column;gap:6px">';
+            html += attachedDocs.map(d => {
+                const expired  = d.expiry && d.expiry < today;
+                const expiring = d.expiry && d.expiry <= warn30 && !expired;
+                return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px">
+                    <span style="font-size:16px">${(d.mime||'').startsWith('image/') ? '🖼️' : (d.mime||'') === 'application/pdf' ? '📕' : '📄'}</span>
+                    <div style="flex:1;min-width:0">
+                        <p style="font-size:11px;font-weight:600;color:#1f2937;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.label || d.fileName}</p>
+                        <p style="font-size:9px;color:#9ca3af;margin:2px 0 0">
+                            <span style="background:#e0e7ff;color:#4338ca;padding:1px 5px;border-radius:4px;font-weight:600">${d.type || 'Other'}</span>
+                            ${d.expiry ? `<span style="margin-left:4px;color:${expired ? '#dc2626' : expiring ? '#d97706' : '#6b7280'};font-weight:${expired||expiring?'700':'400'}">Exp: ${d.expiry}${expired ? ' ⚠️' : expiring ? ' ⚠️' : ''}</span>` : ''}
+                        </p>
+                    </div>
+                </div>`;
+            }).join('');
+            html += '</div>';
+        }
+
+        return html;
     }
 
     // ── LEAVE REQUEST FORM ────────────────────────────────────────
