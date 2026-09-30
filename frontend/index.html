@@ -47316,8 +47316,8 @@ Automated WFH alert — ${company} Attendance System.`;
             const idx = paymentRequests.findIndex(r => r.prID === prID);
             if (idx < 0) return;
             const pr = paymentRequests[idx];
-            if (pr.status !== 'Draft' && pr.status !== 'Cancelled') {
-                alert(`Cannot delete — status is "${pr.status}". Only Draft or Cancelled requests can be permanently deleted.`);
+            if (pr.status !== 'Draft' && pr.status !== 'Cancelled' && pr.status !== 'Superseded') {
+                alert(`Cannot delete — status is "${pr.status}". Only Draft, Cancelled or Superseded requests can be permanently deleted.`);
                 return;
             }
             if (!confirm(
