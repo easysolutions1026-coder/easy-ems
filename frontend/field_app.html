@@ -6982,9 +6982,10 @@
                         <p style="font-size:10px;color:#34d399;margin:0">Technician Self-Service</p>
                     </div>
                 </div>
-                <button onclick="_techSSSignOut()" style="padding:6px 12px;background:rgba(255,255,255,.12);border:none;border-radius:8px;color:#e2e8f0;font-size:11px;font-weight:600;cursor:pointer">
-                    Sign Out
-                </button>
+                <div style="display:flex;align-items:center;gap:6px">
+                    <button onclick="_techSSRefresh()" style="padding:6px 12px;background:rgba(255,255,255,.12);border:none;border-radius:8px;color:#34d399;font-size:11px;font-weight:600;cursor:pointer">🔄 Refresh</button>
+                    <button onclick="_techSSSignOut()" style="padding:6px 12px;background:rgba(255,255,255,.12);border:none;border-radius:8px;color:#e2e8f0;font-size:11px;font-weight:600;cursor:pointer">Sign Out</button>
+                </div>
             </div>
         </header>
         <main id="techSSContent" class="max-w-2xl mx-auto px-4 pt-4" style="padding-bottom:40px">
@@ -6994,7 +6995,8 @@
                     <span style="font-size:12px;font-weight:700;color:#374151">📅 Today — ${new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'short',year:'numeric'})}</span>
                 </div>
                 <div style="font-size:18px;font-weight:800;color:${statusColor};margin-bottom:4px">${statusLabel}</div>
-                <p style="font-size:11px;color:#6b7280;margin:0">Attendance: <strong>${attLabel}</strong>${readiness?.markedAt ? ' · Marked at ' + new Date(readiness.markedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) : ''}</p>
+                <p style="font-size:11px;color:#6b7280;margin:0">Attendance: <strong style="color:${attendance?.type === 'UnApprovedLeave' ? '#dc2626' : attendance?.type === 'ApprovedLeave' ? '#059669' : '#374151'}">${attLabel}${attendance?.type === 'UnApprovedLeave' ? ' ❌' : attendance?.type === 'ApprovedLeave' ? ' ✅' : ''}</strong>${readiness?.markedAt ? ' · Marked at ' + new Date(readiness.markedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) : ''}</p>
+                ${readiness && (readiness.status === 'LEAVE_REQUEST' || readiness.status === 'NOT_WELL') ? `<p style="font-size:10px;margin:6px 0 0;padding:6px 10px;border-radius:6px;background:${attendance?.type === 'UnApprovedLeave' ? '#fef2f2' : attendance?.type === 'ApprovedLeave' ? '#ecfdf5' : '#fefce8'};color:${attendance?.type === 'UnApprovedLeave' ? '#dc2626' : attendance?.type === 'ApprovedLeave' ? '#059669' : '#92400e'};font-weight:600">${attendance?.type === 'UnApprovedLeave' ? '❌ Leave NOT approved by office' : attendance?.type === 'ApprovedLeave' ? '✅ Leave approved by office' : '⏳ Pending office review — tap 🔄 Refresh to check'}</p>` : ''}
             </div>
 
             ${!alreadyMarked ? `
@@ -7257,62 +7259,154 @@
     }
 
     function _techSSRenderWageSummary(s) {
-        const wage = s.wageSnapshot;
-        if (!wage) return '';
+        // Use latest payslip if available, else wageSnapshot
+        const ps = s.latestPayslip || s.wageSnapshot;
+        if (!ps) return '';
+
+        const fmt = v => v ? '₹' + Number(v).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2}) : '';
+
+        // Build earnings rows
+        const earnings = [];
+        if (ps.earnings && Array.isArray(ps.earnings)) {
+            ps.earnings.forEach(e => earnings.push({ label: e.component || e.label, days: e.days, rate: e.rate, amt: e.amount || e.amt }));
+        } else {
+            // Fallback: individual fields
+            if (ps.standbyDays || ps.standbyAmt) earnings.push({ label: 'Stand By (Standby wage)', days: ps.standbyDays, rate: ps.standbyRate || ps.dailyWage, amt: ps.standbyAmt });
+            if (ps.workingDays || ps.workingAmt) earnings.push({ label: 'Working Days', days: ps.workingDays, rate: ps.dailyWage, amt: ps.workingAmt });
+            if (ps.outstationDays || ps.outstationAmt) earnings.push({ label: 'Outstation', days: ps.outstationDays, rate: ps.outstationRate, amt: ps.outstationAmt });
+            if (ps.sailingDays || ps.sailingAmt) earnings.push({ label: 'Sailing', days: ps.sailingDays, rate: ps.sailingRate, amt: ps.sailingAmt });
+            if (ps.travelAllowance) earnings.push({ label: 'Travel Allowance', days: null, rate: ps.travelAllowance, amt: ps.travelAllowance });
+            if (ps.hra) earnings.push({ label: 'HRA', days: null, rate: null, amt: ps.hra });
+            if (ps.da) earnings.push({ label: 'DA', days: null, rate: null, amt: ps.da });
+            if (ps.gradePay) earnings.push({ label: 'Grade Pay', days: null, rate: null, amt: ps.gradePay });
+            if (ps.basicWage && !earnings.length) earnings.push({ label: 'Basic Wage', days: null, rate: null, amt: ps.basicWage });
+        }
+        const grossPay = ps.grossPay || ps.gross || earnings.reduce((s,e) => s + (Number(e.amt)||0), 0);
+
+        // Build deduction rows
+        const deductions = [];
+        if (ps.deductions && Array.isArray(ps.deductions)) {
+            ps.deductions.forEach(d => deductions.push({ label: d.component || d.label, amt: d.amount || d.amt, note: d.note || '' }));
+        } else {
+            if (ps.pf || ps.pfAmt) deductions.push({ label: 'PF 12%' + (ps.uan ? ' · UAN: ' + ps.uan : ''), amt: ps.pf || ps.pfAmt });
+            if (ps.esic || ps.esicAmt) deductions.push({ label: 'ESIC', amt: ps.esic || ps.esicAmt, note: ps.esicNote || '' });
+            if (ps.pt || ps.ptAmt) deductions.push({ label: 'Professional Tax', amt: ps.pt || ps.ptAmt });
+            if (ps.tds || ps.tdsAmt) deductions.push({ label: 'TDS', amt: ps.tds || ps.tdsAmt });
+            if (ps.loanEMI) deductions.push({ label: 'Loan EMI', amt: ps.loanEMI });
+            if (ps.advanceDeduction) deductions.push({ label: 'Advance Deduction', amt: ps.advanceDeduction });
+        }
+        const totalDed = ps.totalDeductions || deductions.reduce((s,d) => s + (Number(d.amt)||0), 0);
+        const netPay = ps.netPay || (grossPay - totalDed);
+
         return `
         <div style="background:#fff;border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
-            <h3 style="font-size:14px;font-weight:800;color:#1e1b4b;margin:0 0 10px">💰 Wage Summary</h3>
-            ${wage.basicWage ? `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f3f4f6"><span style="font-size:12px;color:#6b7280">Basic Wage</span><span style="font-size:12px;font-weight:700;color:#059669">₹${Number(wage.basicWage).toLocaleString('en-IN')}</span></div>` : ''}
-            ${wage.hra ? `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f3f4f6"><span style="font-size:12px;color:#6b7280">HRA</span><span style="font-size:12px;font-weight:600">₹${Number(wage.hra).toLocaleString('en-IN')}</span></div>` : ''}
-            ${wage.da ? `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f3f4f6"><span style="font-size:12px;color:#6b7280">DA</span><span style="font-size:12px;font-weight:600">₹${Number(wage.da).toLocaleString('en-IN')}</span></div>` : ''}
-            ${wage.netPay ? `<div style="display:flex;justify-content:space-between;padding:8px 0;margin-top:4px"><span style="font-size:13px;font-weight:800;color:#1e1b4b">Net Pay</span><span style="font-size:14px;font-weight:800;color:#059669">₹${Number(wage.netPay).toLocaleString('en-IN')}</span></div>` : ''}
-            <p style="font-size:9px;color:#9ca3af;margin:6px 0 0;text-align:center">Last updated by office. Contact admin for discrepancies.</p>
+            <h3 style="font-size:14px;font-weight:800;color:#1e1b4b;margin:0 0 12px">💰 Wage Summary${ps.period ? ' — ' + ps.period : ''}</h3>
+
+            <!-- Earnings -->
+            <div style="margin-bottom:12px">
+                <div style="background:#1e40af;color:#fff;padding:6px 10px;border-radius:8px 8px 0 0;font-size:11px;font-weight:700">EARNINGS</div>
+                <div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;overflow:hidden">
+                    ${earnings.length ? `
+                    <div style="display:grid;grid-template-columns:1fr 40px 60px 70px;padding:4px 10px;background:#f3f4f6;font-size:9px;font-weight:700;color:#6b7280">
+                        <span>COMPONENT</span><span style="text-align:right">DAYS</span><span style="text-align:right">RATE(₹)</span><span style="text-align:right">AMT(₹)</span>
+                    </div>
+                    ${earnings.map(e => `
+                    <div style="display:grid;grid-template-columns:1fr 40px 60px 70px;padding:6px 10px;border-top:1px solid #f3f4f6;font-size:11px;align-items:center">
+                        <span style="color:#1f2937;font-weight:500">${e.label}</span>
+                        <span style="text-align:right;color:#6b7280">${e.days || '—'}</span>
+                        <span style="text-align:right;color:#6b7280">${e.rate ? Number(e.rate).toLocaleString('en-IN') : '—'}</span>
+                        <span style="text-align:right;font-weight:700;color:#059669">${fmt(e.amt)}</span>
+                    </div>`).join('')}
+                    <div style="display:grid;grid-template-columns:1fr 70px;padding:8px 10px;border-top:2px solid #1e40af;font-weight:800">
+                        <span style="color:#1e40af;font-size:12px">GROSS PAY</span>
+                        <span style="text-align:right;color:#1e40af;font-size:12px">${fmt(grossPay)}</span>
+                    </div>` : '<div style="padding:12px;text-align:center;color:#9ca3af;font-size:11px">No earnings data</div>'}
+                </div>
+            </div>
+
+            <!-- Deductions -->
+            ${deductions.length ? `
+            <div style="margin-bottom:12px">
+                <div style="background:#dc2626;color:#fff;padding:6px 10px;border-radius:8px 8px 0 0;font-size:11px;font-weight:700">DEDUCTIONS</div>
+                <div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;overflow:hidden">
+                    ${deductions.map(d => `
+                    <div style="display:flex;justify-content:space-between;padding:6px 10px;border-top:1px solid #f3f4f6;font-size:11px">
+                        <span style="color:#1f2937">${d.label}${d.note ? ' <span style="color:#9ca3af;font-size:9px">' + d.note + '</span>' : ''}</span>
+                        <span style="font-weight:700;color:#dc2626">${Number(d.amt) ? fmt(d.amt) : 'NIL'}</span>
+                    </div>`).join('')}
+                    <div style="display:flex;justify-content:space-between;padding:8px 10px;border-top:2px solid #dc2626;font-weight:800">
+                        <span style="color:#dc2626;font-size:12px">TOTAL DEDUCTIONS</span>
+                        <span style="color:#dc2626;font-size:12px">${fmt(totalDed)}</span>
+                    </div>
+                </div>
+            </div>` : ''}
+
+            <!-- Net Pay -->
+            <div style="background:linear-gradient(135deg,#0d9488,#059669);border-radius:12px;padding:14px 16px;display:flex;justify-content:space-between;align-items:center">
+                <div>
+                    <div style="font-size:10px;color:rgba(255,255,255,.7)">Gross ${fmt(grossPay)} − Ded. ${fmt(totalDed)}</div>
+                </div>
+                <div style="text-align:right">
+                    <div style="font-size:10px;color:rgba(255,255,255,.7);font-weight:600">NET PAY</div>
+                    <div style="font-size:22px;font-weight:900;color:#fff">${fmt(netPay)}</div>
+                </div>
+            </div>
+            <p style="font-size:9px;color:#9ca3af;margin:8px 0 0;text-align:center">View only — contact office for corrections</p>
         </div>`;
     }
 
     function _techSSRenderDocuments(s) {
         const docs = s.documents || [];
         const idFields = [
-            { key: 'pan', label: 'PAN', icon: '🪪' },
+            { key: 'pan', label: 'PAN Card', icon: '🪪' },
             { key: 'aadhar', label: 'Aadhar', icon: '🆔' },
-            { key: 'pfNo', label: 'PF No', icon: '🏦' },
+            { key: 'pfNo', label: 'PF Number', icon: '🏦' },
             { key: 'esicNo', label: 'ESIC No', icon: '🏥' },
             { key: 'passportNo', label: 'Passport', icon: '📘', expKey: 'passportExpiry' },
-            { key: 'dlNo', label: 'DL', icon: '🚗', expKey: 'dlExpiry' },
+            { key: 'dlNo', label: 'Driving Licence', icon: '🚗', expKey: 'dlExpiry' },
             { key: 'cdcNo', label: 'CDC', icon: '📓', expKey: 'cdcExpiry' }
         ];
         const today = new Date().toISOString().split('T')[0];
         const warn30 = new Date(Date.now() + 30*86400000).toISOString().split('T')[0];
 
+        // ID cards grid (like Image 3)
         let idHtml = idFields.filter(f => s[f.key]).map(f => {
             const exp = f.expKey ? s[f.expKey] : null;
             const expired = exp && exp < today;
             const expiring = exp && exp <= warn30 && !expired;
-            return `<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:8px 10px">
-                <div style="font-size:9px;color:#6b7280;font-weight:600">${f.icon} ${f.label}</div>
-                <div style="font-size:12px;font-weight:700;color:#1f2937;margin-top:2px">${s[f.key]}</div>
-                ${exp ? `<div style="font-size:9px;margin-top:2px;color:${expired ? '#dc2626' : expiring ? '#d97706' : '#6b7280'};font-weight:${expired||expiring?'700':'400'}">Exp: ${exp}${expired ? ' ⚠️ EXPIRED' : expiring ? ' ⚠️ Expiring soon' : ''}</div>` : ''}
+            return `<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:10px 12px">
+                <div style="font-size:9px;color:#6b7280;font-weight:600;margin-bottom:2px">${f.label}</div>
+                <div style="font-size:13px;font-weight:800;color:#1f2937">${s[f.key]}</div>
+                ${exp ? `<div style="font-size:9px;margin-top:3px;color:${expired ? '#dc2626' : expiring ? '#d97706' : '#059669'};font-weight:600">Exp: ${exp}${expired ? ' ⚠️ EXPIRED' : expiring ? ' ⚠️ Expiring' : ''}</div>` : ''}
             </div>`;
         }).join('');
 
+        // Attached documents card grid (like Image 2) — VIEW ONLY, no download/copy/print/share
         let attachHtml = '';
         if (docs.length) {
             attachHtml = `
-            <div onclick="this.querySelector('.tssDocsList').classList.toggle('hidden');this.querySelector('.tssDocsChev').textContent=this.querySelector('.tssDocsList').classList.contains('hidden')?'▸':'▾'" style="cursor:pointer;margin-top:12px">
-                <div style="display:flex;align-items:center;gap:6px;padding:8px 0">
-                    <span class="tssDocsChev" style="font-size:12px;color:#6b7280">▸</span>
-                    <span style="font-size:12px;font-weight:700;color:#374151">📎 Attached Files (${docs.length})</span>
-                </div>
-                <div class="tssDocsList hidden" style="display:flex;flex-direction:column;gap:6px" onclick="event.stopPropagation()">
+            <div style="margin-top:14px">
+                <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:8px">📎 Attached Documents (${docs.length})</div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px">
                     ${docs.map(d => {
                         const hasDrive = !!d.driveFileId;
-                        return `<div ${hasDrive ? `onclick="window.open('https://drive.google.com/file/d/${d.driveFileId}/preview','_blank')"` : ''} style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;${hasDrive ? 'cursor:pointer' : ''}">
-                            <span style="font-size:16px">${(d.mime||'').startsWith('image/') ? '🖼️' : (d.mime||'') === 'application/pdf' ? '📕' : '📄'}</span>
-                            <div style="flex:1;min-width:0">
-                                <p style="font-size:11px;font-weight:600;color:#1f2937;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.label || d.fileName}</p>
-                                <p style="font-size:9px;color:#9ca3af;margin:2px 0 0">${d.type || 'Other'}</p>
+                        const isImage = (d.mime||'').startsWith('image/');
+                        const isPdf = (d.mime||'') === 'application/pdf';
+                        const exp = d.expiry;
+                        const expired = exp && exp < today;
+                        const expiring = exp && exp <= warn30 && !expired;
+                        const sizeStr = d.size ? (d.size > 1048576 ? (d.size/1048576).toFixed(1)+' MB' : (d.size/1024).toFixed(1)+' KB') : '';
+                        return `<div style="background:#fff;border:1px solid ${expired ? '#fecaca' : '#e5e7eb'};border-radius:12px;overflow:hidden;${expired ? 'background:#fef2f2' : ''}">
+                            <div style="height:80px;background:${expired ? '#fee2e2' : '#f0fdf4'};display:flex;align-items:center;justify-content:center">
+                                <span style="font-size:36px">${isImage ? '🖼️' : isPdf ? '📕' : '📄'}</span>
                             </div>
-                            ${hasDrive ? '<span style="font-size:10px;color:#2563eb">View →</span>' : ''}
+                            <div style="padding:8px 10px">
+                                ${d.type ? `<span style="font-size:8px;font-weight:700;color:#4338ca;background:#e0e7ff;padding:1px 6px;border-radius:4px;display:inline-block;margin-bottom:3px">${d.type}</span>` : ''}
+                                ${exp ? `<span style="font-size:8px;font-weight:700;color:${expired ? '#dc2626' : expiring ? '#d97706' : '#059669'};${expired ? 'background:#fef2f2' : 'background:#f0fdf4'};padding:1px 6px;border-radius:4px;display:inline-block;margin-bottom:3px;margin-left:2px">${expired ? 'EXPIRED' : 'Valid till'} ${exp}</span>` : ''}
+                                <p style="font-size:11px;font-weight:600;color:#1f2937;margin:2px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${d.label || d.fileName}">${d.label || d.fileName}</p>
+                                <p style="font-size:9px;color:#9ca3af;margin:1px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.fileName || ''}${sizeStr ? ' · ' + sizeStr : ''}</p>
+                                ${hasDrive ? `<button onclick="event.stopPropagation();_techSSPreviewDoc('${d.driveFileId}')" style="width:100%;margin-top:6px;padding:7px;background:#f59e0b;color:#fff;border:none;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">🔒 View</button>` : '<p style="font-size:9px;color:#d1d5db;margin:4px 0 0;text-align:center">No preview</p>'}
+                            </div>
                         </div>`;
                     }).join('')}
                 </div>
@@ -7326,7 +7420,27 @@
             <h3 style="font-size:14px;font-weight:800;color:#1e1b4b;margin:0 0 10px">📄 My Documents</h3>
             ${idHtml ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">${idHtml}</div>` : ''}
             ${attachHtml}
+            <p style="font-size:8px;color:#9ca3af;margin:10px 0 0;text-align:center">🔒 View only — download, copy, print and share disabled</p>
         </div>`;
+    }
+
+    // Document preview — opens in a modal overlay with Drive preview iframe
+    // No download, no copy, no print, no share — just view in embedded iframe
+    function _techSSPreviewDoc(driveFileId) {
+        const overlay = document.createElement('div');
+        overlay.id = 'tssDocPreview';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;flex-direction:column;padding:0';
+        overlay.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 16px;background:#1e1b4b">
+                <span style="font-size:13px;font-weight:700;color:#fff">🔒 Document Preview (View Only)</span>
+                <button onclick="document.getElementById('tssDocPreview').remove()" style="background:none;border:none;font-size:22px;color:#fff;cursor:pointer;padding:4px">✕</button>
+            </div>
+            <iframe src="https://drive.google.com/file/d/${driveFileId}/preview"
+                style="flex:1;border:none;width:100%;background:#fff"
+                sandbox="allow-scripts allow-same-origin"
+                allow="autoplay"
+                loading="lazy"></iframe>`;
+        document.body.appendChild(overlay);
     }
 
     function _techSSRenderRecentLog(s) {
