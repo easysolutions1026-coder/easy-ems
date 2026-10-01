@@ -6970,7 +6970,7 @@
 
         const statusColor = readiness ? (readiness.status === 'READY' ? '#059669' : readiness.status === 'NOT_WELL' ? '#d97706' : '#6366f1') : '#9ca3af';
         const statusLabel = readiness ? (readiness.status === 'READY' ? '✅ Ready for Duty' : readiness.status === 'NOT_WELL' ? '🤒 Not Well' : '📋 Leave Requested') : '⏳ Not Marked Yet';
-        const attLabel = attendance ? attendance.type || 'Marked' : 'Pending';
+        const attLabel = attendance ? (attendance.status || attendance.type || 'Marked') : 'Pending';
         const alreadyMarked = !!readiness;
 
         document.getElementById('app').innerHTML = `
@@ -7235,7 +7235,7 @@
         for (let d = 1; d <= daysInMonth; d++) {
             const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
             const entry = att.find(a => a.date === dateStr);
-            const type = entry?.type || '';
+            const type = entry?.status || entry?.type || '';
             const bg = ATT_COLORS[type] || '#f3f4f6';
             const fg = type ? '#fff' : '#9ca3af';
             const label = ATT_SHORT[type] || '';
@@ -7363,11 +7363,11 @@
         const idFields = [
             { key: 'pan', label: 'PAN Card', icon: '🪪' },
             { key: 'aadhar', label: 'Aadhar', icon: '🆔' },
-            { key: 'pfNo', label: 'PF Number', icon: '🏦' },
-            { key: 'esicNo', label: 'ESIC No', icon: '🏥' },
-            { key: 'passportNo', label: 'Passport', icon: '📘', expKey: 'passportExpiry' },
-            { key: 'dlNo', label: 'Driving Licence', icon: '🚗', expKey: 'dlExpiry' },
-            { key: 'cdcNo', label: 'CDC', icon: '📓', expKey: 'cdcExpiry' }
+            { key: 'pfNumber', label: 'PF Number', icon: '🏦' },
+            { key: 'esicNumber', label: 'ESIC No', icon: '🏥' },
+            { key: 'passport', label: 'Passport', icon: '📘', expKey: 'passportExpiry' },
+            { key: 'drivingLicence', label: 'Driving Licence', icon: '🚗', expKey: 'dlExpiry' },
+            { key: 'cdc', label: 'CDC', icon: '📓', expKey: 'cdcExpiry' }
         ];
         const today = new Date().toISOString().split('T')[0];
         const warn30 = new Date(Date.now() + 30*86400000).toISOString().split('T')[0];
@@ -7408,7 +7408,7 @@
                                 ${exp ? `<span style="font-size:8px;font-weight:700;color:${expired ? '#dc2626' : expiring ? '#d97706' : '#059669'};${expired ? 'background:#fef2f2' : 'background:#f0fdf4'};padding:1px 6px;border-radius:4px;display:inline-block;margin-bottom:3px;margin-left:2px">${expired ? 'EXPIRED' : 'Valid till'} ${exp}</span>` : ''}
                                 <p style="font-size:11px;font-weight:600;color:#1f2937;margin:2px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${d.label || d.fileName}">${d.label || d.fileName}</p>
                                 <p style="font-size:9px;color:#9ca3af;margin:1px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.fileName || ''}${sizeStr ? ' · ' + sizeStr : ''}</p>
-                                ${hasDrive ? `<button onclick="event.stopPropagation();_techSSPreviewDoc('${d.driveFileId}')" style="width:100%;margin-top:6px;padding:7px;background:#f59e0b;color:#fff;border:none;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">🔒 View</button>` : '<p style="font-size:9px;color:#d1d5db;margin:4px 0 0;text-align:center">No preview</p>'}
+                                ${hasDrive ? `<button onclick="event.stopPropagation();_techSSPreviewDoc('${d.driveFileId}')" style="width:100%;margin-top:6px;padding:7px;background:#f59e0b;color:#fff;border:none;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">🔒 View</button>` : `<p style="font-size:9px;color:#9ca3af;margin:6px 0 0;text-align:center;padding:4px;background:#f9fafb;border-radius:6px">📄 On file with office</p>`}
                             </div>
                         </div>`;
                     }).join('')}
