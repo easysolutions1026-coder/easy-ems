@@ -6940,7 +6940,8 @@
                 const text = await res.text();
                 throw new Error(text || 'Login failed');
             }
-            const staff = await res.json();
+            const data = await res.json();
+            const staff = data.staff || data; // backend returns { ok, staff }
             _techSS = { staffID: staff.staffID, pin, name: staff.name, staffRec: staff };
             _techSSRenderDashboard();
         } catch (e) {
@@ -7041,7 +7042,8 @@
                 body: JSON.stringify({ staffID: _techSS.staffID, pin: _techSS.pin })
             });
             if (!res.ok) throw new Error('Session expired');
-            const staff = await res.json();
+            const data = await res.json();
+            const staff = data.staff || data;
             _techSS.staffRec = staff;
             _techSSRenderDashboard();
         } catch (e) {
@@ -7062,7 +7064,8 @@
                 })
             });
             if (!res.ok) { const t = await res.text(); throw new Error(t || 'Save failed'); }
-            const updated = await res.json();
+            const data = await res.json();
+            const updated = data.staff || data;
             _techSS.staffRec = updated;
             showToast(successMsg || '✅ Saved');
             _techSSRenderDashboard();
