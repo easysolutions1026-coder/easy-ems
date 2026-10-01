@@ -1890,6 +1890,12 @@
                     Sign in with Google
                 </button>
                 <p class="text-xs mt-4" style="color:var(--muted)">Field personnel access only</p>
+                <div style="margin-top:20px;padding-top:16px;border-top:1px solid #e5e7eb">
+                    <p style="font-size:11px;color:#6b7280;margin-bottom:8px">Technician? No Google account needed:</p>
+                    <button onclick="_techSSShowLogin()" style="width:100%;padding:12px;background:#f59e0b;color:#fff;border:none;border-radius:10px;font-weight:700;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px">
+                        👷 Technician Self-Service (PIN Login)
+                    </button>
+                </div>
             </div>
         </div>`;
     }
@@ -6856,6 +6862,512 @@
     async function dayEntryPDF(wlID, entryID) {
         return wlPDF(wlID, entryID);
     }
+    // ════════════════════════════════════════════════════════════════
+    //  TECHNICIAN SELF-SERVICE — PIN-based login, readiness, attendance
+    //  Backend: /api/tech/staff-list, /api/tech/login, /api/tech/readiness
+    //  No Google auth required — technicians use staffID + 4-digit PIN
+    // ════════════════════════════════════════════════════════════════
+
+    let _techSS = null;   // { staffID, pin, name, staffRec } — logged-in technician
+    const TECH_API = '/api/tech/';
+
+    function _techSSShowLogin() {
+        document.getElementById('app').innerHTML = `
+        <div class="min-h-screen flex flex-col items-center justify-center p-6" style="background:linear-gradient(160deg,#0f2b4c 0%,#164e63 60%,#0d7c66 100%)">
+            <div class="card p-8 w-full max-w-sm shadow-2xl" style="border-radius:16px">
+                <div style="font-size:48px;text-align:center;margin-bottom:4px">👷</div>
+                <h2 style="text-align:center;font-size:20px;font-weight:800;color:#1e1b4b;margin:0 0 4px">Technician Self-Service</h2>
+                <p style="text-align:center;font-size:11px;color:#6b7280;margin:0 0 20px">Mark daily readiness, view attendance & documents</p>
+
+                <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Select Your Name</label>
+                <select id="techSSName" style="width:100%;padding:10px 12px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;margin-bottom:14px;box-sizing:border-box">
+                    <option value="">Loading technicians…</option>
+                </select>
+
+                <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px">4-Digit PIN</label>
+                <input type="password" id="techSSPin" maxlength="4" inputmode="numeric" pattern="[0-9]*" placeholder="••••"
+                    style="width:100%;padding:10px 12px;border:2px solid #e5e7eb;border-radius:10px;font-size:18px;text-align:center;letter-spacing:8px;margin-bottom:6px;box-sizing:border-box"
+                    onkeydown="if(event.key==='Enter')_techSSHandleLogin()">
+
+                <p id="techSSError" class="hidden" style="font-size:11px;color:#dc2626;text-align:center;margin:4px 0 10px;font-weight:600"></p>
+
+                <button onclick="_techSSHandleLogin()" id="techSSLoginBtn"
+                    style="width:100%;padding:12px;background:#f59e0b;color:#fff;border:none;border-radius:10px;font-weight:700;font-size:14px;cursor:pointer;margin-bottom:12px">
+                    🔑 Sign In
+                </button>
+
+                <button onclick="renderLogin()" style="width:100%;padding:10px;background:none;border:1px solid #d1d5db;border-radius:10px;font-size:12px;color:#6b7280;cursor:pointer">
+                    ← Back to Google Sign-In
+                </button>
+            </div>
+        </div>`;
+        _techSSLoadStaffList();
+    }
+
+    async function _techSSLoadStaffList() {
+        try {
+            const res = await fetch(TECH_API + 'staff-list');
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const list = await res.json();
+            const sel = document.getElementById('techSSName');
+            if (!sel) return;
+            sel.innerHTML = '<option value="">— Select your name —</option>' +
+                list.map(s => `<option value="${s.staffID}">${s.name}</option>`).join('');
+        } catch (e) {
+            console.warn('Staff list load failed:', e);
+            const sel = document.getElementById('techSSName');
+            if (sel) sel.innerHTML = '<option value="">Failed to load — check connection</option>';
+        }
+    }
+
+    async function _techSSHandleLogin() {
+        const staffID = document.getElementById('techSSName')?.value;
+        const pin = document.getElementById('techSSPin')?.value;
+        const err = document.getElementById('techSSError');
+        const btn = document.getElementById('techSSLoginBtn');
+
+        if (!staffID) { err.textContent = 'Please select your name'; err.classList.remove('hidden'); return; }
+        if (!pin || pin.length !== 4) { err.textContent = 'Enter your 4-digit PIN'; err.classList.remove('hidden'); return; }
+
+        btn.disabled = true; btn.textContent = '⏳ Verifying…';
+        try {
+            const res = await fetch(TECH_API + 'login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ staffID, pin })
+            });
+            if (!res.ok) {
+                const text = await res.text();
+                throw new Error(text || 'Login failed');
+            }
+            const staff = await res.json();
+            _techSS = { staffID: staff.staffID, pin, name: staff.name, staffRec: staff };
+            _techSSRenderDashboard();
+        } catch (e) {
+            err.textContent = e.message.includes('locked') ? '🔒 Too many attempts — try again in 30 minutes' :
+                              e.message.includes('Invalid') ? '❌ Wrong PIN. Contact office if you forgot your PIN.' :
+                              '❌ ' + e.message;
+            err.classList.remove('hidden');
+            const pinInput = document.getElementById('techSSPin');
+            if (pinInput) { pinInput.value = ''; pinInput.focus(); }
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = '🔑 Sign In'; }
+        }
+    }
+
+    function _techSSSignOut() {
+        _techSS = null;
+        renderLogin();
+    }
+
+    function _techSSRenderDashboard() {
+        if (!_techSS) return;
+        const s = _techSS.staffRec;
+        const today = new Date().toISOString().split('T')[0];
+        const readiness = (s.techReadiness || []).find(r => r.date === today);
+        const attendance = (s.attendance || []).find(a => a.date === today);
+
+        const statusColor = readiness ? (readiness.status === 'READY' ? '#059669' : readiness.status === 'NOT_WELL' ? '#d97706' : '#6366f1') : '#9ca3af';
+        const statusLabel = readiness ? (readiness.status === 'READY' ? '✅ Ready for Duty' : readiness.status === 'NOT_WELL' ? '🤒 Not Well' : '📋 Leave Requested') : '⏳ Not Marked Yet';
+        const attLabel = attendance ? attendance.type || 'Marked' : 'Pending';
+        const alreadyMarked = !!readiness;
+
+        document.getElementById('app').innerHTML = `
+        <header style="background:var(--navy);padding:14px 16px 10px;position:sticky;top:0;z-index:30">
+            <div class="flex items-center justify-between max-w-2xl mx-auto">
+                <div class="flex items-center gap-2">
+                    <span style="font-size:22px">👷</span>
+                    <div>
+                        <p class="font-bold text-white text-base leading-tight">${_techSS.name}</p>
+                        <p style="font-size:10px;color:#34d399;margin:0">Technician Self-Service</p>
+                    </div>
+                </div>
+                <button onclick="_techSSSignOut()" style="padding:6px 12px;background:rgba(255,255,255,.12);border:none;border-radius:8px;color:#e2e8f0;font-size:11px;font-weight:600;cursor:pointer">
+                    Sign Out
+                </button>
+            </div>
+        </header>
+        <main id="techSSContent" class="max-w-2xl mx-auto px-4 pt-4" style="padding-bottom:40px">
+            <!-- Today's Status -->
+            <div style="background:#fff;border-radius:14px;padding:18px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.06);border-left:4px solid ${statusColor}">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                    <span style="font-size:12px;font-weight:700;color:#374151">📅 Today — ${new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'short',year:'numeric'})}</span>
+                </div>
+                <div style="font-size:18px;font-weight:800;color:${statusColor};margin-bottom:4px">${statusLabel}</div>
+                <p style="font-size:11px;color:#6b7280;margin:0">Attendance: <strong>${attLabel}</strong>${readiness?.markedAt ? ' · Marked at ' + new Date(readiness.markedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) : ''}</p>
+            </div>
+
+            ${!alreadyMarked ? `
+            <!-- Action Buttons -->
+            <div style="display:grid;grid-template-columns:1fr;gap:10px;margin-bottom:18px">
+                <button onclick="_techSSMarkReady()" style="padding:16px;background:#059669;color:#fff;border:none;border-radius:12px;font-weight:700;font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px">
+                    ✅ I am Ready for Duty
+                </button>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                    <button onclick="_techSSShowLeaveForm()" style="padding:14px;background:#6366f1;color:#fff;border:none;border-radius:12px;font-weight:700;font-size:13px;cursor:pointer">
+                        📋 Request Leave
+                    </button>
+                    <button onclick="_techSSShowNotWellForm()" style="padding:14px;background:#d97706;color:#fff;border:none;border-radius:12px;font-weight:700;font-size:13px;cursor:pointer">
+                        🤒 Not Well
+                    </button>
+                </div>
+            </div>` : `
+            <div style="text-align:center;padding:8px;margin-bottom:14px">
+                <p style="font-size:11px;color:#6b7280">Today's readiness already marked. Come back tomorrow.</p>
+                <button onclick="_techSSRefresh()" style="margin-top:8px;padding:6px 16px;border:1px solid #d1d5db;border-radius:8px;font-size:11px;background:#fff;cursor:pointer">🔄 Refresh</button>
+            </div>`}
+
+            <!-- Month Attendance Calendar -->
+            ${_techSSRenderCalendar(s)}
+
+            <!-- Wage Summary -->
+            ${_techSSRenderWageSummary(s)}
+
+            <!-- My Documents -->
+            ${_techSSRenderDocuments(s)}
+
+            <!-- Recent Readiness Log -->
+            ${_techSSRenderRecentLog(s)}
+        </main>`;
+    }
+
+    async function _techSSRefresh() {
+        try {
+            const res = await fetch(TECH_API + 'login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ staffID: _techSS.staffID, pin: _techSS.pin })
+            });
+            if (!res.ok) throw new Error('Session expired');
+            const staff = await res.json();
+            _techSS.staffRec = staff;
+            _techSSRenderDashboard();
+        } catch (e) {
+            showToast('❌ ' + e.message);
+        }
+    }
+
+    async function _techSSSave(readiness, attendance, successMsg) {
+        try {
+            const res = await fetch(TECH_API + 'readiness', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    staffID: _techSS.staffID,
+                    pin: _techSS.pin,
+                    readiness,
+                    attendance
+                })
+            });
+            if (!res.ok) { const t = await res.text(); throw new Error(t || 'Save failed'); }
+            const updated = await res.json();
+            _techSS.staffRec = updated;
+            showToast(successMsg || '✅ Saved');
+            _techSSRenderDashboard();
+        } catch (e) {
+            showToast('❌ ' + e.message);
+        }
+    }
+
+    async function _techSSMarkReady() {
+        const today = new Date().toISOString().split('T')[0];
+        const readiness = {
+            date: today,
+            status: 'READY',
+            markedAt: new Date().toISOString(),
+            officeStatus: '',
+            reason: ''
+        };
+        await _techSSSave(readiness, null, '✅ Readiness marked — Ready for duty');
+    }
+
+    function _techSSShowLeaveForm() {
+        const today = new Date().toISOString().split('T')[0];
+        const content = document.getElementById('techSSContent');
+        if (!content) return;
+        content.innerHTML = `
+        <div style="background:#fff;border-radius:14px;padding:20px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+            <h3 style="font-size:16px;font-weight:800;color:#1e1b4b;margin:0 0 16px">📋 Request Leave</h3>
+
+            <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Reason</label>
+            <select id="tssLeaveReason" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;margin-bottom:12px;box-sizing:border-box">
+                <option value="Personal">Personal</option>
+                <option value="Family Emergency">Family Emergency</option>
+                <option value="Medical">Medical</option>
+                <option value="Festival/Holiday">Festival / Holiday</option>
+                <option value="Travel">Travel to Hometown</option>
+                <option value="Other">Other</option>
+            </select>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+                <div>
+                    <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">From</label>
+                    <input type="date" id="tssLeaveFrom" value="${today}" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;box-sizing:border-box">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">To</label>
+                    <input type="date" id="tssLeaveTo" value="${today}" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;box-sizing:border-box">
+                </div>
+            </div>
+
+            <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Current Location</label>
+            <input type="text" id="tssLeaveLocation" placeholder="City / town" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;margin-bottom:12px;box-sizing:border-box">
+
+            <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Alternate Contact Number</label>
+            <input type="tel" id="tssLeaveContact" placeholder="Mobile number" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;margin-bottom:12px;box-sizing:border-box">
+
+            <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Next Reporting Date</label>
+            <input type="date" id="tssLeaveNextReport" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;margin-bottom:16px;box-sizing:border-box">
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                <button onclick="_techSSRenderDashboard()" style="padding:12px;background:#f3f4f6;color:#374151;border:none;border-radius:10px;font-weight:600;font-size:13px;cursor:pointer">Cancel</button>
+                <button onclick="_techSSSubmitLeave()" style="padding:12px;background:#6366f1;color:#fff;border:none;border-radius:10px;font-weight:700;font-size:13px;cursor:pointer">📋 Submit Leave</button>
+            </div>
+        </div>`;
+    }
+
+    async function _techSSSubmitLeave() {
+        const today = new Date().toISOString().split('T')[0];
+        const reason = document.getElementById('tssLeaveReason')?.value || 'Personal';
+        const from = document.getElementById('tssLeaveFrom')?.value || today;
+        const to = document.getElementById('tssLeaveTo')?.value || today;
+        const location = document.getElementById('tssLeaveLocation')?.value || '';
+        const contact = document.getElementById('tssLeaveContact')?.value || '';
+        const nextReport = document.getElementById('tssLeaveNextReport')?.value || '';
+
+        const readiness = {
+            date: today, status: 'LEAVE_REQUEST', markedAt: new Date().toISOString(),
+            reason, leaveFrom: from, leaveTo: to, location, contact, nextReportDate: nextReport
+        };
+        const attendance = { date: today, type: 'ApprovedLeave', _autoByTechSS: true };
+        await _techSSSave(readiness, attendance, '📋 Leave request submitted');
+    }
+
+    function _techSSShowNotWellForm() {
+        const content = document.getElementById('techSSContent');
+        if (!content) return;
+        content.innerHTML = `
+        <div style="background:#fff;border-radius:14px;padding:20px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+            <h3 style="font-size:16px;font-weight:800;color:#1e1b4b;margin:0 0 16px">🤒 Not Well Report</h3>
+
+            <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Type of Illness</label>
+            <select id="tssIllnessType" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;margin-bottom:12px;box-sizing:border-box">
+                <option value="Fever">Fever</option>
+                <option value="Cold/Flu">Cold / Flu</option>
+                <option value="Body Pain">Body Pain</option>
+                <option value="Stomach">Stomach Issue</option>
+                <option value="Injury">Injury</option>
+                <option value="Other">Other</option>
+            </select>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+                <div>
+                    <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Temperature (°F)</label>
+                    <input type="number" id="tssTemp" placeholder="e.g. 100" step="0.1" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;box-sizing:border-box">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Blood Pressure</label>
+                    <input type="text" id="tssBP" placeholder="e.g. 120/80" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;box-sizing:border-box">
+                </div>
+            </div>
+
+            <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Medication Taken</label>
+            <input type="text" id="tssMedication" placeholder="Medicine name, if any" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;margin-bottom:12px;box-sizing:border-box">
+
+            <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Hospital / Clinic Visited</label>
+            <input type="text" id="tssHospital" placeholder="Hospital name, if visited" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;margin-bottom:12px;box-sizing:border-box">
+
+            <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Doctor's Advice</label>
+            <textarea id="tssDoctorAdvice" rows="2" placeholder="Rest / medication / follow-up" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;margin-bottom:12px;resize:vertical;box-sizing:border-box"></textarea>
+
+            <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Expected Reporting Date</label>
+            <input type="date" id="tssNwNextReport" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;margin-bottom:16px;box-sizing:border-box">
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                <button onclick="_techSSRenderDashboard()" style="padding:12px;background:#f3f4f6;color:#374151;border:none;border-radius:10px;font-weight:600;font-size:13px;cursor:pointer">Cancel</button>
+                <button onclick="_techSSSubmitNotWell()" style="padding:12px;background:#d97706;color:#fff;border:none;border-radius:10px;font-weight:700;font-size:13px;cursor:pointer">🤒 Submit</button>
+            </div>
+        </div>`;
+    }
+
+    async function _techSSSubmitNotWell() {
+        const today = new Date().toISOString().split('T')[0];
+        const readiness = {
+            date: today, status: 'NOT_WELL', markedAt: new Date().toISOString(),
+            illness: document.getElementById('tssIllnessType')?.value || '',
+            temperature: document.getElementById('tssTemp')?.value || '',
+            bp: document.getElementById('tssBP')?.value || '',
+            medication: document.getElementById('tssMedication')?.value || '',
+            hospital: document.getElementById('tssHospital')?.value || '',
+            doctorAdvice: document.getElementById('tssDoctorAdvice')?.value || '',
+            nextReportDate: document.getElementById('tssNwNextReport')?.value || ''
+        };
+        const attendance = { date: today, type: 'NotWell', _autoByTechSS: true };
+        await _techSSSave(readiness, attendance, '🤒 Not-well report submitted. Take care!');
+    }
+
+    function _techSSRenderCalendar(s) {
+        const att = s.attendance || [];
+        const now = new Date();
+        const year = now.getFullYear(), month = now.getMonth();
+        const firstDay = new Date(year, month, 1).getDay(); // 0=Sun
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        const monthName = now.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+
+        const ATT_COLORS = {
+            Working:'#059669', StandBy:'#2563eb', Outstation:'#7c3aed', Sailing:'#0891b2', Anchorage:'#0d9488',
+            ApprovedLeave:'#6366f1', UnApprovedLeave:'#dc2626', NotWell:'#d97706', WeeklyOff:'#9ca3af',
+            NationalHoliday:'#ec4899', CompanyHoliday:'#f472b6', Absent:'#ef4444'
+        };
+        const ATT_SHORT = {
+            Working:'W', StandBy:'SB', Outstation:'OS', Sailing:'SL', Anchorage:'AN',
+            ApprovedLeave:'AL', UnApprovedLeave:'UA', NotWell:'N/W', WeeklyOff:'WO',
+            NationalHoliday:'NH', CompanyHoliday:'CH', Absent:'A'
+        };
+
+        let cells = '';
+        for (let i = 0; i < firstDay; i++) cells += '<div></div>';
+        for (let d = 1; d <= daysInMonth; d++) {
+            const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+            const entry = att.find(a => a.date === dateStr);
+            const type = entry?.type || '';
+            const bg = ATT_COLORS[type] || '#f3f4f6';
+            const fg = type ? '#fff' : '#9ca3af';
+            const label = ATT_SHORT[type] || '';
+            const isToday = dateStr === new Date().toISOString().split('T')[0];
+            cells += `<div style="text-align:center;padding:4px 2px;border-radius:6px;background:${type ? bg : 'transparent'};${isToday ? 'border:2px solid #1e1b4b;' : ''}" title="${type || 'No entry'}">
+                <div style="font-size:10px;font-weight:${isToday?'800':'600'};color:${fg}">${d}</div>
+                <div style="font-size:7px;font-weight:700;color:${fg};opacity:.9">${label}</div>
+            </div>`;
+        }
+
+        return `
+        <div style="background:#fff;border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+            <h3 style="font-size:14px;font-weight:800;color:#1e1b4b;margin:0 0 10px">📅 ${monthName}</h3>
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;text-align:center;margin-bottom:6px">
+                ${['S','M','T','W','T','F','S'].map(d => `<div style="font-size:9px;font-weight:700;color:#9ca3af">${d}</div>`).join('')}
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">
+                ${cells}
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">
+                ${Object.entries(ATT_COLORS).slice(0,8).map(([k,c]) => `<span style="font-size:8px;display:inline-flex;align-items:center;gap:3px"><span style="width:8px;height:8px;border-radius:2px;background:${c};display:inline-block"></span>${ATT_SHORT[k]||k}</span>`).join('')}
+            </div>
+        </div>`;
+    }
+
+    function _techSSRenderWageSummary(s) {
+        const wage = s.wageSnapshot;
+        if (!wage) return '';
+        return `
+        <div style="background:#fff;border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+            <h3 style="font-size:14px;font-weight:800;color:#1e1b4b;margin:0 0 10px">💰 Wage Summary</h3>
+            ${wage.basicWage ? `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f3f4f6"><span style="font-size:12px;color:#6b7280">Basic Wage</span><span style="font-size:12px;font-weight:700;color:#059669">₹${Number(wage.basicWage).toLocaleString('en-IN')}</span></div>` : ''}
+            ${wage.hra ? `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f3f4f6"><span style="font-size:12px;color:#6b7280">HRA</span><span style="font-size:12px;font-weight:600">₹${Number(wage.hra).toLocaleString('en-IN')}</span></div>` : ''}
+            ${wage.da ? `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f3f4f6"><span style="font-size:12px;color:#6b7280">DA</span><span style="font-size:12px;font-weight:600">₹${Number(wage.da).toLocaleString('en-IN')}</span></div>` : ''}
+            ${wage.netPay ? `<div style="display:flex;justify-content:space-between;padding:8px 0;margin-top:4px"><span style="font-size:13px;font-weight:800;color:#1e1b4b">Net Pay</span><span style="font-size:14px;font-weight:800;color:#059669">₹${Number(wage.netPay).toLocaleString('en-IN')}</span></div>` : ''}
+            <p style="font-size:9px;color:#9ca3af;margin:6px 0 0;text-align:center">Last updated by office. Contact admin for discrepancies.</p>
+        </div>`;
+    }
+
+    function _techSSRenderDocuments(s) {
+        const docs = s.documents || [];
+        const idFields = [
+            { key: 'pan', label: 'PAN', icon: '🪪' },
+            { key: 'aadhar', label: 'Aadhar', icon: '🆔' },
+            { key: 'pfNo', label: 'PF No', icon: '🏦' },
+            { key: 'esicNo', label: 'ESIC No', icon: '🏥' },
+            { key: 'passportNo', label: 'Passport', icon: '📘', expKey: 'passportExpiry' },
+            { key: 'dlNo', label: 'DL', icon: '🚗', expKey: 'dlExpiry' },
+            { key: 'cdcNo', label: 'CDC', icon: '📓', expKey: 'cdcExpiry' }
+        ];
+        const today = new Date().toISOString().split('T')[0];
+        const warn30 = new Date(Date.now() + 30*86400000).toISOString().split('T')[0];
+
+        let idHtml = idFields.filter(f => s[f.key]).map(f => {
+            const exp = f.expKey ? s[f.expKey] : null;
+            const expired = exp && exp < today;
+            const expiring = exp && exp <= warn30 && !expired;
+            return `<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:8px 10px">
+                <div style="font-size:9px;color:#6b7280;font-weight:600">${f.icon} ${f.label}</div>
+                <div style="font-size:12px;font-weight:700;color:#1f2937;margin-top:2px">${s[f.key]}</div>
+                ${exp ? `<div style="font-size:9px;margin-top:2px;color:${expired ? '#dc2626' : expiring ? '#d97706' : '#6b7280'};font-weight:${expired||expiring?'700':'400'}">Exp: ${exp}${expired ? ' ⚠️ EXPIRED' : expiring ? ' ⚠️ Expiring soon' : ''}</div>` : ''}
+            </div>`;
+        }).join('');
+
+        let attachHtml = '';
+        if (docs.length) {
+            attachHtml = `
+            <div onclick="this.querySelector('.tssDocsList').classList.toggle('hidden');this.querySelector('.tssDocsChev').textContent=this.querySelector('.tssDocsList').classList.contains('hidden')?'▸':'▾'" style="cursor:pointer;margin-top:12px">
+                <div style="display:flex;align-items:center;gap:6px;padding:8px 0">
+                    <span class="tssDocsChev" style="font-size:12px;color:#6b7280">▸</span>
+                    <span style="font-size:12px;font-weight:700;color:#374151">📎 Attached Files (${docs.length})</span>
+                </div>
+                <div class="tssDocsList hidden" style="display:flex;flex-direction:column;gap:6px" onclick="event.stopPropagation()">
+                    ${docs.map(d => {
+                        const hasDrive = !!d.driveFileId;
+                        return `<div ${hasDrive ? `onclick="window.open('https://drive.google.com/file/d/${d.driveFileId}/preview','_blank')"` : ''} style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;${hasDrive ? 'cursor:pointer' : ''}">
+                            <span style="font-size:16px">${(d.mime||'').startsWith('image/') ? '🖼️' : (d.mime||'') === 'application/pdf' ? '📕' : '📄'}</span>
+                            <div style="flex:1;min-width:0">
+                                <p style="font-size:11px;font-weight:600;color:#1f2937;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.label || d.fileName}</p>
+                                <p style="font-size:9px;color:#9ca3af;margin:2px 0 0">${d.type || 'Other'}</p>
+                            </div>
+                            ${hasDrive ? '<span style="font-size:10px;color:#2563eb">View →</span>' : ''}
+                        </div>`;
+                    }).join('')}
+                </div>
+            </div>`;
+        }
+
+        if (!idHtml && !docs.length) return '';
+
+        return `
+        <div style="background:#fff;border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+            <h3 style="font-size:14px;font-weight:800;color:#1e1b4b;margin:0 0 10px">📄 My Documents</h3>
+            ${idHtml ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">${idHtml}</div>` : ''}
+            ${attachHtml}
+        </div>`;
+    }
+
+    function _techSSRenderRecentLog(s) {
+        const log = (s.techReadiness || []).slice().sort((a,b) => b.date?.localeCompare(a.date)).slice(0, 10);
+        if (!log.length) return '';
+
+        const STATUS_META = {
+            READY: { icon: '✅', label: 'Ready', color: '#059669' },
+            NOT_WELL: { icon: '🤒', label: 'Not Well', color: '#d97706' },
+            LEAVE_REQUEST: { icon: '📋', label: 'Leave', color: '#6366f1' }
+        };
+
+        return `
+        <div style="background:#fff;border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+            <h3 style="font-size:14px;font-weight:800;color:#1e1b4b;margin:0 0 10px">📜 Recent Readiness (last 10)</h3>
+            ${log.map(r => {
+                const m = STATUS_META[r.status] || { icon: '❓', label: r.status, color: '#6b7280' };
+                const d = r.date ? new Date(r.date+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short'}) : '';
+                const t = r.markedAt ? new Date(r.markedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) : '';
+                return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f9fafb">
+                    <span style="font-size:14px">${m.icon}</span>
+                    <div style="flex:1">
+                        <span style="font-size:11px;font-weight:700;color:${m.color}">${m.label}</span>
+                        ${r.reason ? `<span style="font-size:10px;color:#9ca3af;margin-left:4px">— ${r.reason}</span>` : ''}
+                    </div>
+                    <div style="text-align:right">
+                        <div style="font-size:10px;font-weight:600;color:#374151">${d}</div>
+                        <div style="font-size:9px;color:#9ca3af">${t}</div>
+                    </div>
+                </div>`;
+            }).join('')}
+        </div>`;
+    }
+
+    // Auto-open PIN login if URL has ?mode=tech
+    if (new URLSearchParams(window.location.search).get('mode') === 'tech') {
+        window.addEventListener('DOMContentLoaded', () => setTimeout(_techSSShowLogin, 100));
+    }
+
+    // ════════════════════════════════════════════════════════════════
+
     window.gapiLoaded = gapiLoaded;
     window.gisLoaded  = gisLoaded;
     renderLogin();
