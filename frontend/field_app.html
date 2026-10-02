@@ -2265,8 +2265,7 @@
                     </div>
                 </div>` : ''}
 
-                ${_peOpen ? `<!-- Fund requests section -->
-                ${(p.fundRequests||[]).length ? `
+                ${!_peOpen ? '' : (p.fundRequests||[]).length ? `
                 <div style="border-top:1px solid var(--border);background:#f0f9ff">
                     <div style="padding:8px 14px;font-size:11px;font-weight:700;color:#1d4ed8;letter-spacing:.04em">FUND REQUESTS</div>
                     ${(p.fundRequests||[]).map(r=>`
@@ -2285,8 +2284,7 @@
                     </div>`).join('')}
                 </div>` : ''}
 
-                <!-- Fund transfers section -->
-                ${(p.fundTransfers||[]).length ? ` 
+                ${!_peOpen ? '' : (p.fundTransfers||[]).length ? `
                 <div style="border-top:1px solid var(--border);background:#f0f9ff">
                     <div style="padding:8px 14px;font-size:11px;font-weight:700;color:#0369a1;letter-spacing:.04em">FUND TRANSFERS</div>
                     ${(p.fundTransfers||[]).map(t=>`
@@ -2299,7 +2297,6 @@
                     </div>`).join('')}
                 </div>` : ''}
 
-                <!-- Expense items section -->
                 ${_peOpen && _visibleItems.length ? `
                 <div style="border-top:1px solid var(--border)">
                     <div style="padding:8px 14px;font-size:11px;font-weight:700;color:#0d7c66;letter-spacing:.04em;display:flex;justify-content:space-between;align-items:center">
