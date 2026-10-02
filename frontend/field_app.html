@@ -1747,6 +1747,10 @@
     // ════════════════════════════════════════════════════════════════
     let _peSearchQ = '';
     let _wlSearchQ = '';
+    const _peExpanded = new Set(); // projExpIDs that are expanded (collapsed by default)
+    const _wlExpanded = new Set(); // wlIDs that are expanded (collapsed by default)
+    function _togglePE(id) { _peExpanded.has(id) ? _peExpanded.delete(id) : _peExpanded.add(id); renderView(); }
+    function _toggleWL(id) { _wlExpanded.has(id) ? _wlExpanded.delete(id) : _wlExpanded.add(id); renderView(); }
 
     // Update the query and re-render, then restore focus + caret.
     // The whole point: typing should feel uninterrupted even though
@@ -2217,19 +2221,33 @@
             const pendReq = 0; // Old per-project requests deprecated — pool-based now
             const totalReq= 0;
 
+            const _peOpen = _peExpanded.has(p.projExpID);
             return `
             <div class="card mb-4" style="border-left:4px solid ${bal>=0?'#0d7c66':'#dc2626'}">
-                <!-- Project header -->
-                <div class="p-4">
-                    <div class="flex justify-between items-start mb-2">
-                        <div class="flex-1 min-w-0 mr-2">
-                            <p class="font-bold" style="color:var(--navy);font-size:15px">${p.projectName}</p>
-                            ${p.projectRef?`<p style="font-size:11px;color:var(--muted)">Ref: ${p.projectRef}</p>`:''}
-                            ${p.startDate?`<p style="font-size:11px;color:var(--muted)">${p.startDate}${p.endDate?' → '+p.endDate:''}</p>`:''}
+                <!-- Project header — tap to collapse/expand -->
+                <div onclick="_togglePE('${p.projExpID}')" style="cursor:pointer;padding:14px;display:flex;align-items:flex-start;gap:8px">
+                    <span style="font-size:14px;color:#6b7280;margin-top:2px;transition:transform .2s;transform:rotate(${_peOpen?'90':'0'}deg)">${_peOpen?'▾':'▸'}</span>
+                    <div style="flex:1;min-width:0">
+                        <div class="flex justify-between items-start">
+                            <div class="flex-1 min-w-0 mr-2">
+                                <p class="font-bold" style="color:var(--navy);font-size:15px">${p.projectName}</p>
+                                ${p.projectRef?`<p style="font-size:11px;color:var(--muted)">Ref: ${p.projectRef}</p>`:''}
+                                ${p.startDate?`<p style="font-size:11px;color:var(--muted)">${p.startDate}${p.endDate?' → '+p.endDate:''}</p>`:''}
+                            </div>
+                            <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+                                <span class="badge" style="background:${bal>=0?'#f0fdf4':'#fef2f2'};color:${bal>=0?'#15803d':'#dc2626'};font-size:12px">Bal: ${fmt(bal)}</span>
+                                <span class="badge" style="background:#f0f9ff;color:#0369a1;font-size:10px">${(p.items||[]).length} expense${(p.items||[]).length!==1?'s':''}</span>
+                            </div>
                         </div>
-                        <span class="badge" style="background:${bal>=0?'#f0fdf4':'#fef2f2'};color:${bal>=0?'#15803d':'#dc2626'};font-size:12px">Bal: ${fmt(bal)}</span>
+                        <!-- Compact summary always visible -->
+                        <div style="display:flex;gap:12px;font-size:10px;color:var(--muted);margin-top:6px">
+                            <span>Fund: <strong>${fmt(funds)}</strong></span>
+                            <span>Spent: <strong style="color:#b45309">${fmt(spent)}</strong></span>
+                        </div>
                     </div>
-
+                </div>
+                ${_peOpen ? `
+                <div style="padding:0 14px 10px">
                     <!-- Fund bar -->
                     <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:4px">
                         <span>Office Fund: <strong>${fmt(funds)}</strong>${tfIn>0?` <span style="color:#15803d">+${fmt(tfIn)} received</span>`:''}</span>
@@ -2241,13 +2259,13 @@
 
                     <!-- Action buttons -->
                     <div class="flex gap-2 mt-3 flex-wrap">
-                        <button onclick="openExpItemModal('${p.projExpID}')" class="btn-primary" style="padding:7px 12px;font-size:12px">+ Add Expense</button>
-                        <button onclick="reconcilePDF('${p.projExpID}')" style="padding:7px 12px;border-radius:9px;background:#7c3aed;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:600">📄 Reconcile PDF</button>
-                        <button onclick="reconcileCSV('${p.projExpID}')" style="padding:7px 12px;border-radius:9px;background:#15803d;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:600">📊 Reconcile CSV</button>
+                        <button onclick="event.stopPropagation();openExpItemModal('${p.projExpID}')" class="btn-primary" style="padding:7px 12px;font-size:12px">+ Add Expense</button>
+                        <button onclick="event.stopPropagation();reconcilePDF('${p.projExpID}')" style="padding:7px 12px;border-radius:9px;background:#7c3aed;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:600">📄 Reconcile PDF</button>
+                        <button onclick="event.stopPropagation();reconcileCSV('${p.projExpID}')" style="padding:7px 12px;border-radius:9px;background:#15803d;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:600">📊 Reconcile CSV</button>
                     </div>
-                </div>
+                </div>` : ''}
 
-                <!-- Fund requests section -->
+                ${_peOpen ? `<!-- Fund requests section -->
                 ${(p.fundRequests||[]).length ? `
                 <div style="border-top:1px solid var(--border);background:#f0f9ff">
                     <div style="padding:8px 14px;font-size:11px;font-weight:700;color:#1d4ed8;letter-spacing:.04em">FUND REQUESTS</div>
@@ -2268,7 +2286,7 @@
                 </div>` : ''}
 
                 <!-- Fund transfers section -->
-                ${(p.fundTransfers||[]).length ? `
+                ${(p.fundTransfers||[]).length ? ` 
                 <div style="border-top:1px solid var(--border);background:#f0f9ff">
                     <div style="padding:8px 14px;font-size:11px;font-weight:700;color:#0369a1;letter-spacing:.04em">FUND TRANSFERS</div>
                     ${(p.fundTransfers||[]).map(t=>`
@@ -2282,7 +2300,7 @@
                 </div>` : ''}
 
                 <!-- Expense items section -->
-                ${_visibleItems.length ? `
+                ${_peOpen && _visibleItems.length ? `
                 <div style="border-top:1px solid var(--border)">
                     <div style="padding:8px 14px;font-size:11px;font-weight:700;color:#0d7c66;letter-spacing:.04em;display:flex;justify-content:space-between;align-items:center">
                         <span>EXPENSE ENTRIES${(!_showAllItems && _peSearchQ) ? ` <span style="font-weight:500;color:#94a3b8;font-size:10px">· showing ${_visibleItems.length} of ${(p.items||[]).length} (filtered)</span>` : ''}</span>
@@ -2316,7 +2334,7 @@
                             </div>
                         </div>`;
                     }).join('')}
-                </div>` : `<p style="padding:10px 14px;font-size:12px;color:var(--muted);border-top:1px solid var(--border)">No expenses recorded yet.</p>`}
+                </div>` : _peOpen ? `<p style="padding:10px 14px;font-size:12px;color:var(--muted);border-top:1px solid var(--border)">No expenses recorded yet.</p>` : ''}
             </div>`;
         }).join('');
         })()}`;
@@ -5226,34 +5244,41 @@
             const techNames=(w.technicians||[]).map(t=>t.name).join(', ')||'—';
             const days=(w.dailyEntries||[]).length;
             const lastEntry=days?[...w.dailyEntries].sort((a,b)=>(b.date||'').localeCompare(a.date||''))[0]:null;
+            const _wlOpen = _wlExpanded.has(w.wlID);
             return `
             <div class="card mb-4" style="border-left:4px solid ${ss.dot}">
-                <!-- Project header -->
-                <div class="p-4">
-                    <div class="flex justify-between items-start mb-2">
-                        <div class="flex-1 min-w-0 mr-2">
-                            <p class="font-bold" style="color:var(--navy);font-size:15px">${w.project||'—'}</p>
-                            <p style="font-size:12px;color:var(--muted)">📍 ${w.location||'—'}${w.workStartDate?' · '+w.workStartDate+(w.workEndDate?' → '+w.workEndDate:''):''}</p>
-                            <p style="font-size:12px;color:var(--muted)">👷 ${techNames}</p>
+                <!-- Project header — tap to collapse/expand -->
+                <div onclick="_toggleWL('${w.wlID}')" style="cursor:pointer;padding:14px;display:flex;align-items:flex-start;gap:8px">
+                    <span style="font-size:14px;color:#6b7280;margin-top:2px;transition:transform .2s;transform:rotate(${_wlOpen?'90':'0'}deg)">${_wlOpen?'▾':'▸'}</span>
+                    <div style="flex:1;min-width:0">
+                        <div class="flex justify-between items-start">
+                            <div class="flex-1 min-w-0 mr-2">
+                                <p class="font-bold" style="color:var(--navy);font-size:15px">${w.project||'—'}</p>
+                                <p style="font-size:12px;color:var(--muted)">📍 ${w.location||'—'}${w.workStartDate?' · '+w.workStartDate+(w.workEndDate?' → '+w.workEndDate:''):''}</p>
+                                <p style="font-size:12px;color:var(--muted)">👷 ${techNames}</p>
+                            </div>
+                            <div style="display:flex;flex-direction:column;gap:5px;align-items:flex-end">
+                                <span class="badge" style="background:${ss.bg};color:${ss.col}">${w.status||'—'}</span>
+                                <span class="badge" style="background:#f0f9ff;color:#0369a1">${days} day${days!==1?'s':''}</span>
+                            </div>
                         </div>
-                        <div style="display:flex;flex-direction:column;gap:5px;align-items:flex-end">
-                            <span class="badge" style="background:${ss.bg};color:${ss.col}">${w.status||'—'}</span>
-                            <span class="badge" style="background:#f0f9ff;color:#0369a1">${days} day${days!==1?'s':''}</span>
-                        </div>
-                    </div>
-                    <!-- Action buttons -->
-                    <div class="flex gap-2 mt-3 flex-wrap">
-                        <button onclick="openDayModal('${w.wlID}')" class="btn-primary flex-1" style="font-size:12px;padding:8px 10px;background:linear-gradient(135deg,#065f46,#0d9488);min-width:140px">
-                            + Add Daily Update
-                        </button>
-                        <button onclick="wlPDF('${w.wlID}')" style="padding:8px 12px;border-radius:10px;background:#1e3a5f;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:600">📄 Report</button>
-                        <button onclick="openFeedbackModal('${w.wlID}')" style="padding:8px 12px;border-radius:10px;background:${w.customerFeedback?'#f59e0b':'#fff'};color:${w.customerFeedback?'#fff':'#92400e'};border:1.5px solid #f59e0b;cursor:pointer;font-size:12px;font-weight:600" title="${w.customerFeedback ? 'View / re-print customer feedback (already captured)' : 'Capture customer feedback at project completion'}">📋 Feedback${w.customerFeedback ? ' ✓' : ''}</button>
-                        <button onclick="editWorkLog('${w.wlID}')" style="padding:8px 10px;border-radius:10px;border:1.5px solid var(--border);background:#fff;cursor:pointer;font-size:12px;color:var(--muted)">✏️</button>
-                        <button onclick="deleteWorkLog('${w.wlID}')" style="padding:8px 10px;border-radius:10px;border:1.5px solid #fecaca;background:#fff;cursor:pointer;font-size:12px;color:#dc2626">✕</button>
                     </div>
                 </div>
+                ${_wlOpen ? `
+                <!-- Action buttons -->
+                <div style="padding:0 14px 10px">
+                    <div class="flex gap-2 flex-wrap">
+                        <button onclick="event.stopPropagation();openDayModal('${w.wlID}')" class="btn-primary flex-1" style="font-size:12px;padding:8px 10px;background:linear-gradient(135deg,#065f46,#0d9488);min-width:140px">
+                            + Add Daily Update
+                        </button>
+                        <button onclick="event.stopPropagation();wlPDF('${w.wlID}')" style="padding:8px 12px;border-radius:10px;background:#1e3a5f;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:600">📄 Report</button>
+                        <button onclick="event.stopPropagation();openFeedbackModal('${w.wlID}')" style="padding:8px 12px;border-radius:10px;background:${w.customerFeedback?'#f59e0b':'#fff'};color:${w.customerFeedback?'#fff':'#92400e'};border:1.5px solid #f59e0b;cursor:pointer;font-size:12px;font-weight:600" title="${w.customerFeedback ? 'View / re-print customer feedback (already captured)' : 'Capture customer feedback at project completion'}">📋 Feedback${w.customerFeedback ? ' ✓' : ''}</button>
+                        <button onclick="event.stopPropagation();editWorkLog('${w.wlID}')" style="padding:8px 10px;border-radius:10px;border:1.5px solid var(--border);background:#fff;cursor:pointer;font-size:12px;color:var(--muted)">✏️</button>
+                        <button onclick="event.stopPropagation();deleteWorkLog('${w.wlID}')" style="padding:8px 10px;border-radius:10px;border:1.5px solid #fecaca;background:#fff;cursor:pointer;font-size:12px;color:#dc2626">✕</button>
+                    </div>
+                </div>` : ''}
                 <!-- Daily entries -->
-                ${!_visibleEntries.length?`<div style="padding:10px 16px;border-top:1px solid var(--border);font-size:12px;color:var(--muted)">${days?`No matching daily entries.`:`No daily entries yet — tap "+ Add Daily Update" to begin.`}</div>`:`
+                ${!_wlOpen ? '' : !_visibleEntries.length?`<div style="padding:10px 16px;border-top:1px solid var(--border);font-size:12px;color:var(--muted)">${days?`No matching daily entries.`:`No daily entries yet — tap "+ Add Daily Update" to begin.`}</div>`:`
                 <div style="border-top:1px solid var(--border)">
                     ${(!_showAllEntries && _wlSearchQ) ? `<div style="padding:6px 16px;font-size:10px;color:#94a3b8;background:#fafafa">Showing ${_visibleEntries.length} of ${days} daily entries (filtered)</div>` : ''}
                     ${(() => {
