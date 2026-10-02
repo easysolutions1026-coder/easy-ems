@@ -38744,7 +38744,9 @@ Automated WFH alert — ${company} Attendance System.`;
                 availableForPayment: +Math.max(0, bankBalance - minBalance).toFixed(2),
                 revisionOf:        revisingID || '',
                 revisionNote:      revisingID ? ('Revises ' + revisingID) : '',
-                reconciliation:    [],
+                reconciliation:    revisingID
+                    ? JSON.parse(JSON.stringify((paymentRequests.find(r => r.prID === revisingID) || {}).reconciliation || []))
+                    : [],
                 items,
                 salaryGaps:       [],
                 totalGenerated,
