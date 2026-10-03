@@ -686,6 +686,123 @@
     </div>
 </div>
 
+
+<!-- Kick-Off Record Modal — ITSPL/QR/PKR form -->
+<div id="kickOffModal" class="modal">
+    <div class="modal-box" style="max-width:680px">
+        <div class="modal-hdr" style="background:linear-gradient(135deg,#4338ca,#6366f1)">
+            <span class="font-bold text-white text-lg">📝 Project Kick-Off Record</span>
+            <button type="button" onclick="closeKickOffModal()" style="background:none;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1">✕</button>
+        </div>
+        <form id="kickOffForm" onsubmit="saveKickOff(event)" class="p-5 space-y-3">
+            <input type="hidden" id="koWlID"/>
+            <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:10px;display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <div style="grid-column:1/-1">
+                    <label style="font-size:11px;font-weight:600;color:#4338ca">Project Number and Detail</label>
+                    <input type="text" id="koProjectDetail" class="field-input" required style="font-size:13px"/>
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:600;color:#4338ca">Expected Date Starting</label>
+                    <input type="date" id="koExpectedStart" class="field-input" style="font-size:13px"/>
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:600;color:#4338ca">Expected Date of Completion</label>
+                    <input type="date" id="koExpectedEnd" class="field-input" style="font-size:13px"/>
+                </div>
+                <div style="grid-column:1/-1">
+                    <label style="font-size:11px;font-weight:600;color:#4338ca">Team Details</label>
+                    <input type="text" id="koTeamDetails" class="field-input" style="font-size:13px" placeholder="e.g., G RAJESH, DILLIGANESH"/>
+                </div>
+            </div>
+            <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:10px">
+                <p style="font-size:12px;font-weight:700;color:#4338ca;margin-bottom:6px">DOCUMENTS CARRIED / VERIFIED</p>
+                <div id="koDocsContainer" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+            </div>
+            <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:10px">
+                <p style="font-size:12px;font-weight:700;color:#4338ca;margin-bottom:6px">LOCATION OF WORK</p>
+                <div id="koLocContainer" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+            </div>
+            <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:10px">
+                <label style="font-size:11px;font-weight:600;color:#4338ca">Specific Details (if any)</label>
+                <textarea id="koSpecificDetails" rows="2" class="field-input" style="font-size:12px"></textarea>
+            </div>
+            <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:10px">
+                <p style="font-size:12px;font-weight:700;color:#4338ca;margin-bottom:6px">MANUALS / REFERENCE DOCUMENTS</p>
+                <div id="koManualsContainer"></div>
+            </div>
+            <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:10px">
+                <p style="font-size:12px;font-weight:700;color:#4338ca;margin-bottom:6px">PERSONAL PROTECTIVE EQUIPMENT</p>
+                <div id="koPPEContainer" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+                <div style="margin-top:8px">
+                    <label style="font-size:11px;font-weight:600;color:#4338ca">PPE — Correct Donning / Usage Demonstrated</label>
+                    <select id="koPPEDonning" class="field-input" style="font-size:13px;width:auto;min-width:100px">
+                        <option value="">—</option><option value="yes">YES</option><option value="no">NO</option>
+                    </select>
+                </div>
+            </div>
+            <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:10px;display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <div><label style="font-size:11px;font-weight:600;color:#4338ca">Engineer / Technician</label><input type="text" id="koEngineerName" class="field-input" style="font-size:13px"/></div>
+                <div><label style="font-size:11px;font-weight:600;color:#4338ca">General Manager</label><input type="text" id="koGMName" class="field-input" style="font-size:13px"/></div>
+            </div>
+            <div style="background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:10px">
+                <label style="font-size:11px;font-weight:600;color:#854d0e;display:block;margin-bottom:4px">📎 Scanned/photographed signed form</label>
+                <input type="file" id="koSignedFile" accept="image/*,application/pdf" class="field-input" style="font-size:11px"/>
+                <div id="koSignedFilePreview" style="font-size:10px;color:#854d0e;margin-top:4px"></div>
+            </div>
+            <div class="flex justify-between gap-2 pt-2 flex-wrap">
+                <button type="button" onclick="printKickOffFromForm()" style="padding:8px 14px;border-radius:10px;background:#1e3a5f;color:#fff;border:none;cursor:pointer;font-size:13px;font-weight:600">🖨 Print Form</button>
+                <span style="flex:1"></span>
+                <button type="button" onclick="closeKickOffModal()" style="padding:8px 14px;border-radius:10px;border:1.5px solid var(--border);background:#fff;cursor:pointer;font-size:13px">Cancel</button>
+                <button type="submit" class="btn-primary" style="font-size:13px;padding:8px 16px;background:linear-gradient(135deg,#4338ca,#6366f1)">💾 Save Kick-Off</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Growth of Work / Re-Work Report Modal — ITSPL/QR/GW-RW-R form -->
+<div id="growthRWModal" class="modal">
+    <div class="modal-box" style="max-width:680px">
+        <div class="modal-hdr" style="background:linear-gradient(135deg,#9f1239,#e11d48)">
+            <span class="font-bold text-white text-lg">🔄 Growth of Work / Re-Work Report</span>
+            <button type="button" onclick="closeGrowthRWModal()" style="background:none;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1">✕</button>
+        </div>
+        <form id="growthRWForm" onsubmit="saveGrowthRW(event)" class="p-5 space-y-3">
+            <input type="hidden" id="gwWlID"/>
+            <div style="background:#fff1f2;border:1px solid #fecdd3;border-radius:8px;padding:10px;display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <div style="grid-column:1/-1"><label style="font-size:11px;font-weight:600;color:#9f1239">Project No</label><input type="text" id="gwProjectNo" class="field-input" required style="font-size:13px"/></div>
+                <div style="grid-column:1/-1"><label style="font-size:11px;font-weight:600;color:#9f1239">Customer</label><input type="text" id="gwCustomer" class="field-input" style="font-size:13px"/></div>
+                <div><label style="font-size:11px;font-weight:600;color:#9f1239">Date From</label><input type="date" id="gwDateFrom" class="field-input" style="font-size:13px"/></div>
+                <div><label style="font-size:11px;font-weight:600;color:#9f1239">Date To</label><input type="date" id="gwDateTo" class="field-input" style="font-size:13px"/></div>
+            </div>
+            <div style="background:#fff1f2;border:1px solid #fecdd3;border-radius:8px;padding:10px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                    <p style="font-size:12px;font-weight:700;color:#9f1239;margin:0">WORK ITEMS</p>
+                    <button type="button" onclick="_gwAddRow()" style="padding:4px 10px;border-radius:6px;background:#9f1239;color:#fff;border:none;cursor:pointer;font-size:11px;font-weight:600">+ Add Row</button>
+                </div>
+                <div id="gwWorkItemsContainer"></div>
+            </div>
+            <div style="background:#fff1f2;border:1px solid #fecdd3;border-radius:8px;padding:10px">
+                <label style="font-size:11px;font-weight:600;color:#9f1239">Remarks</label>
+                <textarea id="gwRemarks" rows="4" class="field-input" style="font-size:12px" placeholder="Detailed remarks on work progress, debriefing, analysis..."></textarea>
+            </div>
+            <div style="background:#fff1f2;border:1px solid #fecdd3;border-radius:8px;padding:10px;display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <div><label style="font-size:11px;font-weight:600;color:#9f1239">Prepared By</label><input type="text" id="gwPreparedBy" class="field-input" style="font-size:13px"/></div>
+                <div><label style="font-size:11px;font-weight:600;color:#9f1239">Date</label><input type="date" id="gwPreparedDate" class="field-input" style="font-size:13px"/></div>
+            </div>
+            <div style="background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:10px">
+                <label style="font-size:11px;font-weight:600;color:#854d0e;display:block;margin-bottom:4px">📎 Scanned/photographed signed form</label>
+                <input type="file" id="gwSignedFile" accept="image/*,application/pdf" class="field-input" style="font-size:11px"/>
+                <div id="gwSignedFilePreview" style="font-size:10px;color:#854d0e;margin-top:4px"></div>
+            </div>
+            <div class="flex justify-between gap-2 pt-2 flex-wrap">
+                <button type="button" onclick="printGrowthRWFromForm()" style="padding:8px 14px;border-radius:10px;background:#1e3a5f;color:#fff;border:none;cursor:pointer;font-size:13px;font-weight:600">🖨 Print Form</button>
+                <span style="flex:1"></span>
+                <button type="button" onclick="closeGrowthRWModal()" style="padding:8px 14px;border-radius:10px;border:1.5px solid var(--border);background:#fff;cursor:pointer;font-size:13px">Cancel</button>
+                <button type="submit" class="btn-primary" style="font-size:13px;padding:8px 16px;background:linear-gradient(135deg,#9f1239,#e11d48)">💾 Save Growth/RW</button>
+            </div>
+        </form>
+    </div>
+</div>
 <!-- Daily Entry Modal -->
 <div id="dayModal" class="modal">
     <div class="modal-box" style="max-width:640px">
@@ -5269,6 +5386,8 @@
                             + Add Daily Update
                         </button>
                         <button onclick="event.stopPropagation();wlPDF('${w.wlID}')" style="padding:8px 12px;border-radius:10px;background:#1e3a5f;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:600">📄 Report</button>
+                        <button onclick="event.stopPropagation();openKickOffModal('${w.wlID}')" style="padding:8px 12px;border-radius:10px;background:${w.kickOffRecord?'#4338ca':'#fff'};color:${w.kickOffRecord?'#fff':'#4338ca'};border:1.5px solid #4338ca;cursor:pointer;font-size:12px;font-weight:600" title="${w.kickOffRecord?'View Kick-Off Record':'Not yet captured'}">📝 Kick-Off${w.kickOffRecord?' ✓':''}</button>
+                        <button onclick="event.stopPropagation();openGrowthRWModal('${w.wlID}')" style="padding:8px 12px;border-radius:10px;background:${w.growthOfWorkReport?'#9f1239':'#fff'};color:${w.growthOfWorkReport?'#fff':'#9f1239'};border:1.5px solid #9f1239;cursor:pointer;font-size:12px;font-weight:600" title="${w.growthOfWorkReport?'View Growth of Work Report':'Not yet captured'}">🔄 Growth/RW${w.growthOfWorkReport?' ✓':''}</button>
                         <button onclick="event.stopPropagation();openFeedbackModal('${w.wlID}')" style="padding:8px 12px;border-radius:10px;background:${w.customerFeedback?'#f59e0b':'#fff'};color:${w.customerFeedback?'#fff':'#92400e'};border:1.5px solid #f59e0b;cursor:pointer;font-size:12px;font-weight:600" title="${w.customerFeedback ? 'View / re-print customer feedback (already captured)' : 'Capture customer feedback at project completion'}">📋 Feedback${w.customerFeedback ? ' ✓' : ''}</button>
                         <button onclick="event.stopPropagation();editWorkLog('${w.wlID}')" style="padding:8px 10px;border-radius:10px;border:1.5px solid var(--border);background:#fff;cursor:pointer;font-size:12px;color:var(--muted)">✏️</button>
                         <button onclick="event.stopPropagation();deleteWorkLog('${w.wlID}')" style="padding:8px 10px;border-radius:10px;border:1.5px solid #fecaca;background:#fff;cursor:pointer;font-size:12px;color:#dc2626">✕</button>
@@ -6088,6 +6207,286 @@
     }
 
     // ── Feedback PDF — mirrors the ITSPL/QR/CF paper form ──────────────
+
+    // ── KICK-OFF RECORD (ITSPL/QR/PKR) ───────────────────────────────
+    async function _ensureJsPDF() {
+        if (!window.jspdf) {
+            await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
+            await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
+        }
+    }
+
+    const _KO_DOCUMENTS = [
+        {key:'passport',label:'Passport'},{key:'aadhaar',label:'Aadhaar'},{key:'safetyTraining',label:'Safety Training'},
+        {key:'medicalCert',label:'Medical Certificate'},{key:'cdc',label:'CDC'},{key:'articleAgreement',label:'Article of Agreement'}
+    ];
+    const _KO_LOCATIONS = [
+        {key:'at-site',label:'At Site'},{key:'port',label:'Port'},{key:'anchorage',label:'Anchorage'},
+        {key:'sailing',label:'Sailing'},{key:'workshop',label:'Workshop'},{key:'drydock',label:'Drydock'}
+    ];
+    const _KO_MANUALS = [
+        {key:'manual',label:'Manual'},{key:'clearanceTable',label:'Clearance Table'},{key:'importantNotes',label:'Important Notes'},
+        {key:'reportingForms',label:'Reporting Forms'},{key:'dailyReport',label:'Daily Report'},{key:'workInstruction',label:'Work Instruction (Read & Understood)'}
+    ];
+    const _KO_PPE = [
+        {key:'safetyShoe',label:'Safety Shoe'},{key:'helmet',label:'Helmet'},{key:'earPlug',label:'Ear Plug'},
+        {key:'goggle',label:'Goggle'},{key:'boilerSuit',label:'Boiler Suits'},{key:'handGlove',label:'Hand Glove'},{key:'mask',label:'Mask'}
+    ];
+    let _koDocState = {}, _koLocState = '', _koManualState = {}, _koPPEState = {}, _koSignedAttachment = null;
+
+    function _koRenderToggles() {
+        const dc = document.getElementById('koDocsContainer');
+        dc.innerHTML = _KO_DOCUMENTS.map(d => {
+            const on = !!_koDocState[d.key];
+            return `<button type="button" onclick="_koDocState['${d.key}']=!_koDocState['${d.key}'];_koRenderToggles()" style="padding:4px 10px;border-radius:20px;font-size:11px;cursor:pointer;border:1.5px solid ${on?'#4338ca':'#d1d5db'};background:${on?'#4338ca':'#fff'};color:${on?'#fff':'#6b7280'};font-weight:${on?'600':'400'}">${on?'✓ ':''}${d.label}</button>`;
+        }).join('');
+        const lc = document.getElementById('koLocContainer');
+        lc.innerHTML = _KO_LOCATIONS.map(l => {
+            const on = _koLocState === l.key;
+            return `<button type="button" onclick="_koLocState='${l.key}';_koRenderToggles()" style="padding:4px 10px;border-radius:20px;font-size:11px;cursor:pointer;border:1.5px solid ${on?'#4338ca':'#d1d5db'};background:${on?'#4338ca':'#fff'};color:${on?'#fff':'#6b7280'};font-weight:${on?'600':'400'}">${on?'✓ ':''}${l.label}</button>`;
+        }).join('');
+        const mc = document.getElementById('koManualsContainer');
+        mc.innerHTML = _KO_MANUALS.map(m => {
+            const v = _koManualState[m.key];
+            return `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid #ede9fe">
+                <span style="font-size:12px;color:#1f2937">${m.label}</span>
+                <span style="display:flex;gap:4px">
+                    <button type="button" onclick="_koManualState['${m.key}']=true;_koRenderToggles()" style="padding:2px 8px;border-radius:4px;font-size:10px;cursor:pointer;border:1px solid ${v===true?'#16a34a':'#d1d5db'};background:${v===true?'#16a34a':'#fff'};color:${v===true?'#fff':'#6b7280'};font-weight:600">YES</button>
+                    <button type="button" onclick="_koManualState['${m.key}']=false;_koRenderToggles()" style="padding:2px 8px;border-radius:4px;font-size:10px;cursor:pointer;border:1px solid ${v===false?'#dc2626':'#d1d5db'};background:${v===false?'#dc2626':'#fff'};color:${v===false?'#fff':'#6b7280'};font-weight:600">NO</button>
+                </span>
+            </div>`;
+        }).join('');
+        const pc = document.getElementById('koPPEContainer');
+        pc.innerHTML = _KO_PPE.map(p => {
+            const on = !!_koPPEState[p.key];
+            return `<button type="button" onclick="_koPPEState['${p.key}']=!_koPPEState['${p.key}'];_koRenderToggles()" style="padding:4px 10px;border-radius:20px;font-size:11px;cursor:pointer;border:1.5px solid ${on?'#16a34a':'#d1d5db'};background:${on?'#dcfce7':'#fff'};color:${on?'#166534':'#6b7280'};font-weight:${on?'600':'400'}">${on?'✓ ':''}${p.label}</button>`;
+        }).join('');
+    }
+
+    function openKickOffModal(wlID) {
+        const wl = workLogs.find(x => x.wlID === wlID);
+        if (!wl) return;
+        document.getElementById('koWlID').value = wlID;
+        const ko = wl.kickOffRecord || {};
+        document.getElementById('koProjectDetail').value = ko.projectDetail || ((wl.ref ? wl.ref + ' - ' : '') + (wl.project || ''));
+        document.getElementById('koExpectedStart').value = ko.expectedStartDate || wl.workStartDate || '';
+        document.getElementById('koExpectedEnd').value = ko.expectedCompletionDate || wl.workEndDate || '';
+        document.getElementById('koTeamDetails').value = ko.teamDetails || (wl.technicians||[]).map(t=>t.name).join(', ') || '';
+        document.getElementById('koSpecificDetails').value = ko.specificDetails || '';
+        document.getElementById('koEngineerName').value = ko.engineerName || '';
+        document.getElementById('koGMName').value = ko.generalManagerName || '';
+        document.getElementById('koPPEDonning').value = ko.ppeDonningVerified === true ? 'yes' : ko.ppeDonningVerified === false ? 'no' : '';
+        _koDocState = {...(ko.documents || {})};
+        _koLocState = ko.locationOfWork || '';
+        _koManualState = {...(ko.manualsRefDocs || {})};
+        _koPPEState = {...(ko.ppe || {})};
+        _koSignedAttachment = ko.signedAttachment || null;
+        const fp = document.getElementById('koSignedFilePreview');
+        fp.innerHTML = _koSignedAttachment ? `Attached: <a href="https://drive.google.com/file/d/${_koSignedAttachment.driveFileId}/view" target="_blank" style="color:#1d4ed8;text-decoration:underline">${_koSignedAttachment.name||'signed'}</a> <button type="button" onclick="_koSignedAttachment=null;document.getElementById('koSignedFilePreview').innerHTML=''" style="color:#dc2626;background:none;border:none;cursor:pointer;font-size:11px">[remove]</button>` : '';
+        document.getElementById('koSignedFile').value = '';
+        _koRenderToggles();
+        document.getElementById('kickOffModal').classList.add('show');
+    }
+    function closeKickOffModal() { document.getElementById('kickOffModal').classList.remove('show'); }
+
+    function _collectKickOffFromForm() {
+        return {
+            projectDetail: document.getElementById('koProjectDetail').value.trim(),
+            expectedStartDate: document.getElementById('koExpectedStart').value,
+            expectedCompletionDate: document.getElementById('koExpectedEnd').value,
+            teamDetails: document.getElementById('koTeamDetails').value.trim(),
+            specificDetails: document.getElementById('koSpecificDetails').value.trim(),
+            documents: {..._koDocState},
+            locationOfWork: _koLocState,
+            manualsRefDocs: {..._koManualState},
+            ppe: {..._koPPEState},
+            ppeDonningVerified: document.getElementById('koPPEDonning').value === 'yes' ? true : document.getElementById('koPPEDonning').value === 'no' ? false : null,
+            engineerName: document.getElementById('koEngineerName').value.trim(),
+            generalManagerName: document.getElementById('koGMName').value.trim(),
+            signedAttachment: _koSignedAttachment
+        };
+    }
+
+    async function saveKickOff(ev) {
+        ev.preventDefault();
+        const wlID = document.getElementById('koWlID').value;
+        const wi = workLogs.findIndex(x => x.wlID === wlID);
+        if (wi < 0) return;
+        const koData = _collectKickOffFromForm();
+        // Handle file upload
+        const fileInput = document.getElementById('koSignedFile');
+        if (fileInput.files.length) {
+            _showToast('📤 Uploading signed form…', '#4338ca', 5000);
+            try {
+                const folder = await getOrCreateSubFolder('KickOffRecords');
+                const uploaded = await uploadFileToDrive(fileInput.files[0], folder);
+                koData.signedAttachment = uploaded;
+            } catch (e) { console.error('KO upload failed:', e); _showToast('Upload failed: ' + e.message, '#dc2626'); }
+        }
+        const existing = workLogs[wi].kickOffRecord;
+        koData.createdAt = existing?.createdAt || new Date().toISOString();
+        koData.createdBy = existing?.createdBy || currentUser?.name || currentUser?.email || 'Field App';
+        koData.updatedAt = new Date().toISOString();
+        koData.updatedBy = currentUser?.name || currentUser?.email || 'Field App';
+        workLogs[wi].kickOffRecord = koData;
+        await saveWorkLogs();
+        closeKickOffModal();
+        renderWorkLogs();
+        _showToast('✅ Kick-Off Record saved', '#16a34a');
+    }
+
+    async function printKickOffFromForm() {
+        const wlID = document.getElementById('koWlID').value;
+        const wl = workLogs.find(x => x.wlID === wlID);
+        const ko = _collectKickOffFromForm();
+        await _ensureJsPDF();
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+        const PW = doc.internal.pageSize.width, ML = 15, MR = 15, CW = PW - ML - MR;
+        doc.setFontSize(13);doc.setFont('helvetica','bold');doc.setTextColor(15,58,95);
+        doc.text('IMSE TECH - SERVICES PVT LTD', ML, 14);
+        doc.setFontSize(8);doc.setFont('helvetica','normal');doc.setTextColor(80,80,80);
+        doc.text('ITSPL/QR/PKR', ML, 19);
+        const mx = PW-MR-60;doc.setDrawColor(120,120,120);doc.setLineWidth(0.2);doc.rect(mx,8,60,18);
+        doc.setFontSize(7);doc.text('ISSUE NO:',mx+2,12);doc.text('01',mx+30,12);doc.text('DATE:',mx+2,15);doc.text('01.08.2018',mx+30,15);doc.text('REV:',mx+2,18);doc.text('00',mx+30,18);doc.text('PAGE:',mx+2,21);doc.text('1 of 1',mx+30,21);
+        doc.setDrawColor(15,58,95);doc.setLineWidth(0.6);doc.line(ML,29,PW-MR,29);
+        doc.setFontSize(14);doc.setFont('helvetica','bold');doc.setTextColor(15,58,95);
+        doc.text('PROJECT KICK-OFF RECORD',PW/2,38,{align:'center'});
+        const fmt=d=>d?d.split('-').reverse().join('.'):' ';
+        const docsStr=_KO_DOCUMENTS.map(d=>d.label).join(' / ');
+        const locsStr=_KO_LOCATIONS.map(l=>l.label).join(' / ');
+        const manualsStr=_KO_MANUALS.map(m=>{const v=ko.manualsRefDocs[m.key];return v===true?m.label+' \u2014 YES':v===false?m.label+' \u2014 NO':null}).filter(Boolean).join('\n')||'(not marked)';
+        const ppeStr=_KO_PPE.filter(p=>ko.ppe[p.key]).map(p=>'\u2022  '+p.label).join('\n')||'(none selected)';
+        const donStr=ko.ppeDonningVerified===true?'YES':ko.ppeDonningVerified===false?'NO':'(not marked)';
+        doc.autoTable({startY:45,margin:{left:ML,right:MR},theme:'grid',styles:{fontSize:9,cellPadding:3,valign:'top',textColor:[0,0,0]},columnStyles:{0:{cellWidth:60,fontStyle:'bold',fillColor:[241,245,249]},1:{cellWidth:CW-60}},body:[
+            ['PROJECT NUMBER AND DETAIL',ko.projectDetail||''],['EXPECTED DATE STARTING',fmt(ko.expectedStartDate)],['TEAM DETAILS',ko.teamDetails||''],
+            ['DOCUMENTS CARRIED / VERIFIED',docsStr],['LOCATION OF WORK',locsStr],['EXPECTED DATE OF COMPLETION',fmt(ko.expectedCompletionDate)],
+            ['SPECIFIC DETAILS IF ANY',ko.specificDetails||''],['MANUALS / REFERENCE\nDOCUMENTS',manualsStr],['PERSONAL PROTECTIVE\nEQUIPMENT FOR ALL\nTECHNICIANS',ppeStr],
+            ['PPE \u2014 CORRECT DONNING\n/ USAGE DEMONSTRATED',donStr]
+        ]});
+        let y=doc.lastAutoTable.finalY+10;
+        doc.autoTable({startY:y,margin:{left:ML,right:MR},theme:'grid',styles:{fontSize:9,cellPadding:4,minCellHeight:24,valign:'top',textColor:[0,0,0]},body:[[{content:'ENGINEER / TECHNICIAN\n\n'+(ko.engineerName||''),styles:{cellWidth:CW/2}},{content:'GENERAL MANAGER\n\n'+(ko.generalManagerName||''),styles:{cellWidth:CW/2}}]]});
+        y=doc.lastAutoTable.finalY+4;doc.setFontSize(8);doc.setFont('helvetica','italic');doc.setTextColor(80,80,80);
+        doc.text(ko.projectDetail||'',ML,y+3);
+        doc.save('KickOffRecord_'+(wl?.project||'KO').replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_-]/g,'')+'_'+(ko.expectedStartDate||new Date().toISOString().substring(0,10))+'.pdf');
+        _showToast('✅ Kick-Off PDF downloaded','#16a34a');
+    }
+
+    // ── GROWTH OF WORK / RE-WORK REPORT (ITSPL/QR/GW-RW-R) ──────────
+    let _gwWorkItems = [], _gwSignedAttachment = null;
+    function _gwAddRow() {
+        _gwWorkItems.push({agreedWorkScope:'',growthOfWork:'',reWork:''});
+        _gwRenderRows();
+    }
+    function _gwRenderRows() {
+        const c = document.getElementById('gwWorkItemsContainer');
+        c.innerHTML = _gwWorkItems.map((r,i) => `
+            <div style="display:grid;grid-template-columns:30px 1fr 1fr 1fr 30px;gap:4px;margin-bottom:4px;align-items:start">
+                <span style="font-size:11px;font-weight:700;color:#9f1239;padding-top:6px;text-align:center">${i+1}</span>
+                <textarea rows="2" class="field-input" style="font-size:11px" placeholder="Agreed Work Scope" oninput="_gwWorkItems[${i}].agreedWorkScope=this.value">${r.agreedWorkScope||''}</textarea>
+                <textarea rows="2" class="field-input" style="font-size:11px" placeholder="Growth of Work" oninput="_gwWorkItems[${i}].growthOfWork=this.value">${r.growthOfWork||''}</textarea>
+                <textarea rows="2" class="field-input" style="font-size:11px" placeholder="Re Work" oninput="_gwWorkItems[${i}].reWork=this.value">${r.reWork||''}</textarea>
+                <button type="button" onclick="_gwWorkItems.splice(${i},1);_gwRenderRows()" style="padding:2px 6px;border:none;background:none;color:#dc2626;cursor:pointer;font-size:14px">✕</button>
+            </div>`).join('') || '<p style="font-size:11px;color:#9ca3af;text-align:center;padding:10px">No work items — tap "+ Add Row"</p>';
+    }
+
+    function openGrowthRWModal(wlID) {
+        const wl = workLogs.find(x => x.wlID === wlID);
+        if (!wl) return;
+        document.getElementById('gwWlID').value = wlID;
+        const gw = wl.growthOfWorkReport || {};
+        document.getElementById('gwProjectNo').value = gw.projectNo || ((wl.ref ? wl.ref + ' - ' : '') + (wl.project || ''));
+        document.getElementById('gwCustomer').value = gw.customer || wl.client || wl.vessel || '';
+        document.getElementById('gwDateFrom').value = gw.dateFrom || wl.workStartDate || '';
+        document.getElementById('gwDateTo').value = gw.dateTo || wl.workEndDate || '';
+        document.getElementById('gwRemarks').value = gw.remarks || '';
+        document.getElementById('gwPreparedBy').value = gw.preparedBy || currentUser?.name || '';
+        document.getElementById('gwPreparedDate').value = gw.preparedDate || new Date().toISOString().split('T')[0];
+        _gwWorkItems = (gw.workItems || []).map(r => ({...r}));
+        if (!_gwWorkItems.length) _gwWorkItems.push({agreedWorkScope:'',growthOfWork:'',reWork:''});
+        _gwSignedAttachment = gw.signedAttachment || null;
+        const fp = document.getElementById('gwSignedFilePreview');
+        fp.innerHTML = _gwSignedAttachment ? `Attached: <a href="https://drive.google.com/file/d/${_gwSignedAttachment.driveFileId}/view" target="_blank" style="color:#1d4ed8;text-decoration:underline">${_gwSignedAttachment.name||'signed'}</a> <button type="button" onclick="_gwSignedAttachment=null;document.getElementById('gwSignedFilePreview').innerHTML=''" style="color:#dc2626;background:none;border:none;cursor:pointer;font-size:11px">[remove]</button>` : '';
+        document.getElementById('gwSignedFile').value = '';
+        _gwRenderRows();
+        document.getElementById('growthRWModal').classList.add('show');
+    }
+    function closeGrowthRWModal() { document.getElementById('growthRWModal').classList.remove('show'); }
+
+    function _collectGrowthRWFromForm() {
+        return {
+            projectNo: document.getElementById('gwProjectNo').value.trim(),
+            customer: document.getElementById('gwCustomer').value.trim(),
+            dateFrom: document.getElementById('gwDateFrom').value,
+            dateTo: document.getElementById('gwDateTo').value,
+            workItems: _gwWorkItems.filter(r => r.agreedWorkScope || r.growthOfWork || r.reWork),
+            remarks: document.getElementById('gwRemarks').value.trim(),
+            preparedBy: document.getElementById('gwPreparedBy').value.trim(),
+            preparedDate: document.getElementById('gwPreparedDate').value,
+            signedAttachment: _gwSignedAttachment
+        };
+    }
+
+    async function saveGrowthRW(ev) {
+        ev.preventDefault();
+        const wlID = document.getElementById('gwWlID').value;
+        const wi = workLogs.findIndex(x => x.wlID === wlID);
+        if (wi < 0) return;
+        const gwData = _collectGrowthRWFromForm();
+        const fileInput = document.getElementById('gwSignedFile');
+        if (fileInput.files.length) {
+            _showToast('📤 Uploading signed form…', '#9f1239', 5000);
+            try {
+                const folder = await getOrCreateSubFolder('GrowthOfWork');
+                const uploaded = await uploadFileToDrive(fileInput.files[0], folder);
+                gwData.signedAttachment = uploaded;
+            } catch (e) { console.error('GW upload failed:', e); _showToast('Upload failed: ' + e.message, '#dc2626'); }
+        }
+        const existing = workLogs[wi].growthOfWorkReport;
+        gwData.createdAt = existing?.createdAt || new Date().toISOString();
+        gwData.createdBy = existing?.createdBy || currentUser?.name || currentUser?.email || 'Field App';
+        gwData.updatedAt = new Date().toISOString();
+        gwData.updatedBy = currentUser?.name || currentUser?.email || 'Field App';
+        workLogs[wi].growthOfWorkReport = gwData;
+        await saveWorkLogs();
+        closeGrowthRWModal();
+        renderWorkLogs();
+        _showToast('✅ Growth of Work Report saved', '#16a34a');
+    }
+
+    async function printGrowthRWFromForm() {
+        const wlID = document.getElementById('gwWlID').value;
+        const wl = workLogs.find(x => x.wlID === wlID);
+        const gw = _collectGrowthRWFromForm();
+        await _ensureJsPDF();
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+        const PW = doc.internal.pageSize.width, ML = 15, MR = 15, CW = PW - ML - MR;
+        doc.setFontSize(13);doc.setFont('helvetica','bold');doc.setTextColor(15,58,95);
+        doc.text('IMSE TECH - SERVICES PVT LTD', ML, 14);
+        doc.setFontSize(8);doc.setFont('helvetica','normal');doc.setTextColor(80,80,80);
+        doc.text('ITSPL/QR/GW-RW-R', ML, 19);
+        const mx = PW-MR-60;doc.setDrawColor(120,120,120);doc.setLineWidth(0.2);doc.rect(mx,8,60,18);
+        doc.setFontSize(7);doc.text('ISSUE NO:',mx+2,12);doc.text('01',mx+30,12);doc.text('DATE:',mx+2,15);doc.text('16.11.2019',mx+30,15);doc.text('REV:',mx+2,18);doc.text('00',mx+30,18);doc.text('PAGE:',mx+2,21);doc.text('1 of 1',mx+30,21);
+        doc.setDrawColor(15,58,95);doc.setLineWidth(0.6);doc.line(ML,29,PW-MR,29);
+        doc.setFontSize(14);doc.setFont('helvetica','bold');doc.setTextColor(15,58,95);
+        doc.text('GROWTH OF WORK / RE WORK - REPORT',PW/2,38,{align:'center'});
+        const fmt=d=>d?d.split('-').reverse().join('.'):' ';
+        const dateRange=(gw.dateFrom?fmt(gw.dateFrom):'')+(gw.dateTo?' TO '+fmt(gw.dateTo):'');
+        doc.autoTable({startY:45,margin:{left:ML,right:MR},theme:'grid',styles:{fontSize:9,cellPadding:3,valign:'top',textColor:[0,0,0]},columnStyles:{0:{cellWidth:32,fontStyle:'bold',fillColor:[241,245,249]},1:{cellWidth:CW-32}},body:[['PROJECT NO',gw.projectNo||''],['CUSTOMER',gw.customer||''],['DATE',dateRange]]});
+        let y=doc.lastAutoTable.finalY+5;
+        const rows=gw.workItems||[];
+        doc.autoTable({startY:y,margin:{left:ML,right:MR},theme:'grid',styles:{fontSize:9,cellPadding:3,valign:'top',textColor:[0,0,0]},headStyles:{fillColor:[30,58,138],textColor:[255,255,255],fontStyle:'bold',fontSize:9,halign:'center'},head:[[{content:'S.NO',styles:{cellWidth:14,halign:'center'}},{content:'AGREED WORK SCOPE',styles:{cellWidth:(CW-14)*0.42}},{content:'GROWTH OF WORK',styles:{cellWidth:(CW-14)*0.29}},{content:'RE WORK',styles:{cellWidth:(CW-14)*0.29}}]],body:rows.length?rows.map((r,i)=>[{content:String(i+1),styles:{halign:'center'}},r.agreedWorkScope||'',r.growthOfWork||'',r.reWork||'']):[[{content:'(No work items)',colSpan:4,styles:{halign:'center',fontStyle:'italic',textColor:[120,120,120]}}]]});
+        y=doc.lastAutoTable.finalY+8;
+        doc.autoTable({startY:y,margin:{left:ML,right:MR},theme:'grid',styles:{fontSize:9,cellPadding:3,minCellHeight:18,valign:'top',textColor:[0,0,0]},columnStyles:{0:{cellWidth:32,fontStyle:'bold',fillColor:[241,245,249]},1:{cellWidth:CW-32}},body:[['REMARKS',gw.remarks||'']]});
+        y=doc.lastAutoTable.finalY+6;
+        doc.autoTable({startY:y,margin:{left:ML,right:MR},theme:'grid',styles:{fontSize:9,cellPadding:4,minCellHeight:22,valign:'top',textColor:[0,0,0]},body:[[{content:'PREPARED BY\n\n'+(gw.preparedBy||''),styles:{cellWidth:CW/2}},{content:'DATE\n\n'+fmt(gw.preparedDate),styles:{cellWidth:CW/2}}]]});
+        y=doc.lastAutoTable.finalY+4;doc.setFontSize(8);doc.setFont('helvetica','italic');doc.setTextColor(80,80,80);
+        doc.text('Issued By: MR',ML,y);doc.text('Approved By: DIRECTOR',ML,y+4);
+        doc.save('GrowthOfWork_'+(wl?.project||'GW').replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_-]/g,'')+'_'+(gw.preparedDate||new Date().toISOString().substring(0,10))+'.pdf');
+        _showToast('✅ Growth of Work PDF downloaded','#16a34a');
+    }
+
     // Accepts an optional `fbOverride` so we can print a blank form (or a
     // partially-filled form) from the modal without persisting first.
     async function feedbackPDF(wlID, fbOverride) {
@@ -7311,173 +7710,182 @@
         const basic = Number(s.basicSalary) || Number(s.techBasic) || 0;
         if (!basic) return '';
 
-        // Actual component values from staff record
-        const hraPct = Number(s.hraPct) || 0;
-        const daPct  = Number(s.daPct) || 0;
-        const gpVal  = Number(s.gradePay) || 0;  // Fixed ₹ amount, NOT percentage
-        const hra = hraPct > 0 ? Math.round(basic * hraPct / 100) : 0;
-        const da  = daPct > 0 ? Math.round(basic * daPct / 100) : 0;
+        // ── Read correct field names per staff type ──
+        // Tech: techHRAPct, techDAPct, techGPPct, techVariable
+        // Office: hraPct, daPct, gradePay (fixed ₹), variable
+        const hraPct = isTech ? +(s.techHRAPct ?? 50) : (Number(s.hraPct) || 0);
+        const daPct  = isTech ? +(s.techDAPct  ?? 65) : (Number(s.daPct) || 0);
+        const gpPct  = isTech ? +(s.techGPPct  ?? 30) : 0;
+        const gpFixed = !isTech ? (Number(s.gradePay) || 0) : 0;
+        const hra = +(basic * hraPct / 100).toFixed(2);
+        const da  = +(basic * daPct / 100).toFixed(2);
+        const gp  = isTech ? +(basic * gpPct / 100).toFixed(2) : gpFixed;
         const conveyance = Number(s.conveyance) || 0;
         const medical = Number(s.medical) || 0;
-        const variable = Number(s.variable) || 0;
-        const annualBonus = basic > 0 ? Math.round(basic / 10) : 0; // Basic ÷ 10
-        const travelAllow = Number(s.travelAllow) || 0;
+        const variable = isTech ? (Number(s.techVariable) || 0) : (Number(s.variable) || 0);
+        const annualBonus = basic > 0 ? Math.round(basic / 10) : 0;
+        const travelAllow = Number(s.travelAllow) || Number(s.techTravelAllow) || 0;
         const gender = (s.gender || '').toLowerCase();
+        const fixedAllow = +(hra + da + gp).toFixed(2);
+        const daysInMonth = 30;
 
-        // PF basis = Basic + DA + GP (statutory components)
-        const pfBasisComponents = basic + da + gpVal;
-        // Total fixed = Basic + HRA + DA + GP
-        const fixedAllow = hra + da + gpVal;
-        const monthlyCTC = basic + fixedAllow;
+        // Daily/standby wage (matches calcTechWage exactly)
+        const dailyWage = +((basic + fixedAllow + variable) / daysInMonth).toFixed(4);
+        const standbyWage = +((basic + fixedAllow) / daysInMonth).toFixed(4);
 
-        // Technician daily wages
-        const dailyWage = Number(s.dailyWage) || Math.round((monthlyCTC + variable) / 30 * 100) / 100;
-        const standbyWage = Number(s.standbyWage) || Math.round(monthlyCTC / 30 * 100) / 100;
+        // Allowance percentages
+        const outstPct = (Number(s.outstationPct) || 20) / 100;
+        const sailPct  = (Number(s.sailingPct) || 30) / 100;
+        const ancPct   = (Number(s.anchoragePct) || 30) / 100;
 
-        // Duty-type rates for technicians
-        const outstationMul = 1 + (Number(s.outstationPct) || 20) / 100;
-        const sailingMul    = 1 + (Number(s.sailingPct) || 30) / 100;
-        const anchorageMul  = 1 + (Number(s.anchoragePct) || 30) / 100;
-
-        // Pay period: 26th prev month – 25th this month
+        // Pay period
         const now = new Date();
         const refDate = new Date(now.getFullYear(), now.getMonth() + _techSSMonthOffset, 15);
         const pYear = refDate.getFullYear(), pMonth = refDate.getMonth();
         const sDate = new Date(pYear, pMonth - 1, 26);
         const startDate = `${sDate.getFullYear()}-${String(sDate.getMonth()+1).padStart(2,'0')}-26`;
         const endDate = `${pYear}-${String(pMonth+1).padStart(2,'0')}-25`;
+        const periodMonth = pMonth + 1;
 
-        const att = (s.attendance || []).filter(a => a.date >= startDate && a.date <= endDate);
+        const attRaw = (s.attendance || []).filter(a => a.date >= startDate && a.date <= endDate);
         const periodLabel = new Date(startDate+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'}) + ' – ' + new Date(endDate+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
 
-        // Tally days by type
         const counts = {};
-        att.forEach(a => {
+        attRaw.forEach(a => {
             const t = a.status || a.type || '';
             if (t && t !== 'WeeklyOff' && t !== 'NationalHoliday' && t !== 'CompanyHoliday') {
                 counts[t] = (counts[t] || 0) + 1;
             }
         });
 
+        const ENGAGED_TYPES = ['Working','Outstation','Anchorage','Sailing'];
         const earnings = [];
         let totalEarnings = 0;
 
         if (isTech) {
-            // ── TECHNICIAN: daily wage × days per duty type ──
-            const DUTY_META = {
-                Working:      { label: 'Working Days',    rate: dailyWage },
-                StandBy:      { label: 'Stand By (Standby wage)', rate: standbyWage },
-                Outstation:   { label: 'Outstation',      rate: Math.round(standbyWage * outstationMul * 100) / 100 },
-                Sailing:      { label: 'Sailing',         rate: Math.round(standbyWage * sailingMul * 100) / 100 },
-                Anchorage:    { label: 'Anchorage',       rate: Math.round(standbyWage * anchorageMul * 100) / 100 },
-                ApprovedLeave:{ label: 'Approved Leave',  rate: 0 },
-                UnApprovedLeave:{ label: 'Unapproved Leave', rate: 0 },
-                NotWell:      { label: 'Not Well',        rate: standbyWage },
-                Absent:       { label: 'Absent',          rate: 0 }
-            };
-            Object.entries(counts).forEach(([type, days]) => {
-                const meta = DUTY_META[type] || { label: type, rate: standbyWage };
-                const amt = Math.round(meta.rate * days * 100) / 100;
-                if (days > 0) {
-                    earnings.push({ label: meta.label, days, rate: meta.rate, amt });
-                    totalEarnings += amt;
-                }
+            const eng = ENGAGED_TYPES.reduce((sum,t) => sum + (counts[t]||0), 0);
+            const sbd = counts['StandBy'] || 0;
+            const wP  = +((counts['Working']||0) * dailyWage).toFixed(2);
+            const outP = +((counts['Outstation']||0) * dailyWage).toFixed(2);
+            const ancP = +((counts['Anchorage']||0) * dailyWage).toFixed(2);
+            const salP = +((counts['Sailing']||0) * dailyWage).toFixed(2);
+            const sbyP = +(sbd * standbyWage).toFixed(2);
+            const maxPaidSickDays = 2;
+            const nwDays = counts['NotWell'] || 0;
+            const nwPaidDays = Math.min(nwDays, maxPaidSickDays);
+            const nwP = +(nwPaidDays * standbyWage).toFixed(2);
+            const outA = +((counts['Outstation']||0) * dailyWage * outstPct).toFixed(2);
+            const ancA = +((counts['Anchorage']||0) * dailyWage * ancPct).toFixed(2);
+            const salA = +((counts['Sailing']||0) * dailyWage * sailPct).toFixed(2);
+            const daysIn1520 = Math.max(0, Math.min(eng, 20) - 15);
+            const daysAbove20 = Math.max(0, eng - 20);
+            const t15 = daysIn1520 > 0 ? +(daysIn1520 * dailyWage * 0.5).toFixed(2) : 0;
+            const t20 = daysAbove20 > 0 ? +(daysAbove20 * dailyWage * 0.65).toFixed(2) : 0;
+            const alDeduct = +((counts['ApprovedLeave']||0) * dailyWage * 0.5).toFixed(2);
+            const noShowDays = attRaw.filter(a => a.status === 'UnApprovedLeave' && a.noShowPenalty).length;
+            const regularULDays = Math.max(0, (counts['UnApprovedLeave']||0) - noShowDays);
+            const ulDeductRegular = +(regularULDays * dailyWage * 2).toFixed(2);
+            const ulDeductNoShow  = +(noShowDays * dailyWage * 2).toFixed(2);
+            const ulDeduct = +(ulDeductRegular + ulDeductNoShow).toFixed(2);
+
+            // OT Ex-Gratia
+            const hourlyRate = +(dailyWage / 10).toFixed(4);
+            const otRate = +(hourlyRate * 2).toFixed(4);
+            let otAmt = 0, totalOTHours = 0;
+            attRaw.forEach(a => {
+                const h = parseFloat(a.otHours) || 0;
+                if (h <= 0) return;
+                if (!ENGAGED_TYPES.includes(a.status || a.type || '')) return;
+                otAmt += +(h * otRate).toFixed(2);
+                totalOTHours += h;
             });
-            if (travelAllow > 0) {
-                earnings.push({ label: 'Travel Allowance (in Gross, subject to TDS)', days: null, rate: travelAllow, amt: travelAllow });
-                totalEarnings += travelAllow;
-            }
+            otAmt = +otAmt.toFixed(2);
+
+            if ((counts['Working']||0) > 0)    earnings.push({ label: 'Working Days', days: counts['Working'], rate: +dailyWage.toFixed(2), amt: wP });
+            if ((counts['Outstation']||0) > 0)  earnings.push({ label: 'Outstation Days', days: counts['Outstation'], rate: +dailyWage.toFixed(2), amt: outP });
+            if ((counts['Anchorage']||0) > 0)   earnings.push({ label: 'Anchorage Days', days: counts['Anchorage'], rate: +dailyWage.toFixed(2), amt: ancP });
+            if ((counts['Sailing']||0) > 0)     earnings.push({ label: 'Sailing Days', days: counts['Sailing'], rate: +dailyWage.toFixed(2), amt: salP });
+            if (sbd > 0)                        earnings.push({ label: 'Stand By (Standby wage)', days: sbd, rate: +standbyWage.toFixed(2), amt: sbyP });
+            if (nwDays > 0)                     earnings.push({ label: `Not Well — paid (${nwPaidDays} of ${nwDays}d, limit ${maxPaidSickDays}/mo)`, days: nwPaidDays, rate: +standbyWage.toFixed(2), amt: nwP });
+            if ((counts['Outstation']||0) > 0)  earnings.push({ label: `Outstation Allow (${Math.round(outstPct*100)}% of DW)`, days: counts['Outstation'], rate: +(dailyWage*outstPct).toFixed(2), amt: outA });
+            if ((counts['Sailing']||0) > 0)     earnings.push({ label: `Sailing Allow (${Math.round(sailPct*100)}% of DW)`, days: counts['Sailing'], rate: +(dailyWage*sailPct).toFixed(2), amt: salA });
+            if ((counts['Anchorage']||0) > 0)   earnings.push({ label: `Anchorage Allow (${Math.round(ancPct*100)}% of DW)`, days: counts['Anchorage'], rate: +(dailyWage*ancPct).toFixed(2), amt: ancA });
+            if (daysIn1520 > 0)                 earnings.push({ label: `Days 16–20 extra (${daysIn1520}d × DW×0.5)`, days: daysIn1520, rate: +(dailyWage*0.5).toFixed(2), amt: t15 });
+            if (daysAbove20 > 0)                earnings.push({ label: `Days 21+ allow (${daysAbove20}d × DW×0.65)`, days: daysAbove20, rate: +(dailyWage*0.65).toFixed(2), amt: t20 });
+            if (otAmt > 0)                      earnings.push({ label: `OT Ex-Gratia (${totalOTHours.toFixed(1)}h × ₹${otRate.toFixed(2)}/hr)`, days: null, rate: +otRate.toFixed(2), amt: otAmt });
+            if (travelAllow > 0)                earnings.push({ label: 'Travel Allowance (in Gross, subject to TDS)', days: null, rate: travelAllow, amt: travelAllow });
+            if ((counts['ApprovedLeave']||0) > 0) earnings.push({ label: `Approved Leave Deduct (50% × ${counts['ApprovedLeave']}d)`, days: counts['ApprovedLeave'], rate: +(dailyWage*0.5).toFixed(2), amt: -alDeduct });
+            if (regularULDays > 0)              earnings.push({ label: `Unapproved Leave (2× DW × ${regularULDays}d)`, days: regularULDays, rate: +(dailyWage*2).toFixed(2), amt: -ulDeductRegular });
+            if (noShowDays > 0)                 earnings.push({ label: `No-Show Penalty (2× DW × ${noShowDays}d)`, days: noShowDays, rate: +(dailyWage*2).toFixed(2), amt: -ulDeductNoShow });
+
+            const grossBase = wP + outP + ancP + salP + sbyP + nwP + outA + ancA + salA + t15 + t20;
+            totalEarnings = +(grossBase - alDeduct - ulDeduct + otAmt + travelAllow).toFixed(2);
         } else {
-            // ── OFFICE STAFF: fixed monthly salary components ──
-            earnings.push({ label: 'Basic Salary', days: null, rate: null, amt: basic });
-            totalEarnings += basic;
+            earnings.push({ label: 'Basic Salary', days: null, rate: null, amt: basic }); totalEarnings += basic;
             if (hra > 0) { earnings.push({ label: `HRA (${hraPct}%)`, days: null, rate: null, amt: hra }); totalEarnings += hra; }
             if (da > 0) { earnings.push({ label: `DA (${daPct}%)`, days: null, rate: null, amt: da }); totalEarnings += da; }
-            if (gpVal > 0) { earnings.push({ label: 'Grade Pay', days: null, rate: null, amt: gpVal }); totalEarnings += gpVal; }
+            if (gp > 0) { earnings.push({ label: 'Grade Pay', days: null, rate: null, amt: gp }); totalEarnings += gp; }
             if (conveyance > 0) { earnings.push({ label: 'Conveyance', days: null, rate: null, amt: conveyance }); totalEarnings += conveyance; }
             if (medical > 0) { earnings.push({ label: 'Medical', days: null, rate: null, amt: medical }); totalEarnings += medical; }
             if (annualBonus > 0) { earnings.push({ label: 'Annual Bonus (Basic÷10)', days: null, rate: null, amt: annualBonus }); totalEarnings += annualBonus; }
             if (variable > 0) { earnings.push({ label: 'Variable (excl. PF)', days: null, rate: null, amt: variable }); totalEarnings += variable; }
-            // Deduct absent/unapproved days
             const absentDays = (counts['Absent'] || 0) + (counts['UnApprovedLeave'] || 0);
             if (absentDays > 0) {
-                const perDay = Math.round(totalEarnings / 30 * 100) / 100;
-                const deduct = Math.round(perDay * absentDays * 100) / 100;
+                const perDay = +(totalEarnings / 30).toFixed(2);
+                const deduct = +(perDay * absentDays).toFixed(2);
                 earnings.push({ label: `Less: Absent/Unapproved (${absentDays} days)`, days: absentDays, rate: perDay, amt: -deduct });
                 totalEarnings -= deduct;
             }
         }
-        const grossPay = Math.round(totalEarnings * 100) / 100;
+        const grossPay = +totalEarnings.toFixed(2);
 
         // ── DEDUCTIONS ──
-        const pfPct = Number(s.pfPct) || 12;
-        const esicPct = Number(s.esicPct) || 0.75;
-
-        let pfGross, esicWages;
+        const pfPct = isTech ? +(s.techPFPct ?? 12) : (Number(s.pfPct) || 12);
+        const esicPct = isTech ? +(s.techESICPct ?? 0.75) : (Number(s.esicPct) || 0.75);
+        let pfGross, pfAmt, esicBasis;
+        const hasUAN = !!(s.uanNumber && s.uanNumber.trim());
         if (isTech) {
-            // Tech: PF basis = standbyWage × 30 (Basic + Fixed, excl Variable)
-            // ESIC basis = dailyWage × 30 (includes Variable)
-            pfGross = Math.round(standbyWage * 30);
-            esicWages = Math.round(dailyWage * 30);
+            pfGross = +(basic + fixedAllow).toFixed(2);
+            pfAmt = hasUAN ? +(pfGross * pfPct / 100).toFixed(2) : 0;
+            esicBasis = +(basic + fixedAllow + variable).toFixed(2);
         } else {
-            // Office: PF basis = Gross − Variable (Variable is "excl. PF")
-            // ESIC wages = Gross − Annual Bonus
             pfGross = grossPay - variable;
-            esicWages = grossPay - annualBonus;
+            pfAmt = pfGross > 15000 ? +(15000 * pfPct / 100).toFixed(2) : +(pfGross * pfPct / 100).toFixed(2);
+            esicBasis = grossPay - annualBonus;
         }
-        const pfAmt = Math.round(pfGross * pfPct / 100);
-        const esicExempt = esicWages > 21000;
-        const esicAmt = esicExempt ? 0 : Math.round(esicWages * esicPct / 100);
-
-        // PT: gender-aware thresholds
+        const esicRoundedBasis = Math.round(esicBasis);
+        const esicExempt = esicRoundedBasis > 21000;
+        const esicAmt = esicExempt ? 0 : Math.ceil(esicRoundedBasis * esicPct / 100);
         let ptAmt = 0;
         const ptBasis = isTech ? pfGross : grossPay;
-        if (gender === 'female') {
-            if (ptBasis > 25000) ptAmt = 200;
-        } else {
-            if (ptBasis > 15000) ptAmt = 200;
-            else if (ptBasis > 10000) ptAmt = 150;
-        }
-
-        // TDS: only for technicians (1% of gross) or if explicitly set
-        const tdsAmt = isTech
-            ? (Number(s.tdsMonthly) || Math.round(grossPay * 0.01 * 100) / 100)
-            : (Number(s.tdsMonthly) || 0);  // Office: no auto TDS
+        const ptThreshold = gender === 'female' ? 25000 : 10000;
+        if (ptBasis > ptThreshold) ptAmt = periodMonth === 2 ? 300 : 200;
+        const tdsAmt = isTech ? (Number(s.techTDS) || +(grossPay * 0.01).toFixed(2)) : (Number(s.tdsMonthly) || 0);
 
         const deductions = [];
         if (isTech) {
-            deductions.push({ label: `PF ${pfPct}% (Basic ₹${basic.toLocaleString('en-IN')} + Fixed ₹${(pfGross-basic).toLocaleString('en-IN')})`, amt: pfAmt });
+            deductions.push({ label: hasUAN ? `PF ${pfPct}% (Basic ₹${basic.toLocaleString('en-IN')} + Fixed ₹${fixedAllow.toLocaleString('en-IN')})${s.uanNumber ? ' · UAN: '+s.uanNumber : ''}` : `PF — NIL (no UAN)`, amt: pfAmt });
         } else {
             deductions.push({ label: `PF ${pfPct}% (PF Gross ₹${pfGross.toLocaleString('en-IN')})`, amt: pfAmt });
         }
-        deductions.push({ label: esicExempt ? `ESIC – NIL (Wages ₹${esicWages.toLocaleString('en-IN')} > ₹21,000)` : `ESIC – ${esicPct}% of Wages ₹${esicWages.toLocaleString('en-IN')} (≤ ₹21,000)`, amt: esicAmt });
+        deductions.push({ label: esicExempt ? `ESIC – NIL (Wages ₹${esicRoundedBasis.toLocaleString('en-IN')} > ₹21,000)` : `ESIC ${esicPct}% of ₹${esicRoundedBasis.toLocaleString('en-IN')}`, amt: esicAmt });
         if (gender === 'female' && ptBasis <= 25000) {
-            deductions.push({ label: `PT – NIL (Female: gross ₹${ptBasis.toLocaleString('en-IN')} ≤ ₹25,000)`, amt: 0 });
+            deductions.push({ label: `PT – NIL (Female: ₹${ptBasis.toLocaleString('en-IN')} ≤ ₹25,000)`, amt: 0 });
         } else if (ptAmt > 0) {
-            deductions.push({ label: `PT – ${isTech ? 'Basic+Fixed' : 'Gross'} ₹${ptBasis.toLocaleString('en-IN')} > ₹${ptAmt===200?'15,000':'10,000'}`, amt: ptAmt });
+            deductions.push({ label: `PT – ${isTech?'Basic+Fixed':'Gross'} ₹${ptBasis.toLocaleString('en-IN')} > ₹${ptAmt===200?'15,000':'10,000'}`, amt: ptAmt });
         }
-        if (tdsAmt > 0) {
-            deductions.push({ label: `TDS – ${Number(s.tdsMonthly) ? 'Monthly' : '1% of Gross ₹'+grossPay.toLocaleString('en-IN')+' (Auto)'}`, amt: tdsAmt });
-        }
+        if (tdsAmt > 0) deductions.push({ label: `TDS – ${(isTech ? Number(s.techTDS) : Number(s.tdsMonthly)) ? 'Monthly' : '1% of Gross ₹'+grossPay.toLocaleString('en-IN')+' (Auto)'}`, amt: tdsAmt });
+        (s.loans || []).forEach(l => { if (l.status === 'Active' && l.emi > 0) deductions.push({ label: `Loan EMI — ${l.remarks || l.loanID}`, amt: Number(l.emi) }); });
 
-        // Active loan EMI deductions
-        (s.loans || []).forEach(l => {
-            if (l.status === 'Active' && l.emi > 0) {
-                deductions.push({ label: `Loan EMI — ${l.remarks || l.loanID}`, amt: Number(l.emi) });
-            }
-        });
-
-        const totalDed = deductions.reduce((s, d) => s + (Number(d.amt) || 0), 0);
-        const netPay = Math.round((grossPay - totalDed) * 100) / 100;
-
+        const totalDed = deductions.reduce((sum, d) => sum + (Number(d.amt) || 0), 0);
+        const netPay = +(grossPay - totalDed).toFixed(2);
         const fmt = v => v ? '₹' + Number(v).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2}) : '';
 
         return `
         <div style="background:#fff;border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
             <h3 style="font-size:14px;font-weight:800;color:#1e1b4b;margin:0 0 4px">💰 ${isTech ? 'Wage Summary' : 'Salary Summary'}</h3>
-            <p style="font-size:10px;color:#6b7280;margin:0 0 12px">Period: ${periodLabel} (30 days)</p>
-
-            <!-- Earnings -->
+            <p style="font-size:10px;color:#6b7280;margin:0 0 4px">Period: ${periodLabel} (30-day basis)</p>
+            <p style="font-size:9px;color:#9ca3af;margin:0 0 12px">Daily Wage: ${fmt(dailyWage)} | Standby Wage: ${fmt(standbyWage)}</p>
             <div style="margin-bottom:12px">
                 <div style="background:#1e40af;color:#fff;padding:6px 10px;border-radius:8px 8px 0 0;font-size:11px;font-weight:700">EARNINGS</div>
                 <div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;overflow:hidden">
@@ -7487,9 +7895,9 @@
                     ${earnings.map(e => `
                     <div style="display:grid;grid-template-columns:1fr 40px 60px 70px;padding:6px 10px;border-top:1px solid #f3f4f6;font-size:11px;align-items:center">
                         <span style="color:#1f2937;font-weight:500">${e.label}</span>
-                        <span style="text-align:right;color:#6b7280">${e.days || '—'}</span>
-                        <span style="text-align:right;color:#6b7280">${e.rate ? Number(e.rate).toLocaleString('en-IN') : '—'}</span>
-                        <span style="text-align:right;font-weight:700;color:#059669">${fmt(e.amt)}</span>
+                        <span style="text-align:right;color:#6b7280">${e.days != null ? e.days : '—'}</span>
+                        <span style="text-align:right;color:#6b7280">${e.rate ? Number(e.rate).toLocaleString('en-IN',{minimumFractionDigits:2}) : '—'}</span>
+                        <span style="text-align:right;font-weight:700;color:${e.amt < 0 ? '#dc2626' : '#059669'}">${fmt(Math.abs(e.amt))}${e.amt < 0 ? ' ▼' : ''}</span>
                     </div>`).join('')}
                     <div style="display:grid;grid-template-columns:1fr 70px;padding:8px 10px;border-top:2px solid #1e40af;font-weight:800">
                         <span style="color:#1e40af;font-size:12px">GROSS PAY</span>
@@ -7497,8 +7905,6 @@
                     </div>
                 </div>
             </div>
-
-            <!-- Deductions -->
             <div style="margin-bottom:12px">
                 <div style="background:#dc2626;color:#fff;padding:6px 10px;border-radius:8px 8px 0 0;font-size:11px;font-weight:700">DEDUCTIONS</div>
                 <div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;overflow:hidden">
@@ -7513,21 +7919,18 @@
                     </div>
                 </div>
             </div>
-
-            <!-- Net Pay -->
             <div style="background:linear-gradient(135deg,#0d9488,#059669);border-radius:12px;padding:14px 16px;display:flex;justify-content:space-between;align-items:center">
                 <div>
                     <div style="font-size:10px;color:rgba(255,255,255,.7)">Gross ${fmt(grossPay)} − Ded. ${fmt(totalDed)}</div>
-                    <div style="font-size:9px;color:rgba(255,255,255,.5);margin-top:2px">PF Basis: ${isTech ? 'Basic+Fixed = ' : ''}₹${pfGross.toLocaleString('en-IN')} | ESIC/PT Basis: ₹${esicWages.toLocaleString('en-IN')}</div>
+                    <div style="font-size:9px;color:rgba(255,255,255,.5);margin-top:2px">PF Basis: ${isTech ? 'Basic+Fixed = ' : ''}₹${pfGross.toLocaleString('en-IN')} | ESIC Basis: ₹${esicRoundedBasis.toLocaleString('en-IN')}</div>
                 </div>
                 <div style="text-align:right">
                     <div style="font-size:10px;color:rgba(255,255,255,.7);font-weight:600">NET PAY</div>
                     <div style="font-size:22px;font-weight:900;color:#fff">${fmt(netPay)}</div>
                 </div>
             </div>
-
             <div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center">
-                <span style="font-size:10px;padding:3px 10px;border:1px solid #e5e7eb;border-radius:6px;color:#6b7280;font-weight:600">${isTech ? 'Stand By: '+(counts['StandBy']||0) : 'Working: '+(counts['Working']||0)+' days'}</span>
+                <span style="font-size:10px;padding:3px 10px;border:1px solid #e5e7eb;border-radius:6px;color:#6b7280;font-weight:600">${isTech ? 'Engaged: '+ENGAGED_TYPES.reduce((sum,t)=>sum+(counts[t]||0),0)+' | Stand By: '+(counts['StandBy']||0) : 'Working: '+(counts['Working']||0)+' days'}</span>
                 <span style="font-size:8px;color:#9ca3af">View only — contact office for corrections</span>
             </div>
         </div>`;
