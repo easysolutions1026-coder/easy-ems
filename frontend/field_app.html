@@ -5269,6 +5269,8 @@
                             + Add Daily Update
                         </button>
                         <button onclick="event.stopPropagation();wlPDF('${w.wlID}')" style="padding:8px 12px;border-radius:10px;background:#1e3a5f;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:600">📄 Report</button>
+                        <button onclick="event.stopPropagation();viewKickOff('${w.wlID}')" style="padding:8px 12px;border-radius:10px;background:${w.kickOffRecord?'#4338ca':'#fff'};color:${w.kickOffRecord?'#fff':'#4338ca'};border:1.5px solid #4338ca;cursor:pointer;font-size:12px;font-weight:600" title="${w.kickOffRecord?'View Kick-Off Record':'Not yet captured'}">📝 Kick-Off${w.kickOffRecord?' ✓':''}</button>
+                        <button onclick="event.stopPropagation();viewGrowthRW('${w.wlID}')" style="padding:8px 12px;border-radius:10px;background:${w.growthOfWorkReport?'#9f1239':'#fff'};color:${w.growthOfWorkReport?'#fff':'#9f1239'};border:1.5px solid #9f1239;cursor:pointer;font-size:12px;font-weight:600" title="${w.growthOfWorkReport?'View Growth of Work Report':'Not yet captured'}">🔄 Growth/RW${w.growthOfWorkReport?' ✓':''}</button>
                         <button onclick="event.stopPropagation();openFeedbackModal('${w.wlID}')" style="padding:8px 12px;border-radius:10px;background:${w.customerFeedback?'#f59e0b':'#fff'};color:${w.customerFeedback?'#fff':'#92400e'};border:1.5px solid #f59e0b;cursor:pointer;font-size:12px;font-weight:600" title="${w.customerFeedback ? 'View / re-print customer feedback (already captured)' : 'Capture customer feedback at project completion'}">📋 Feedback${w.customerFeedback ? ' ✓' : ''}</button>
                         <button onclick="event.stopPropagation();editWorkLog('${w.wlID}')" style="padding:8px 10px;border-radius:10px;border:1.5px solid var(--border);background:#fff;cursor:pointer;font-size:12px;color:var(--muted)">✏️</button>
                         <button onclick="event.stopPropagation();deleteWorkLog('${w.wlID}')" style="padding:8px 10px;border-radius:10px;border:1.5px solid #fecaca;background:#fff;cursor:pointer;font-size:12px;color:#dc2626">✕</button>
@@ -6085,6 +6087,64 @@
         if (!wlID) { showToast('Open a work log first'); return; }
         const formData = _collectFeedbackFromForm();
         await feedbackPDF(wlID, formData);
+    }
+
+    // ── Kick-Off & Growth/RW Viewers (read-only, data from main app) ──
+    function _openFormViewer(title, bgGrad, html) {
+        const modal = document.createElement('div');
+        modal.id = 'formViewerModal';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99999;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto';
+        modal.innerHTML = `<div style="background:#fff;border-radius:16px;max-width:600px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+            <div style="background:${bgGrad};padding:16px 20px;border-radius:16px 16px 0 0;display:flex;justify-content:space-between;align-items:center">
+                <span style="color:#fff;font-weight:700;font-size:15px">${title}</span>
+                <button onclick="document.getElementById('formViewerModal').remove()" style="background:none;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1">✕</button>
+            </div>
+            <div style="padding:20px">${html}</div>
+        </div>`;
+        document.body.appendChild(modal);
+    }
+    function viewKickOff(wlID) {
+        const wl = workLogs.find(w => w.wlID === wlID);
+        const ko = wl?.kickOffRecord;
+        if (!ko) { _showToast('📝 Kick-Off Record not yet captured', '#4338ca', 3000); return; }
+        const r = (label, val) => val ? `<tr><td style="padding:6px 10px;font-size:12px;font-weight:600;color:#374151;border:1px solid #e5e7eb;width:40%">${label}</td><td style="padding:6px 10px;font-size:12px;color:#1f2937;border:1px solid #e5e7eb">${val}</td></tr>` : '';
+        let html = '<table style="width:100%;border-collapse:collapse;margin-bottom:12px">';
+        html += r('Project', wl.project);
+        html += r('Vessel / Client', ko.vessel || ko.client || wl.location || '');
+        html += r('Date', ko.date || '');
+        html += r('Scope of Work', ko.scopeOfWork || '');
+        html += r('Tools / Equipment', ko.toolsEquipment || '');
+        html += r('Safety Briefing', ko.safetyBriefing || '');
+        html += r('Remarks', ko.remarks || '');
+        html += r('Captured By', ko.capturedBy || '');
+        html += '</table>';
+        if (ko.signedAttachment?.driveFileId) {
+            html += `<p style="font-size:11px;color:#4338ca;font-weight:600">📎 Signed attachment on file</p>`;
+        }
+        _openFormViewer('📝 Project Kick-Off Record', 'linear-gradient(135deg,#4338ca,#6366f1)', html);
+    }
+    function viewGrowthRW(wlID) {
+        const wl = workLogs.find(w => w.wlID === wlID);
+        const gw = wl?.growthOfWorkReport;
+        if (!gw) { _showToast('🔄 Growth of Work Report not yet captured', '#9f1239', 3000); return; }
+        const r = (label, val) => val ? `<tr><td style="padding:6px 10px;font-size:12px;font-weight:600;color:#374151;border:1px solid #e5e7eb;width:40%">${label}</td><td style="padding:6px 10px;font-size:12px;color:#1f2937;border:1px solid #e5e7eb">${val}</td></tr>` : '';
+        let html = '<table style="width:100%;border-collapse:collapse;margin-bottom:12px">';
+        html += r('Project', wl.project);
+        html += r('Date', gw.date || '');
+        // Growth of work entries (array of date+description)
+        if (gw.entries && gw.entries.length) {
+            html += `<tr><td colspan="2" style="padding:8px 10px;font-size:12px;font-weight:700;color:#1e1b4b;border:1px solid #e5e7eb;background:#fdf2f8">Growth of Work Progress</td></tr>`;
+            gw.entries.forEach((e, i) => {
+                html += `<tr><td style="padding:4px 10px;font-size:11px;color:#6b7280;border:1px solid #e5e7eb">${e.date || 'Day '+(i+1)}</td><td style="padding:4px 10px;font-size:11px;color:#1f2937;border:1px solid #e5e7eb">${e.description || e.growthOfWork || ''}</td></tr>`;
+            });
+        }
+        html += r('Remarks', gw.remarks || '');
+        html += r('Captured By', gw.capturedBy || '');
+        html += '</table>';
+        if (gw.signedAttachment?.driveFileId) {
+            html += `<p style="font-size:11px;color:#9f1239;font-weight:600">📎 Signed attachment on file</p>`;
+        }
+        _openFormViewer('🔄 Growth of Work / Re-Work Report', 'linear-gradient(135deg,#9f1239,#e11d48)', html);
     }
 
     // ── Feedback PDF — mirrors the ITSPL/QR/CF paper form ──────────────
@@ -7305,6 +7365,7 @@
             </div>
         </div>`;
     }
+
     function _techSSRenderWageSummary(s) {
         const isTech = (s.staffType||'').toLowerCase().includes('tech');
         const basic = Number(s.basicSalary) || Number(s.techBasic) || 0;
@@ -7313,23 +7374,22 @@
         // ── Component values (mirrors calcTechWage in index.html) ──
         const hraPct = Number(s.hraPct) || 0;
         const daPct  = Number(s.daPct) || 0;
-        const gpPct  = Number(s.gradePay) || 0; // Grade Pay as % of Basic (matches payslip engine)
-        const hra = hraPct > 0 ? Math.round(basic * hraPct / 100) : 0;
-        const da  = daPct > 0 ? Math.round(basic * daPct / 100) : 0;
-        const gp  = gpPct > 0 ? Math.round(basic * gpPct / 100) : 0;
+        const gpPct  = Number(s.gradePay) || 0; // Grade Pay % of Basic (matches payslip)
+        const hra = hraPct > 0 ? +(basic * hraPct / 100).toFixed(2) : 0;
+        const da  = daPct > 0 ? +(basic * daPct / 100).toFixed(2) : 0;
+        const gp  = gpPct > 0 ? +(basic * gpPct / 100).toFixed(2) : 0;
         const conveyance = Number(s.conveyance) || 0;
         const medical = Number(s.medical) || 0;
         const variable = Number(s.variable) || 0;
         const annualBonus = basic > 0 ? Math.round(basic / 10) : 0;
         const travelAllow = Number(s.travelAllow) || 0;
         const gender = (s.gender || '').toLowerCase();
-        const fixedAllow = hra + da + gp;
-        const monthlyCTC = basic + fixedAllow;
-        const daysInMonth = 30; // Fixed 30-day basis per wage rule
+        const fixedAllow = +(hra + da + gp).toFixed(2);
+        const daysInMonth = 30;
 
-        // Technician daily wages (matches calcTechWage exactly)
-        const dailyWage = daysInMonth > 0 ? +((basic + fixedAllow + variable) / daysInMonth).toFixed(4) : 0;
-        const standbyWage = daysInMonth > 0 ? +((basic + fixedAllow) / daysInMonth).toFixed(4) : 0;
+        // Daily/standby wage (matches calcTechWage exactly)
+        const dailyWage = +((basic + fixedAllow + variable) / daysInMonth).toFixed(4);
+        const standbyWage = +((basic + fixedAllow) / daysInMonth).toFixed(4);
 
         // Allowance percentages
         const outstPct = (Number(s.outstationPct) || 20) / 100;
@@ -7343,7 +7403,7 @@
         const sDate = new Date(pYear, pMonth - 1, 26);
         const startDate = `${sDate.getFullYear()}-${String(sDate.getMonth()+1).padStart(2,'0')}-26`;
         const endDate = `${pYear}-${String(pMonth+1).padStart(2,'0')}-25`;
-        const periodMonth = pMonth + 1; // 1-based month for PT calc
+        const periodMonth = pMonth + 1;
 
         const attRaw = (s.attendance || []).filter(a => a.date >= startDate && a.date <= endDate);
         const periodLabel = new Date(startDate+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'}) + ' – ' + new Date(endDate+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
@@ -7357,13 +7417,12 @@
             }
         });
 
+        const ENGAGED_TYPES = ['Working','Outstation','Anchorage','Sailing'];
         const earnings = [];
         let totalEarnings = 0;
 
         if (isTech) {
-            // ── TECHNICIAN: mirrors calcTechWage exactly ──
-            const ENGAGED_TYPES = ['Working','Outstation','Anchorage','Sailing'];
-            const eng = ENGAGED_TYPES.reduce((s,t) => s + (counts[t]||0), 0);
+            const eng = ENGAGED_TYPES.reduce((sum,t) => sum + (counts[t]||0), 0);
             const sbd = counts['StandBy'] || 0;
 
             // Base wage earnings
@@ -7373,8 +7432,8 @@
             const salP = +((counts['Sailing']||0) * dailyWage).toFixed(2);
             const sbyP = +(sbd * standbyWage).toFixed(2);
 
-            // Not Well: first N days/month → standbyWage, beyond → ₹0
-            const maxPaidSickDays = 2; // matches payslip default
+            // Not Well: first N days → standbyWage, beyond → ₹0
+            const maxPaidSickDays = 2;
             const nwDays = counts['NotWell'] || 0;
             const nwPaidDays = Math.min(nwDays, maxPaidSickDays);
             const nwP = +(nwPaidDays * standbyWage).toFixed(2);
@@ -7384,7 +7443,7 @@
             const ancA = +((counts['Anchorage']||0) * dailyWage * ancPct).toFixed(2);
             const salA = +((counts['Sailing']||0) * dailyWage * sailPct).toFixed(2);
 
-            // Threshold allowances (days 16-20 and 21+)
+            // Threshold allowances
             const daysIn1520 = Math.max(0, Math.min(eng, 20) - 15);
             const daysAbove20 = Math.max(0, eng - 20);
             const t15 = daysIn1520 > 0 ? +(daysIn1520 * dailyWage * 0.5).toFixed(2) : 0;
@@ -7392,15 +7451,26 @@
 
             // Leave deductions
             const alDeduct = +((counts['ApprovedLeave']||0) * dailyWage * 0.5).toFixed(2);
-            // Unapproved leave: no-show (noShowPenalty flag) = 2×, regular = 2× default
-            const periodDateSet = new Set(attRaw.map(a => a.date));
-            const noShowDays = attRaw.filter(a =>
-                a.status === 'UnApprovedLeave' && a.noShowPenalty
-            ).length;
+            const noShowDays = attRaw.filter(a => a.status === 'UnApprovedLeave' && a.noShowPenalty).length;
             const regularULDays = Math.max(0, (counts['UnApprovedLeave']||0) - noShowDays);
             const ulDeductRegular = +(regularULDays * dailyWage * 2).toFixed(2);
             const ulDeductNoShow  = +(noShowDays * dailyWage * 2).toFixed(2);
             const ulDeduct = +(ulDeductRegular + ulDeductNoShow).toFixed(2);
+
+            // ── OT Ex-Gratia (matches calcTechWage) ──
+            const hourlyRate = +(dailyWage / 10).toFixed(4);
+            const otRate = +(hourlyRate * 2).toFixed(4);
+            let otAmt = 0;
+            let totalOTHours = 0;
+            attRaw.forEach(a => {
+                const h = parseFloat(a.otHours) || 0;
+                if (h <= 0) return;
+                const attType = a.status || a.type || '';
+                if (!ENGAGED_TYPES.includes(attType)) return;
+                otAmt += +(h * otRate).toFixed(2);
+                totalOTHours += h;
+            });
+            otAmt = +otAmt.toFixed(2);
 
             // Earnings rows
             if ((counts['Working']||0) > 0)    earnings.push({ label: 'Working Days', days: counts['Working'], rate: +dailyWage.toFixed(2), amt: wP });
@@ -7414,19 +7484,19 @@
             if ((counts['Anchorage']||0) > 0)   earnings.push({ label: `Anchorage Allow (${Math.round(ancPct*100)}% of DW)`, days: counts['Anchorage'], rate: +(dailyWage*ancPct).toFixed(2), amt: ancA });
             if (daysIn1520 > 0)                 earnings.push({ label: `Days 16–20 extra (${daysIn1520}d × DW×0.5)`, days: daysIn1520, rate: +(dailyWage*0.5).toFixed(2), amt: t15 });
             if (daysAbove20 > 0)                earnings.push({ label: `Days 21+ allow (${daysAbove20}d × DW×0.65)`, days: daysAbove20, rate: +(dailyWage*0.65).toFixed(2), amt: t20 });
+            if (otAmt > 0)                      earnings.push({ label: `OT Ex-Gratia (${totalOTHours.toFixed(1)}h × ₹${otRate.toFixed(2)}/hr)`, days: null, rate: +otRate.toFixed(2), amt: otAmt });
             if (travelAllow > 0)                earnings.push({ label: 'Travel Allowance (in Gross, subject to TDS)', days: null, rate: travelAllow, amt: travelAllow });
 
-            // Deduction rows (show as negative in earnings section like payslip does)
+            // Deduction rows (negative in earnings)
             if ((counts['ApprovedLeave']||0) > 0) earnings.push({ label: `Approved Leave Deduct (50% × ${counts['ApprovedLeave']}d)`, days: counts['ApprovedLeave'], rate: +(dailyWage*0.5).toFixed(2), amt: -alDeduct });
             if (regularULDays > 0)              earnings.push({ label: `Unapproved Leave (2× DW × ${regularULDays}d)`, days: regularULDays, rate: +(dailyWage*2).toFixed(2), amt: -ulDeductRegular });
             if (noShowDays > 0)                 earnings.push({ label: `No-Show Penalty (2× DW × ${noShowDays}d)`, days: noShowDays, rate: +(dailyWage*2).toFixed(2), amt: -ulDeductNoShow });
 
             const grossBase = wP + outP + ancP + salP + sbyP + nwP + outA + ancA + salA + t15 + t20;
-            totalEarnings = +(grossBase - alDeduct - ulDeduct + travelAllow).toFixed(2);
+            totalEarnings = +(grossBase - alDeduct - ulDeduct + otAmt + travelAllow).toFixed(2);
         } else {
-            // ── OFFICE STAFF: fixed monthly salary components ──
-            earnings.push({ label: 'Basic Salary', days: null, rate: null, amt: basic });
-            totalEarnings += basic;
+            // ── OFFICE STAFF ──
+            earnings.push({ label: 'Basic Salary', days: null, rate: null, amt: basic }); totalEarnings += basic;
             if (hra > 0) { earnings.push({ label: `HRA (${hraPct}%)`, days: null, rate: null, amt: hra }); totalEarnings += hra; }
             if (da > 0) { earnings.push({ label: `DA (${daPct}%)`, days: null, rate: null, amt: da }); totalEarnings += da; }
             if (gp > 0) { earnings.push({ label: `Grade Pay (${gpPct}%)`, days: null, rate: null, amt: gp }); totalEarnings += gp; }
@@ -7447,48 +7517,32 @@
         // ── DEDUCTIONS (mirrors calcTechDeductions) ──
         const pfPct = Number(s.pfPct) || 12;
         const esicPct = Number(s.esicPct) || 0.75;
-
-        let pfGross, pfAmt, pfCapped, esicBasis;
+        let pfGross, pfAmt, esicBasis;
         if (isTech) {
-            // Tech PF: (Basic + Fixed Allowance) × pfPct% — matches _calcTechPF
             pfGross = +(basic + fixedAllow).toFixed(2);
-            pfAmt = +(pfGross * pfPct / 100).toFixed(2);
-            pfCapped = false;
-            // ESIC basis = Basic + Fixed + Variable (monthly amounts)
+            const hasUAN = !!(s.uanNumber && s.uanNumber.trim());
+            pfAmt = hasUAN ? +(pfGross * pfPct / 100).toFixed(2) : 0;
             esicBasis = +(basic + fixedAllow + variable).toFixed(2);
         } else {
             pfGross = grossPay - variable;
             pfAmt = pfGross > 15000 ? +(15000 * pfPct / 100).toFixed(2) : +(pfGross * pfPct / 100).toFixed(2);
-            pfCapped = pfGross > 15000;
             esicBasis = grossPay - annualBonus;
         }
-        // Check UAN — no PF if no UAN
-        const hasUAN = !!(s.uanNumber && s.uanNumber.trim());
-        if (!hasUAN) pfAmt = 0;
-
-        // ESIC: rounded basis, ceil contribution (matches _calcESIC)
+        const hasUAN = isTech ? !!(s.uanNumber && s.uanNumber.trim()) : true;
         const esicRoundedBasis = Math.round(esicBasis);
         const esicExempt = esicRoundedBasis > 21000;
         const esicAmt = esicExempt ? 0 : Math.ceil(esicRoundedBasis * esicPct / 100);
-
-        // PT: gender-aware (matches _calcPT — uses Maharashtra slabs)
         let ptAmt = 0;
         const ptBasis = isTech ? pfGross : grossPay;
         const ptThreshold = gender === 'female' ? 25000 : 10000;
-        if (ptBasis > ptThreshold) {
-            ptAmt = periodMonth === 2 ? 300 : 200;
-        }
-
-        // TDS: 1% of gross for tech (auto), or manual override
-        const tdsAmt = isTech
-            ? (Number(s.tdsMonthly) || +(grossPay * 0.01).toFixed(2))
-            : (Number(s.tdsMonthly) || 0);
+        if (ptBasis > ptThreshold) ptAmt = periodMonth === 2 ? 300 : 200;
+        const tdsAmt = isTech ? (Number(s.tdsMonthly) || +(grossPay * 0.01).toFixed(2)) : (Number(s.tdsMonthly) || 0);
 
         const deductions = [];
         if (isTech) {
             deductions.push({ label: hasUAN ? `PF ${pfPct}% of ₹${pfGross.toLocaleString('en-IN')}` : `PF — NIL (no UAN)`, amt: pfAmt });
         } else {
-            deductions.push({ label: `PF ${pfPct}% (PF Gross ₹${pfGross.toLocaleString('en-IN')}${pfCapped?' — capped ₹15K':''})`, amt: pfAmt });
+            deductions.push({ label: `PF ${pfPct}% (PF Gross ₹${pfGross.toLocaleString('en-IN')})`, amt: pfAmt });
         }
         deductions.push({ label: esicExempt ? `ESIC – NIL (Wages ₹${esicRoundedBasis.toLocaleString('en-IN')} > ₹21,000)` : `ESIC ${esicPct}% of ₹${esicRoundedBasis.toLocaleString('en-IN')}`, amt: esicAmt });
         if (gender === 'female' && ptBasis <= 25000) {
@@ -7496,20 +7550,11 @@
         } else if (ptAmt > 0) {
             deductions.push({ label: `PT ₹${ptAmt} (${periodMonth===2?'Feb ₹300':'₹200/mo'})`, amt: ptAmt });
         }
-        if (tdsAmt > 0) {
-            deductions.push({ label: `TDS – ${Number(s.tdsMonthly) ? 'Monthly' : '1% of Gross ₹'+grossPay.toLocaleString('en-IN')+' (Auto)'}`, amt: tdsAmt });
-        }
+        if (tdsAmt > 0) deductions.push({ label: `TDS – ${Number(s.tdsMonthly) ? 'Monthly' : '1% of Gross ₹'+grossPay.toLocaleString('en-IN')+' (Auto)'}`, amt: tdsAmt });
+        (s.loans || []).forEach(l => { if (l.status === 'Active' && l.emi > 0) deductions.push({ label: `Loan EMI — ${l.remarks || l.loanID}`, amt: Number(l.emi) }); });
 
-        // Active loan EMI deductions
-        (s.loans || []).forEach(l => {
-            if (l.status === 'Active' && l.emi > 0) {
-                deductions.push({ label: `Loan EMI — ${l.remarks || l.loanID}`, amt: Number(l.emi) });
-            }
-        });
-
-        const totalDed = deductions.reduce((s, d) => s + (Number(d.amt) || 0), 0);
+        const totalDed = deductions.reduce((sum, d) => sum + (Number(d.amt) || 0), 0);
         const netPay = Math.round((grossPay - totalDed) * 100) / 100;
-
         const fmt = v => v ? '₹' + Number(v).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2}) : '';
 
         return `
@@ -7517,8 +7562,6 @@
             <h3 style="font-size:14px;font-weight:800;color:#1e1b4b;margin:0 0 4px">💰 ${isTech ? 'Wage Summary' : 'Salary Summary'}</h3>
             <p style="font-size:10px;color:#6b7280;margin:0 0 4px">Period: ${periodLabel} (30-day basis)</p>
             <p style="font-size:9px;color:#9ca3af;margin:0 0 12px">Daily Wage: ${fmt(dailyWage)} | Standby Wage: ${fmt(standbyWage)}</p>
-
-            <!-- Earnings -->
             <div style="margin-bottom:12px">
                 <div style="background:#1e40af;color:#fff;padding:6px 10px;border-radius:8px 8px 0 0;font-size:11px;font-weight:700">EARNINGS</div>
                 <div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;overflow:hidden">
@@ -7528,7 +7571,7 @@
                     ${earnings.map(e => `
                     <div style="display:grid;grid-template-columns:1fr 40px 60px 70px;padding:6px 10px;border-top:1px solid #f3f4f6;font-size:11px;align-items:center">
                         <span style="color:#1f2937;font-weight:500">${e.label}</span>
-                        <span style="text-align:right;color:#6b7280">${e.days || '—'}</span>
+                        <span style="text-align:right;color:#6b7280">${e.days != null ? e.days : '—'}</span>
                         <span style="text-align:right;color:#6b7280">${e.rate ? Number(e.rate).toLocaleString('en-IN') : '—'}</span>
                         <span style="text-align:right;font-weight:700;color:${e.amt < 0 ? '#dc2626' : '#059669'}">${fmt(Math.abs(e.amt))}${e.amt < 0 ? ' ▼' : ''}</span>
                     </div>`).join('')}
@@ -7538,8 +7581,6 @@
                     </div>
                 </div>
             </div>
-
-            <!-- Deductions -->
             <div style="margin-bottom:12px">
                 <div style="background:#dc2626;color:#fff;padding:6px 10px;border-radius:8px 8px 0 0;font-size:11px;font-weight:700">DEDUCTIONS</div>
                 <div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;overflow:hidden">
@@ -7554,8 +7595,6 @@
                     </div>
                 </div>
             </div>
-
-            <!-- Net Pay -->
             <div style="background:linear-gradient(135deg,#0d9488,#059669);border-radius:12px;padding:14px 16px;display:flex;justify-content:space-between;align-items:center">
                 <div>
                     <div style="font-size:10px;color:rgba(255,255,255,.7)">Gross ${fmt(grossPay)} − Ded. ${fmt(totalDed)}</div>
@@ -7566,9 +7605,8 @@
                     <div style="font-size:22px;font-weight:900;color:#fff">${fmt(netPay)}</div>
                 </div>
             </div>
-
             <div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center">
-                <span style="font-size:10px;padding:3px 10px;border:1px solid #e5e7eb;border-radius:6px;color:#6b7280;font-weight:600">${isTech ? 'Engaged: '+(['Working','Outstation','Anchorage','Sailing'].reduce((s,t)=>s+(counts[t]||0),0))+' | Stand By: '+(counts['StandBy']||0) : 'Working: '+(counts['Working']||0)+' days'}</span>
+                <span style="font-size:10px;padding:3px 10px;border:1px solid #e5e7eb;border-radius:6px;color:#6b7280;font-weight:600">${isTech ? 'Engaged: '+ENGAGED_TYPES.reduce((sum,t)=>sum+(counts[t]||0),0)+' | Stand By: '+(counts['StandBy']||0) : 'Working: '+(counts['Working']||0)+' days'}</span>
                 <span style="font-size:8px;color:#9ca3af">View only — contact office for corrections</span>
             </div>
         </div>`;
