@@ -7412,33 +7412,53 @@
         // ── DEDUCTIONS ──
         const pfPct = Number(s.pfPct) || 12;
         const esicPct = Number(s.esicPct) || 0.75;
-        // PF basis: for office = Basic+DA+GP (statutory); for tech = Basic+Fixed
-        const pfGross = isTech ? monthlyCTC : (basic + da + gpVal);
-        const pfAmt = Math.round(pfGross * pfPct / 100);
-        // ESIC: 0.75% of gross wages, exempt if monthly wages > ₹21,000
-        const esicWages = isTech ? monthlyCTC : grossPay;
-        const esicExempt = esicWages > 21000;
-        const esicAmt = esicExempt ? 0 : Math.round(grossPay * esicPct / 100);
-        // PT: gender-aware thresholds (Female exempt if gross ≤ ₹25,000)
-        let ptAmt = 0;
-        if (gender === 'female') {
-            if (grossPay > 25000) ptAmt = 200;
+
+        let pfGross, esicWages;
+        if (isTech) {
+            // Tech: PF basis = standbyWage × 30 (Basic + Fixed, excl Variable)
+            // ESIC basis = dailyWage × 30 (includes Variable)
+            pfGross = Math.round(standbyWage * 30);
+            esicWages = Math.round(dailyWage * 30);
         } else {
-            if (grossPay > 15000) ptAmt = 200;
-            else if (grossPay > 10000) ptAmt = 150;
+            // Office: PF basis = Gross − Variable (Variable is "excl. PF")
+            // ESIC wages = Gross − Annual Bonus
+            pfGross = grossPay - variable;
+            esicWages = grossPay - annualBonus;
         }
-        // TDS
-        const tdsAmt = Number(s.tdsMonthly) || Math.round(grossPay * 0.01 * 100) / 100;
+        const pfAmt = Math.round(pfGross * pfPct / 100);
+        const esicExempt = esicWages > 21000;
+        const esicAmt = esicExempt ? 0 : Math.round(esicWages * esicPct / 100);
+
+        // PT: gender-aware thresholds
+        let ptAmt = 0;
+        const ptBasis = isTech ? pfGross : grossPay;
+        if (gender === 'female') {
+            if (ptBasis > 25000) ptAmt = 200;
+        } else {
+            if (ptBasis > 15000) ptAmt = 200;
+            else if (ptBasis > 10000) ptAmt = 150;
+        }
+
+        // TDS: only for technicians (1% of gross) or if explicitly set
+        const tdsAmt = isTech
+            ? (Number(s.tdsMonthly) || Math.round(grossPay * 0.01 * 100) / 100)
+            : (Number(s.tdsMonthly) || 0);  // Office: no auto TDS
 
         const deductions = [];
-        deductions.push({ label: `PF ${pfPct}% (PF Gross ₹${pfGross.toLocaleString('en-IN')})`, amt: pfAmt });
-        deductions.push({ label: esicExempt ? `ESIC – NIL (Wages ₹${esicWages.toLocaleString('en-IN')} > ₹21,000)` : `ESIC – ${esicPct}% of Wages ₹${esicWages.toLocaleString('en-IN')} (≤ ₹21,000)`, amt: esicAmt });
-        if (gender === 'female' && grossPay <= 25000) {
-            deductions.push({ label: `PT – NIL (Female: gross ₹${grossPay.toLocaleString('en-IN')} ≤ ₹25,000)`, amt: 0 });
-        } else if (ptAmt > 0) {
-            deductions.push({ label: `PT – Gross ₹${grossPay.toLocaleString('en-IN')} > ₹${ptAmt===200?'15,000':'10,000'}`, amt: ptAmt });
+        if (isTech) {
+            deductions.push({ label: `PF ${pfPct}% (Basic ₹${basic.toLocaleString('en-IN')} + Fixed ₹${(pfGross-basic).toLocaleString('en-IN')})`, amt: pfAmt });
+        } else {
+            deductions.push({ label: `PF ${pfPct}% (PF Gross ₹${pfGross.toLocaleString('en-IN')})`, amt: pfAmt });
         }
-        deductions.push({ label: `TDS – ${Number(s.tdsMonthly) ? 'Monthly' : '1% of Gross ₹'+grossPay.toLocaleString('en-IN')+' (Auto)'}`, amt: tdsAmt });
+        deductions.push({ label: esicExempt ? `ESIC – NIL (Wages ₹${esicWages.toLocaleString('en-IN')} > ₹21,000)` : `ESIC – ${esicPct}% of Wages ₹${esicWages.toLocaleString('en-IN')} (≤ ₹21,000)`, amt: esicAmt });
+        if (gender === 'female' && ptBasis <= 25000) {
+            deductions.push({ label: `PT – NIL (Female: gross ₹${ptBasis.toLocaleString('en-IN')} ≤ ₹25,000)`, amt: 0 });
+        } else if (ptAmt > 0) {
+            deductions.push({ label: `PT – ${isTech ? 'Basic+Fixed' : 'Gross'} ₹${ptBasis.toLocaleString('en-IN')} > ₹${ptAmt===200?'15,000':'10,000'}`, amt: ptAmt });
+        }
+        if (tdsAmt > 0) {
+            deductions.push({ label: `TDS – ${Number(s.tdsMonthly) ? 'Monthly' : '1% of Gross ₹'+grossPay.toLocaleString('en-IN')+' (Auto)'}`, amt: tdsAmt });
+        }
 
         // Active loan EMI deductions
         (s.loans || []).forEach(l => {
@@ -7498,7 +7518,7 @@
             <div style="background:linear-gradient(135deg,#0d9488,#059669);border-radius:12px;padding:14px 16px;display:flex;justify-content:space-between;align-items:center">
                 <div>
                     <div style="font-size:10px;color:rgba(255,255,255,.7)">Gross ${fmt(grossPay)} − Ded. ${fmt(totalDed)}</div>
-                    <div style="font-size:9px;color:rgba(255,255,255,.5);margin-top:2px">PF Basis: ₹${pfGross.toLocaleString('en-IN')} | ESIC/PT Basis: ₹${esicWages.toLocaleString('en-IN')}</div>
+                    <div style="font-size:9px;color:rgba(255,255,255,.5);margin-top:2px">PF Basis: ${isTech ? 'Basic+Fixed = ' : ''}₹${pfGross.toLocaleString('en-IN')} | ESIC/PT Basis: ₹${esicWages.toLocaleString('en-IN')}</div>
                 </div>
                 <div style="text-align:right">
                     <div style="font-size:10px;color:rgba(255,255,255,.7);font-weight:600">NET PAY</div>
