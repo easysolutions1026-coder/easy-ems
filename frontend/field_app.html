@@ -7298,6 +7298,7 @@
     }
 
     function _techSSRenderWageSummary(s) {
+        const isTech = (s.staffType||'').toLowerCase().includes('tech');
         const basic = Number(s.techBasic) || 0;
         if (!basic) return ''; // No wage data configured
 
@@ -7311,29 +7312,24 @@
         const fixedAllow = hra + da + gp;
         const monthlyCTC = basic + fixedAllow;
         const dailyWage = Math.round((monthlyCTC / 30) * 100) / 100;
-        const travelAllow = Number(s.travelAllow) || 0;
+        const travelAllow = isTech ? (Number(s.travelAllow) || 0) : 0;
 
-        // Duty-type multipliers
+        // Duty-type multipliers (technicians only)
         const outstationMul = 1 + (Number(s.outstationPct) || 20) / 100;
         const sailingMul    = 1 + (Number(s.sailingPct) || 30) / 100;
         const anchorageMul  = 1 + (Number(s.anchoragePct) || 30) / 100;
 
-        // Count attendance days for pay period (26th prev month to 25th this month)
+        // Pay period: use _techSSMonthOffset for navigation
+        // Period = 26th of previous month to 25th of this month
         const now = new Date();
-        const targetWage = new Date(now.getFullYear(), now.getMonth() + _techSSMonthOffset, 1);
-        let pYear = targetWage.getFullYear(), pMonth = targetWage.getMonth(); // 0-based
-        let startDate, endDate;
-        if (_techSSMonthOffset === 0 ? now.getDate() >= 26 : true) {
-            startDate = `${pYear}-${String(pMonth+1).padStart(2,'0')}-26`;
-            const eM = pMonth + 1 > 11 ? 0 : pMonth + 1;
-            const eY = pMonth + 1 > 11 ? pYear + 1 : pYear;
-            endDate = `${eY}-${String(eM+1).padStart(2,'0')}-25`;
-        } else {
-            const sM = pMonth - 1 < 0 ? 11 : pMonth - 1;
-            const sY = pMonth - 1 < 0 ? pYear - 1 : pYear;
-            startDate = `${sY}-${String(sM+1).padStart(2,'0')}-26`;
-            endDate = `${pYear}-${String(pMonth+1).padStart(2,'0')}-25`;
-        }
+        // For past months: offset -1 = previous month's pay period
+        const refDate = new Date(now.getFullYear(), now.getMonth() + _techSSMonthOffset, 15);
+        const pYear = refDate.getFullYear(), pMonth = refDate.getMonth();
+        // Start: 26th of previous month
+        const sDate = new Date(pYear, pMonth - 1, 26);
+        const startDate = `${sDate.getFullYear()}-${String(sDate.getMonth()+1).padStart(2,'0')}-26`;
+        // End: 25th of this month
+        const endDate = `${pYear}-${String(pMonth+1).padStart(2,'0')}-25`;
 
         const att = (s.attendance || []).filter(a => a.date >= startDate && a.date <= endDate);
         const periodLabel = new Date(startDate+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'}) + ' – ' + new Date(endDate+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
@@ -7346,34 +7342,54 @@
                 counts[t] = (counts[t] || 0) + 1;
             }
         });
+        const totalWorkingDays = Object.values(counts).reduce((s,v) => s+v, 0);
 
         // Build earnings rows
-        const DUTY_META = {
-            Working:      { label: 'Working Days',              mul: 1 },
-            StandBy:      { label: 'Stand By (Standby wage)',   mul: 1 },
-            Outstation:   { label: 'Outstation',                mul: outstationMul },
-            Sailing:      { label: 'Sailing',                   mul: sailingMul },
-            Anchorage:    { label: 'Anchorage',                 mul: anchorageMul },
-            ApprovedLeave:{ label: 'Approved Leave',            mul: 0 },
-            UnApprovedLeave:{ label: 'Unapproved Leave',        mul: 0 },
-            NotWell:      { label: 'Not Well',                  mul: 1 },
-            Absent:       { label: 'Absent',                    mul: 0 }
-        };
-
         const earnings = [];
         let totalEarnings = 0;
-        Object.entries(counts).forEach(([type, days]) => {
-            const meta = DUTY_META[type] || { label: type, mul: 1 };
-            const rate = Math.round(dailyWage * meta.mul * 100) / 100;
-            const amt = Math.round(rate * days * 100) / 100;
-            if (days > 0) {
-                earnings.push({ label: meta.label, days, rate, amt });
-                totalEarnings += amt;
+
+        if (isTech) {
+            // Technician: daily wage × days per duty type
+            const DUTY_META = {
+                Working:      { label: 'Working Days',              mul: 1 },
+                StandBy:      { label: 'Stand By (Standby wage)',   mul: 1 },
+                Outstation:   { label: 'Outstation',                mul: outstationMul },
+                Sailing:      { label: 'Sailing',                   mul: sailingMul },
+                Anchorage:    { label: 'Anchorage',                 mul: anchorageMul },
+                ApprovedLeave:{ label: 'Approved Leave',            mul: 0 },
+                UnApprovedLeave:{ label: 'Unapproved Leave',        mul: 0 },
+                NotWell:      { label: 'Not Well',                  mul: 1 },
+                Absent:       { label: 'Absent',                    mul: 0 }
+            };
+            Object.entries(counts).forEach(([type, days]) => {
+                const meta = DUTY_META[type] || { label: type, mul: 1 };
+                const rate = Math.round(dailyWage * meta.mul * 100) / 100;
+                const amt = Math.round(rate * days * 100) / 100;
+                if (days > 0) {
+                    earnings.push({ label: meta.label, days, rate, amt });
+                    totalEarnings += amt;
+                }
+            });
+            if (travelAllow > 0) {
+                earnings.push({ label: 'Travel Allowance (in Gross, subject to TDS)', days: null, rate: travelAllow, amt: travelAllow });
+                totalEarnings += travelAllow;
             }
-        });
-        if (travelAllow > 0) {
-            earnings.push({ label: 'Travel Allowance (in Gross, subject to TDS)', days: null, rate: travelAllow, amt: travelAllow });
-            totalEarnings += travelAllow;
+        } else {
+            // Office staff: fixed monthly salary components
+            earnings.push({ label: 'Basic Pay', days: null, rate: null, amt: basic });
+            totalEarnings += basic;
+            if (hra > 0) { earnings.push({ label: `HRA (${hraPct}%)`, days: null, rate: null, amt: hra }); totalEarnings += hra; }
+            if (da > 0) { earnings.push({ label: `DA (${daPct}%)`, days: null, rate: null, amt: da }); totalEarnings += da; }
+            if (gp > 0) { earnings.push({ label: `Grade Pay (${gpPct}%)`, days: null, rate: null, amt: gp }); totalEarnings += gp; }
+            const variable = Number(s.techVariable) || 0;
+            if (variable > 0) { earnings.push({ label: 'Variable / Allowance', days: null, rate: null, amt: variable }); totalEarnings += variable; }
+            // Pro-rate for partial months (if absent/leave days exist)
+            const absentDays = (counts['Absent'] || 0) + (counts['UnApprovedLeave'] || 0);
+            if (absentDays > 0) {
+                const deduct = Math.round((monthlyCTC / 30) * absentDays * 100) / 100;
+                earnings.push({ label: `Less: Absent/Unapproved (${absentDays} days)`, days: absentDays, rate: Math.round(monthlyCTC/30*100)/100, amt: -deduct });
+                totalEarnings -= deduct;
+            }
         }
         const grossPay = Math.round(totalEarnings * 100) / 100;
 
@@ -7405,7 +7421,7 @@
 
         return `
         <div style="background:#fff;border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
-            <h3 style="font-size:14px;font-weight:800;color:#1e1b4b;margin:0 0 4px">💰 Wage Summary</h3>
+            <h3 style="font-size:14px;font-weight:800;color:#1e1b4b;margin:0 0 4px">💰 ${isTech ? 'Wage Summary' : 'Salary Summary'}</h3>
             <p style="font-size:10px;color:#6b7280;margin:0 0 12px">Period: ${periodLabel} (30 days)</p>
 
             <!-- Earnings -->
@@ -7458,7 +7474,7 @@
             </div>
 
             <div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center">
-                <span style="font-size:10px;padding:3px 10px;border:1px solid #e5e7eb;border-radius:6px;color:#6b7280;font-weight:600">Stand By: ${counts['StandBy']||0}</span>
+                <span style="font-size:10px;padding:3px 10px;border:1px solid #e5e7eb;border-radius:6px;color:#6b7280;font-weight:600">${isTech ? 'Stand By: '+(counts['StandBy']||0) : 'Working: '+(counts['Working']||0)+' days'}</span>
                 <span style="font-size:8px;color:#9ca3af">View only — contact office for corrections</span>
             </div>
         </div>`;
