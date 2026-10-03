@@ -226,10 +226,9 @@ techRouter.get('/staff-list', async (req, res) => {
       where: { status: 'Active' },
       select: { staffID: true, name: true, staffType: true, designation: true }
     });
-    const techs = rows
-      .filter(r => (r.staffType || '').toLowerCase().includes('tech'))
-      .map(r => ({ staffID: r.staffID, name: r.name, designation: r.designation || '' }));
-    res.json(techs);
+    const staffList = rows
+      .map(r => ({ staffID: r.staffID, name: r.name, staffType: r.staffType || '', designation: r.designation || '' }));
+    res.json(staffList);
   } catch (err) {
     console.error('[tech/staff-list] error:', err);
     res.status(500).json({ error: 'INTERNAL_ERROR' });
