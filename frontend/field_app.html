@@ -7308,36 +7308,43 @@
 
     function _techSSRenderWageSummary(s) {
         const isTech = (s.staffType||'').toLowerCase().includes('tech');
-        const basic = Number(s.techBasic) || 0;
-        if (!basic) return ''; // No wage data configured
+        const basic = Number(s.basicSalary) || Number(s.techBasic) || 0;
+        if (!basic) return '';
 
-        // Compute allowances from percentages
-        const hraPct = Number(s.techHRAPct) ?? 50;
-        const daPct  = Number(s.techDAPct) ?? 65;
-        const gpPct  = Number(s.techGPPct) ?? 30;
-        const hra = Math.round(basic * hraPct / 100);
-        const da  = Math.round(basic * daPct / 100);
-        const gp  = Math.round(basic * gpPct / 100);
-        const fixedAllow = hra + da + gp;
+        // Actual component values from staff record
+        const hraPct = Number(s.hraPct) || 0;
+        const daPct  = Number(s.daPct) || 0;
+        const gpVal  = Number(s.gradePay) || 0;  // Fixed ₹ amount, NOT percentage
+        const hra = hraPct > 0 ? Math.round(basic * hraPct / 100) : 0;
+        const da  = daPct > 0 ? Math.round(basic * daPct / 100) : 0;
+        const conveyance = Number(s.conveyance) || 0;
+        const medical = Number(s.medical) || 0;
+        const variable = Number(s.variable) || 0;
+        const annualBonus = basic > 0 ? Math.round(basic / 10) : 0; // Basic ÷ 10
+        const travelAllow = Number(s.travelAllow) || 0;
+        const gender = (s.gender || '').toLowerCase();
+
+        // PF basis = Basic + DA + GP (statutory components)
+        const pfBasisComponents = basic + da + gpVal;
+        // Total fixed = Basic + HRA + DA + GP
+        const fixedAllow = hra + da + gpVal;
         const monthlyCTC = basic + fixedAllow;
-        const dailyWage = Math.round((monthlyCTC / 30) * 100) / 100;
-        const travelAllow = isTech ? (Number(s.travelAllow) || 0) : 0;
 
-        // Duty-type multipliers (technicians only)
+        // Technician daily wages
+        const dailyWage = Number(s.dailyWage) || Math.round((monthlyCTC + variable) / 30 * 100) / 100;
+        const standbyWage = Number(s.standbyWage) || Math.round(monthlyCTC / 30 * 100) / 100;
+
+        // Duty-type rates for technicians
         const outstationMul = 1 + (Number(s.outstationPct) || 20) / 100;
         const sailingMul    = 1 + (Number(s.sailingPct) || 30) / 100;
         const anchorageMul  = 1 + (Number(s.anchoragePct) || 30) / 100;
 
-        // Pay period: use _techSSMonthOffset for navigation
-        // Period = 26th of previous month to 25th of this month
+        // Pay period: 26th prev month – 25th this month
         const now = new Date();
-        // For past months: offset -1 = previous month's pay period
         const refDate = new Date(now.getFullYear(), now.getMonth() + _techSSMonthOffset, 15);
         const pYear = refDate.getFullYear(), pMonth = refDate.getMonth();
-        // Start: 26th of previous month
         const sDate = new Date(pYear, pMonth - 1, 26);
         const startDate = `${sDate.getFullYear()}-${String(sDate.getMonth()+1).padStart(2,'0')}-26`;
-        // End: 25th of this month
         const endDate = `${pYear}-${String(pMonth+1).padStart(2,'0')}-25`;
 
         const att = (s.attendance || []).filter(a => a.date >= startDate && a.date <= endDate);
@@ -7351,31 +7358,28 @@
                 counts[t] = (counts[t] || 0) + 1;
             }
         });
-        const totalWorkingDays = Object.values(counts).reduce((s,v) => s+v, 0);
 
-        // Build earnings rows
         const earnings = [];
         let totalEarnings = 0;
 
         if (isTech) {
-            // Technician: daily wage × days per duty type
+            // ── TECHNICIAN: daily wage × days per duty type ──
             const DUTY_META = {
-                Working:      { label: 'Working Days',              mul: 1 },
-                StandBy:      { label: 'Stand By (Standby wage)',   mul: 1 },
-                Outstation:   { label: 'Outstation',                mul: outstationMul },
-                Sailing:      { label: 'Sailing',                   mul: sailingMul },
-                Anchorage:    { label: 'Anchorage',                 mul: anchorageMul },
-                ApprovedLeave:{ label: 'Approved Leave',            mul: 0 },
-                UnApprovedLeave:{ label: 'Unapproved Leave',        mul: 0 },
-                NotWell:      { label: 'Not Well',                  mul: 1 },
-                Absent:       { label: 'Absent',                    mul: 0 }
+                Working:      { label: 'Working Days',    rate: dailyWage },
+                StandBy:      { label: 'Stand By (Standby wage)', rate: standbyWage },
+                Outstation:   { label: 'Outstation',      rate: Math.round(standbyWage * outstationMul * 100) / 100 },
+                Sailing:      { label: 'Sailing',         rate: Math.round(standbyWage * sailingMul * 100) / 100 },
+                Anchorage:    { label: 'Anchorage',       rate: Math.round(standbyWage * anchorageMul * 100) / 100 },
+                ApprovedLeave:{ label: 'Approved Leave',  rate: 0 },
+                UnApprovedLeave:{ label: 'Unapproved Leave', rate: 0 },
+                NotWell:      { label: 'Not Well',        rate: standbyWage },
+                Absent:       { label: 'Absent',          rate: 0 }
             };
             Object.entries(counts).forEach(([type, days]) => {
-                const meta = DUTY_META[type] || { label: type, mul: 1 };
-                const rate = Math.round(dailyWage * meta.mul * 100) / 100;
-                const amt = Math.round(rate * days * 100) / 100;
+                const meta = DUTY_META[type] || { label: type, rate: standbyWage };
+                const amt = Math.round(meta.rate * days * 100) / 100;
                 if (days > 0) {
-                    earnings.push({ label: meta.label, days, rate, amt });
+                    earnings.push({ label: meta.label, days, rate: meta.rate, amt });
                     totalEarnings += amt;
                 }
             });
@@ -7384,49 +7388,62 @@
                 totalEarnings += travelAllow;
             }
         } else {
-            // Office staff: fixed monthly salary components
-            earnings.push({ label: 'Basic Pay', days: null, rate: null, amt: basic });
+            // ── OFFICE STAFF: fixed monthly salary components ──
+            earnings.push({ label: 'Basic Salary', days: null, rate: null, amt: basic });
             totalEarnings += basic;
             if (hra > 0) { earnings.push({ label: `HRA (${hraPct}%)`, days: null, rate: null, amt: hra }); totalEarnings += hra; }
             if (da > 0) { earnings.push({ label: `DA (${daPct}%)`, days: null, rate: null, amt: da }); totalEarnings += da; }
-            if (gp > 0) { earnings.push({ label: `Grade Pay (${gpPct}%)`, days: null, rate: null, amt: gp }); totalEarnings += gp; }
-            const variable = Number(s.techVariable) || 0;
-            if (variable > 0) { earnings.push({ label: 'Variable / Allowance', days: null, rate: null, amt: variable }); totalEarnings += variable; }
-            // Pro-rate for partial months (if absent/leave days exist)
+            if (gpVal > 0) { earnings.push({ label: 'Grade Pay', days: null, rate: null, amt: gpVal }); totalEarnings += gpVal; }
+            if (conveyance > 0) { earnings.push({ label: 'Conveyance', days: null, rate: null, amt: conveyance }); totalEarnings += conveyance; }
+            if (medical > 0) { earnings.push({ label: 'Medical', days: null, rate: null, amt: medical }); totalEarnings += medical; }
+            if (annualBonus > 0) { earnings.push({ label: 'Annual Bonus (Basic÷10)', days: null, rate: null, amt: annualBonus }); totalEarnings += annualBonus; }
+            if (variable > 0) { earnings.push({ label: 'Variable (excl. PF)', days: null, rate: null, amt: variable }); totalEarnings += variable; }
+            // Deduct absent/unapproved days
             const absentDays = (counts['Absent'] || 0) + (counts['UnApprovedLeave'] || 0);
             if (absentDays > 0) {
-                const deduct = Math.round((monthlyCTC / 30) * absentDays * 100) / 100;
-                earnings.push({ label: `Less: Absent/Unapproved (${absentDays} days)`, days: absentDays, rate: Math.round(monthlyCTC/30*100)/100, amt: -deduct });
+                const perDay = Math.round(totalEarnings / 30 * 100) / 100;
+                const deduct = Math.round(perDay * absentDays * 100) / 100;
+                earnings.push({ label: `Less: Absent/Unapproved (${absentDays} days)`, days: absentDays, rate: perDay, amt: -deduct });
                 totalEarnings -= deduct;
             }
         }
         const grossPay = Math.round(totalEarnings * 100) / 100;
 
-        // Deductions
-        const pfPct = Number(s.techPFPct) ?? 12;
-        const esicPct = Number(s.techESICPct) ?? 0.75;
-        const pfBasis = basic + fixedAllow;
-        const pfAmt = Math.round(pfBasis * pfPct / 100);
-        const esicBasis = monthlyCTC;
-        const esicExempt = esicBasis > 21000;
+        // ── DEDUCTIONS ──
+        const pfPct = Number(s.pfPct) || 12;
+        const esicPct = Number(s.esicPct) || 0.75;
+        // PF basis: for office = Basic+DA+GP (statutory); for tech = Basic+Fixed
+        const pfGross = isTech ? monthlyCTC : (basic + da + gpVal);
+        const pfAmt = Math.round(pfGross * pfPct / 100);
+        // ESIC: 0.75% of gross wages, exempt if monthly wages > ₹21,000
+        const esicWages = isTech ? monthlyCTC : grossPay;
+        const esicExempt = esicWages > 21000;
         const esicAmt = esicExempt ? 0 : Math.round(grossPay * esicPct / 100);
-        // PT slab
+        // PT: gender-aware thresholds (Female exempt if gross ≤ ₹25,000)
         let ptAmt = 0;
-        if (pfBasis > 15000) ptAmt = 200;
-        else if (pfBasis > 10000) ptAmt = 150;
-        // TDS (1% auto)
-        const tdsAmt = Math.round(grossPay * 0.01 * 100) / 100;
+        if (gender === 'female') {
+            if (grossPay > 25000) ptAmt = 200;
+        } else {
+            if (grossPay > 15000) ptAmt = 200;
+            else if (grossPay > 10000) ptAmt = 150;
+        }
+        // TDS
+        const tdsAmt = Number(s.tdsMonthly) || Math.round(grossPay * 0.01 * 100) / 100;
 
         const deductions = [];
-        deductions.push({ label: `PF ${pfPct}% (Basic ₹${basic.toLocaleString('en-IN')} + Fixed ₹${fixedAllow.toLocaleString('en-IN')})`, amt: pfAmt });
-        deductions.push({ label: esicExempt ? `ESIC – NIL (Wages ₹${esicBasis.toLocaleString('en-IN')} > ₹21,000)` : `ESIC ${esicPct}%`, amt: esicAmt });
-        if (ptAmt > 0) deductions.push({ label: `PT – Basic+Fixed ₹${pfBasis.toLocaleString('en-IN')} > ₹${ptAmt===200?'15,000':'10,000'}`, amt: ptAmt });
-        deductions.push({ label: `TDS – 1% of Gross ₹${grossPay.toLocaleString('en-IN')} (Auto)`, amt: tdsAmt });
+        deductions.push({ label: `PF ${pfPct}% (PF Gross ₹${pfGross.toLocaleString('en-IN')})`, amt: pfAmt });
+        deductions.push({ label: esicExempt ? `ESIC – NIL (Wages ₹${esicWages.toLocaleString('en-IN')} > ₹21,000)` : `ESIC – ${esicPct}% of Wages ₹${esicWages.toLocaleString('en-IN')} (≤ ₹21,000)`, amt: esicAmt });
+        if (gender === 'female' && grossPay <= 25000) {
+            deductions.push({ label: `PT – NIL (Female: gross ₹${grossPay.toLocaleString('en-IN')} ≤ ₹25,000)`, amt: 0 });
+        } else if (ptAmt > 0) {
+            deductions.push({ label: `PT – Gross ₹${grossPay.toLocaleString('en-IN')} > ₹${ptAmt===200?'15,000':'10,000'}`, amt: ptAmt });
+        }
+        deductions.push({ label: `TDS – ${Number(s.tdsMonthly) ? 'Monthly' : '1% of Gross ₹'+grossPay.toLocaleString('en-IN')+' (Auto)'}`, amt: tdsAmt });
 
         // Active loan EMI deductions
         (s.loans || []).forEach(l => {
             if (l.status === 'Active' && l.emi > 0) {
-                deductions.push({ label: `Loan EMI — ${l.remarks || l.loanID} (₹${Number(l.principal||0).toLocaleString('en-IN')} principal)`, amt: Number(l.emi) });
+                deductions.push({ label: `Loan EMI — ${l.remarks || l.loanID}`, amt: Number(l.emi) });
             }
         });
 
@@ -7481,7 +7498,7 @@
             <div style="background:linear-gradient(135deg,#0d9488,#059669);border-radius:12px;padding:14px 16px;display:flex;justify-content:space-between;align-items:center">
                 <div>
                     <div style="font-size:10px;color:rgba(255,255,255,.7)">Gross ${fmt(grossPay)} − Ded. ${fmt(totalDed)}</div>
-                    <div style="font-size:9px;color:rgba(255,255,255,.5);margin-top:2px">PF Basis: Basic+Fixed = ₹${pfBasis.toLocaleString('en-IN')} | ESIC/PT Basis: ₹${esicBasis.toLocaleString('en-IN')}</div>
+                    <div style="font-size:9px;color:rgba(255,255,255,.5);margin-top:2px">PF Basis: ₹${pfGross.toLocaleString('en-IN')} | ESIC/PT Basis: ₹${esicWages.toLocaleString('en-IN')}</div>
                 </div>
                 <div style="text-align:right">
                     <div style="font-size:10px;color:rgba(255,255,255,.7);font-weight:600">NET PAY</div>
