@@ -7423,6 +7423,13 @@
         if (ptAmt > 0) deductions.push({ label: `PT – Basic+Fixed ₹${pfBasis.toLocaleString('en-IN')} > ₹${ptAmt===200?'15,000':'10,000'}`, amt: ptAmt });
         deductions.push({ label: `TDS – 1% of Gross ₹${grossPay.toLocaleString('en-IN')} (Auto)`, amt: tdsAmt });
 
+        // Active loan EMI deductions
+        (s.loans || []).forEach(l => {
+            if (l.status === 'Active' && l.emi > 0) {
+                deductions.push({ label: `Loan EMI — ${l.remarks || l.loanID} (₹${Number(l.principal||0).toLocaleString('en-IN')} principal)`, amt: Number(l.emi) });
+            }
+        });
+
         const totalDed = deductions.reduce((s, d) => s + (Number(d.amt) || 0), 0);
         const netPay = Math.round((grossPay - totalDed) * 100) / 100;
 
