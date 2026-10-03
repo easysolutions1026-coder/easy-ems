@@ -7065,18 +7065,27 @@
     }
 
     async function _techSSRefresh() {
+        showToast('🔄 Refreshing…');
         try {
+            if (!_techSS || !_techSS.staffID || !_techSS.pin) {
+                showToast('❌ Session lost — please sign in again');
+                _techSSSignOut();
+                return;
+            }
             const res = await fetch(TECH_API + 'login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ staffID: _techSS.staffID, pin: _techSS.pin })
             });
-            if (!res.ok) throw new Error('Session expired');
+            if (!res.ok) throw new Error('Session expired (HTTP ' + res.status + ')');
             const data = await res.json();
             const staff = data.staff || data;
             _techSS.staffRec = staff;
+            _techSSMonthOffset = 0; // Reset to current month on refresh
             _techSSRenderDashboard();
+            showToast('✅ Data refreshed');
         } catch (e) {
+            console.error('[TechSS Refresh]', e);
             showToast('❌ ' + e.message);
         }
     }
