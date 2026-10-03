@@ -8165,7 +8165,7 @@
                     'HRA %','DA %','Grade Pay','Conveyance','Medical Allow.','Variable Allow.','PF %','TDS /month',
                     // Tech fields
                     'Tech Variable','Tech HRA %','Tech DA %','Tech GP %','Standby %','AL %',
-                    'Tech PF %','Tech ESIC %','Tech TDS',
+                    'Tech PF %','Tech ESIC %','Tech TDS','Tech Travel Allow',
                     'Recorded By','Recorded At']];
                 staff.forEach(s => {
                     (s.wageRevisions||[]).sort((a,b)=>a.effectiveDate>b.effectiveDate?-1:1).forEach(r => {
@@ -8183,7 +8183,7 @@
                             r.techHRAPct||'', r.techDAPct||'', r.techGPPct||'',
                             r.standbyPct||'', r.alPct||'',
                             r.techPFPct||'', r.techESICPct||'',
-                            parseFloat(r.techTDS||0),
+                            parseFloat(r.techTDS||0), parseFloat(r.techTravelAllow||0),
                             r.recordedBy||currentUser?.name||'', r.recordedAt||r.effectiveDate||''
                         ]);
                     });
@@ -30561,14 +30561,14 @@ Automated WFH alert — ${company} Attendance System.`;
 
         // ── WAGE REVISION ─────────────────────────────────────────────────────
         let _editWageRevID=null;
-        function onWagStaffChange(sid){const st=staff.find(x=>x.staffID===sid),isTech=st&&st.staffType==='Technician';document.getElementById('wagTechSection').classList.toggle('hidden',!isTech);document.getElementById('wagOfficeSection').classList.toggle('hidden',isTech||!st);if(st){const fv=(id,v)=>{const el=document.getElementById(id);if(el&&v!==undefined&&v!==null&&v!=='')el.value=v;};fv('wagBasic',st.basicSalary||'');if(isTech){fv('wagVariable',st.techVariable||'');fv('wagTechHRAPct',st.techHRAPct??50);fv('wagTechDAPct',st.techDAPct??65);fv('wagTechGPPct',st.techGPPct??30);fv('wagStandbyPct',st.standbyPct??50);fv('wagAlPct',st.alPct??50);fv('wagTechPFPct',st.techPFPct??12);fv('wagTechESICPct',st.techESICPct??0.75);fv('wagTechTDS',st.techTDS||'');}else{fv('wagHRAPct',st.hraPct??30);fv('wagDAPct',st.daPct??65);fv('wagGradePay',st.gradePay||'');fv('wagConveyance',st.conveyance||'');fv('wagMedical',st.medical||'');fv('wagOfficeVariable',st.variable||'');fv('wagPFPct',st.pfPct??12);fv('wagTDSMonthly',st.tdsMonthly||'');}}}
+        function onWagStaffChange(sid){const st=staff.find(x=>x.staffID===sid),isTech=st&&st.staffType==='Technician';document.getElementById('wagTechSection').classList.toggle('hidden',!isTech);document.getElementById('wagOfficeSection').classList.toggle('hidden',isTech||!st);if(st){const fv=(id,v)=>{const el=document.getElementById(id);if(el&&v!==undefined&&v!==null&&v!=='')el.value=v;};fv('wagBasic',st.basicSalary||'');if(isTech){fv('wagVariable',st.techVariable||'');fv('wagTechHRAPct',st.techHRAPct??50);fv('wagTechDAPct',st.techDAPct??65);fv('wagTechGPPct',st.techGPPct??30);fv('wagStandbyPct',st.standbyPct??50);fv('wagAlPct',st.alPct??50);fv('wagTechPFPct',st.techPFPct??12);fv('wagTechESICPct',st.techESICPct??0.75);fv('wagTechTDS',st.techTDS||'');fv('wagTechTravel',st.techTravelAllow||4000);}else{fv('wagHRAPct',st.hraPct??30);fv('wagDAPct',st.daPct??65);fv('wagGradePay',st.gradePay||'');fv('wagConveyance',st.conveyance||'');fv('wagMedical',st.medical||'');fv('wagOfficeVariable',st.variable||'');fv('wagPFPct',st.pfPct??12);fv('wagTDSMonthly',st.tdsMonthly||'');}}}
         function openWageModal(prefillSID,rev){
             _editWageRevID=rev?rev.revID:null;const titleEl=document.getElementById('wageModalTitle');if(titleEl)titleEl.textContent=rev?'Edit Wage Revision':'Add Wage Revision';
-            ['wagBasic','wagVariable','wagStandbyPct','wagAlPct','wagTechHRAPct','wagTechDAPct','wagTechGPPct','wagTechPFPct','wagTechESICPct','wagTechTDS','wagHRAPct','wagDAPct','wagGradePay','wagConveyance','wagMedical','wagOfficeVariable','wagPFPct','wagTDSMonthly','wagReason'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=''});
+            ['wagBasic','wagVariable','wagStandbyPct','wagAlPct','wagTechHRAPct','wagTechDAPct','wagTechGPPct','wagTechPFPct','wagTechESICPct','wagTechTDS','wagTechTravel','wagHRAPct','wagDAPct','wagGradePay','wagConveyance','wagMedical','wagOfficeVariable','wagPFPct','wagTDSMonthly','wagReason'].forEach(id=>{const el=document.getElementById(id);if(el)el.value=''});
             document.getElementById('wagDate').value=new Date().toISOString().split('T')[0];
             const sel=document.getElementById('wagStaff');sel.innerHTML=staff.map(s=>`<option value="${s.staffID}">${s.name} (${s.staffType||'Staff'})</option>`).join('');sel.disabled=!!rev;
             const targetID=prefillSID||(rev?rev.staffID:null)||(staff[0]?.staffID||'');if(targetID)sel.value=targetID;onWagStaffChange(sel.value);
-            if(rev){const fv=(id,v)=>{const el=document.getElementById(id);if(el&&v!=null)el.value=v;};fv('wagDate',rev.effectiveDate);fv('wagBasic',rev.basicSalary);fv('wagVariable',rev.techVariable);fv('wagReason',rev.reason);fv('wagStandbyPct',rev.standbyPct);fv('wagAlPct',rev.alPct);fv('wagTechHRAPct',rev.techHRAPct??50);fv('wagTechDAPct',rev.techDAPct??65);fv('wagTechGPPct',rev.techGPPct??30);fv('wagTechPFPct',rev.techPFPct??12);fv('wagTechESICPct',rev.techESICPct??0.75);fv('wagTechTDS',rev.techTDS);fv('wagHRAPct',rev.hraPct);fv('wagDAPct',rev.daPct);fv('wagGradePay',rev.gradePay);fv('wagConveyance',rev.conveyance);fv('wagMedical',rev.medical);fv('wagOfficeVariable',rev.variable);fv('wagPFPct',rev.pfPct);fv('wagTDSMonthly',rev.tdsMonthly);}
+            if(rev){const fv=(id,v)=>{const el=document.getElementById(id);if(el&&v!=null)el.value=v;};fv('wagDate',rev.effectiveDate);fv('wagBasic',rev.basicSalary);fv('wagVariable',rev.techVariable);fv('wagReason',rev.reason);fv('wagStandbyPct',rev.standbyPct);fv('wagAlPct',rev.alPct);fv('wagTechHRAPct',rev.techHRAPct??50);fv('wagTechDAPct',rev.techDAPct??65);fv('wagTechGPPct',rev.techGPPct??30);fv('wagTechPFPct',rev.techPFPct??12);fv('wagTechESICPct',rev.techESICPct??0.75);fv('wagTechTDS',rev.techTDS);fv('wagTechTravel',rev.techTravelAllow??4000);fv('wagHRAPct',rev.hraPct);fv('wagDAPct',rev.daPct);fv('wagGradePay',rev.gradePay);fv('wagConveyance',rev.conveyance);fv('wagMedical',rev.medical);fv('wagOfficeVariable',rev.variable);fv('wagPFPct',rev.pfPct);fv('wagTDSMonthly',rev.tdsMonthly);}
             document.getElementById('wageModal').classList.add('show');
             // Trigger the 26th-of-month validator so the hint reflects the
             // currently-loaded date (either today's date on Add, or the
@@ -30587,7 +30587,7 @@ Automated WFH alert — ${company} Attendance System.`;
             const revRecord={effectiveDate:newDate,reason:ps('wagReason'),basicSalary:pf('wagBasic'),techVariable:pf('wagVariable'),
                 standbyPct:pn('wagStandbyPct'),alPct:pn('wagAlPct'),
                 techHRAPct:pn('wagTechHRAPct'),techDAPct:pn('wagTechDAPct'),techGPPct:pn('wagTechGPPct'),
-                techPFPct:pn('wagTechPFPct'),techESICPct:pn('wagTechESICPct'),techTDS:pf('wagTechTDS'),
+                techPFPct:pn('wagTechPFPct'),techESICPct:pn('wagTechESICPct'),techTDS:pf('wagTechTDS'),techTravelAllow:pf('wagTechTravel'),
                 hraPct:pn('wagHRAPct'),daPct:pn('wagDAPct'),
                 gradePay:pn('wagGradePay'),conveyance:pn('wagConveyance'),
                 medical:pn('wagMedical'),variable:pn('wagOfficeVariable'),
@@ -30604,6 +30604,7 @@ Automated WFH alert — ${company} Attendance System.`;
                 sync('techHRAPct',revRecord.techHRAPct??50);sync('techDAPct',revRecord.techDAPct??65);sync('techGPPct',revRecord.techGPPct??30);
                 sync('techPFPct',revRecord.techPFPct??12);sync('techESICPct',revRecord.techESICPct??0.75);
                 if(revRecord.techTDS!==undefined)staff[idx].techTDS=revRecord.techTDS;
+                if(revRecord.techTravelAllow!==undefined)staff[idx].techTravelAllow=revRecord.techTravelAllow;
             } else{
                 sync('hraPct',revRecord.hraPct);sync('daPct',revRecord.daPct);
                 sync('gradePay',revRecord.gradePay);sync('conveyance',revRecord.conveyance);
@@ -30895,7 +30896,7 @@ Automated WFH alert — ${company} Attendance System.`;
 
             // ── Fixed amounts (basic-independent) ──
             const variable   = isTech ? (+g('techVariable') || 0) : (+g('variable') || 0);
-            const travel     = isTech ? 4000 : 0;      // travel default per calcTechWage
+            const travel     = isTech ? (+g('techTravelAllow') || 4000) : 0;
             const conveyance = !isTech ? (+g('conveyance') || 0) : 0;
             const medical    = !isTech ? (+g('medical')    || 0) : 0;
             const bonusMonthly = +(basic / 120).toFixed(2);  // Basic÷10 annual → ÷12 monthly
@@ -30978,6 +30979,7 @@ Automated WFH alert — ${company} Attendance System.`;
                 techVariable: +st.techVariable || 0,
                 techPFPct:   st.techPFPct  ?? 12,
                 techESICPct: st.techESICPct ?? 0.75,
+                techTravelAllow: +st.techTravelAllow || 4000,
                 hraPct:      st.hraPct ?? 30,
                 daPct:       st.daPct  ?? 65,
                 gradePay:    +st.gradePay || 0,
@@ -31039,6 +31041,7 @@ Automated WFH alert — ${company} Attendance System.`;
                             <div><label style="font-size:10px;font-weight:600;color:#64748b">DA %</label><input type="number" step="0.01" value="${window._ctcProposed.techDAPct}" oninput="_ctcSet('techDAPct',this.value)" style="width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px"/></div>
                             <div><label style="font-size:10px;font-weight:600;color:#64748b">Grade Pay %</label><input type="number" step="0.01" value="${window._ctcProposed.techGPPct}" oninput="_ctcSet('techGPPct',this.value)" style="width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px"/></div>
                             <div><label style="font-size:10px;font-weight:600;color:#64748b">Variable ₹</label><input type="number" step="0.01" value="${window._ctcProposed.techVariable}" oninput="_ctcSet('techVariable',this.value)" style="width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px"/></div>
+                            <div><label style="font-size:10px;font-weight:600;color:#64748b">Travel ₹</label><input type="number" step="1" value="${window._ctcProposed.techTravelAllow}" oninput="_ctcSet('techTravelAllow',this.value)" style="width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px"/></div>
                             <div><label style="font-size:10px;font-weight:600;color:#64748b">PF %</label><input type="number" step="0.01" value="${window._ctcProposed.techPFPct}" oninput="_ctcSet('techPFPct',this.value)" style="width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px"/></div>
                             <div><label style="font-size:10px;font-weight:600;color:#64748b">ESIC %</label><input type="number" step="0.01" value="${window._ctcProposed.techESICPct}" oninput="_ctcSet('techESICPct',this.value)" style="width:100%;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px"/></div>
                         ` : `
@@ -48281,6 +48284,7 @@ Automated WFH alert — ${company} Attendance System.`;
                         <div><label class="block text-xs font-semibold text-gray-600 mb-1">PF %</label><input type="number" id="wagTechPFPct" placeholder="12" min="0" max="30" step="0.01" class="w-full px-3 py-2 border rounded-lg text-sm bg-white"/></div>
                         <div><label class="block text-xs font-semibold text-gray-600 mb-1">ESIC %</label><input type="number" id="wagTechESICPct" placeholder="0.75" min="0" max="5" step="0.01" class="w-full px-3 py-2 border rounded-lg text-sm bg-white"/></div>
                         <div><label class="block text-xs font-semibold text-gray-600 mb-1">TDS /month</label><input type="number" id="wagTechTDS" placeholder="0.00" min="0" step="0.01" class="w-full px-3 py-2 border rounded-lg text-sm bg-white"/></div>
+                        <div><label class="block text-xs font-semibold text-gray-600 mb-1">Travel Allowance (₹/mo)</label><input type="number" id="wagTechTravel" placeholder="4000" min="0" step="1" class="w-full px-3 py-2 border rounded-lg text-sm bg-white"/></div>
                     </div>
                 </div>
                 <div id="wagOfficeSection" class="hidden bg-purple-50 border border-purple-200 rounded-xl p-4">
