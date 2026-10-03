@@ -22989,8 +22989,11 @@
                             <div><label class="block text-xs font-semibold text-gray-600 mb-1">Mobile</label>
                                 <input type="text" id="sMobile" class="w-full px-3 py-2 border rounded-lg text-sm"/></div>
                             <div><label class="block text-xs font-semibold text-gray-600 mb-1">🔐 Self-Service PIN <span class="text-gray-400 font-normal">(4-digit)</span></label>
-                                <input type="text" id="sPin" maxlength="4" inputmode="numeric" pattern="[0-9]{4}" placeholder="e.g. 1234" class="w-full px-3 py-2 border rounded-lg text-sm tracking-widest"/>
-                                <p class="text-[10px] text-gray-400 mt-0.5">Used for Technician Self-Service login (daily readiness, leave, attendance view)</p></div>
+                                <div style="position:relative">
+                                    <input type="password" id="sPin" maxlength="4" inputmode="numeric" pattern="[0-9]{4}" placeholder="e.g. 1234" class="w-full px-3 py-2 border rounded-lg text-sm tracking-widest" onfocus="this.type='text'" onblur="this.type='password'"/>
+                                    <span onclick="const p=document.getElementById('sPin');p.type=p.type==='password'?'text':'password'" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:14px;user-select:none" title="Show/Hide PIN">👁️</span>
+                                </div>
+                                <p class="text-[10px] text-gray-400 mt-0.5">Used for Self-Service login (daily readiness, leave, attendance view)</p></div>
                             <div><label class="block text-xs font-semibold text-gray-600 mb-1">Email</label>
                                 <input type="email" id="sEmail" class="w-full px-3 py-2 border rounded-lg text-sm"/></div>
                             <div><label class="block text-xs font-semibold text-gray-600 mb-1">Basic Salary (₹)</label>
@@ -26676,7 +26679,9 @@ ${'─'.repeat(50)}
                 document.getElementById('sGender').value = s.gender||'Male';
                 document.getElementById('sDOJ').value        = s.doj||'';
                 document.getElementById('sMobile').value     = s.mobile||'';
-                document.getElementById('sPin').value        = s.pin||'';
+                const _pinEl = document.getElementById('sPin');
+                _pinEl.value        = s.pin||'';
+                _pinEl.type         = 'password'; // masked by default in view mode
                 document.getElementById('sEmail').value      = s.email||'';
                 // Employee Code
                 const empCodeEl = document.getElementById('sEmpCode');
