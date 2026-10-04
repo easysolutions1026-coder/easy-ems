@@ -8432,7 +8432,7 @@
                             ${_canAccess('docs')?`<button onclick="switchView('docs')" class="px-3 py-2 rounded-lg whitespace-nowrap ${currentView === 'docs' ? 'bg-purple-100 text-purple-700' : 'text-gray-600 hover:bg-gray-100'}" title="Company documents, certificates, insurance policies">📄 Documents${(()=>{const c=_countDocsExpiringOrExpired();return c>0?` <span class="ml-1 px-1.5 py-0.5 bg-red-500 text-white rounded-full text-xs font-bold" title="${c} document(s) need attention">${c}</span>`:'';})()}</button>`:''}
                             ${_canAccess('docs')?`<button onclick="switchView('letters')" class="px-3 py-2 rounded-lg whitespace-nowrap ${currentView === 'letters' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}" title="Cover letters for invoices, Returnable Tools letters for site trips">✉️ Letters</button>`:''}
                             ${_canAccess('worklogs')?`<button onclick="switchView('worklogs')" class="px-3 py-2 rounded-lg whitespace-nowrap ${currentView === 'worklogs' ? 'bg-purple-100 text-purple-700' : 'text-gray-600 hover:bg-gray-100'}" title="Read-only view of project work logs added by field technicians">📋 Project Work Logs</button>`:''}
-                            ${_canAccess('worklogs')?`<button onclick="switchView('ghg')" class="px-3 py-2 rounded-lg whitespace-nowrap ${currentView === 'ghg' ? 'bg-green-100 text-green-700' : 'text-gray-600 hover:bg-gray-100'}" title="GHG Emission Monitoring">🌍 GHG</button>`:''}
+                            ${_canAccess('ghg')?`<button onclick="switchView('ghg')" class="px-3 py-2 rounded-lg whitespace-nowrap ${currentView === 'ghg' ? 'bg-green-100 text-green-700' : 'text-gray-600 hover:bg-gray-100'}" title="GHG Emission Monitoring">🌍 GHG</button>`:''}
                             ${_canAccess('alerts')?`<button onclick="switchView('alerts')" class="px-3 py-2 rounded-lg whitespace-nowrap ${currentView === 'alerts' ? 'bg-amber-100 text-amber-700' : 'text-gray-600 hover:bg-gray-100'}" title="Send alerts to field technicians and track responses">🔔 Alerts${(()=>{const p=(window._alertsList||[]).filter(a=>a.status==='active'&&(a.recipients||[]).some(r=>r.response==='sent')).length;return p>0?` <span class="ml-1 px-1.5 py-0.5 bg-amber-500 text-white rounded-full text-xs font-bold">${p}</span>`:'';})()}</button>`:''}
                             ${_canAccess('settings')||!_bmsSession?`<button onclick="switchView('settings')" class="px-3 py-2 rounded-lg whitespace-nowrap ${currentView === 'settings' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}">Settings</button>`:''}
                         </div>
@@ -8517,7 +8517,7 @@
                     ${_canAccess('docs')?`<button onclick="switchView('docs');_mobileCloseMore()" class="${currentView==='docs'?'mb-active':''}">📄 Documents</button>`:''}
                     ${_canAccess('docs')?`<button onclick="switchView('letters');_mobileCloseMore()" class="${currentView==='letters'?'mb-active':''}">✉️ Letters</button>`:''}
                     ${_canAccess('worklogs')?`<button onclick="switchView('worklogs');_mobileCloseMore()" class="${currentView==='worklogs'?'mb-active':''}">📋 Work Logs</button>`:''}
-                    ${_canAccess('worklogs')?`<button onclick="switchView('ghg');_mobileCloseMore()" class="${currentView==='ghg'?'mb-active':''}">🌍 GHG</button>`:''}
+                    ${_canAccess('ghg')?`<button onclick="switchView('ghg');_mobileCloseMore()" class="${currentView==='ghg'?'mb-active':''}">🌍 GHG</button>`:''}
                     ${_canAccess('alerts')?`<button onclick="switchView('alerts');_mobileCloseMore()" class="${currentView==='alerts'?'mb-active':''}">🔔 Alerts</button>`:''}
                     ${_canAccess('settings')||!_bmsSession?`<button onclick="switchView('settings');_mobileCloseMore()" class="${currentView==='settings'?'mb-active':''}">⚙️ Settings</button>`:''}
                 </div>
@@ -8561,6 +8561,7 @@
             parties:       'Parties',
             mis:           'MIS',
             worklogs:      'Project Work Logs',
+            ghg:           'GHG Emissions',
             settings:      'Settings'
         };
 
@@ -8668,6 +8669,7 @@
             { view:'docs',         label:'Documents' },
             { view:'letters',      label:'Letters' },
             { view:'worklogs',     label:'Project Work Logs' },
+            { view:'ghg',          label:'GHG Emissions' },
             { view:'alerts',       label:'Alerts (send/track)' },
             { view:'settings',     label:'Settings' },
             { view:'auditlog',     label:'Audit Log' },
@@ -8696,10 +8698,10 @@
             // own entries — neither of which fits the maker-checker rule.
             // Existing installs with custom rolePermissions saved to
             // settings won't auto-update; re-set from Settings if needed.
-            'Accounts': ['dashboard','transactions','ar','expenses','projexp','payreq','direxp','pettycash','bank','tax','tax.verify','mis','parties','docs','worklogs','alerts','auditlog','settings'],
-            'HR':       ['dashboard','staff','staff.list','staff.attendance','staff.documents','staff.payslip','mis','docs','worklogs','alerts','auditlog'],
+            'Accounts': ['dashboard','transactions','ar','expenses','projexp','payreq','direxp','pettycash','bank','tax','tax.verify','mis','parties','docs','worklogs','ghg','alerts','auditlog','settings'],
+            'HR':       ['dashboard','staff','staff.list','staff.attendance','staff.documents','staff.payslip','mis','docs','worklogs','ghg','alerts','auditlog'],
             'Field':    ['dashboard','docs','worklogs','alerts','auditlog'],
-            'View Only':['dashboard','transactions','ar','expenses','projexp','funds','payreq','direxp','pettycash','bank','tax','tax.certify','mis','staff','staff.list','staff.attendance','staff.documents','staff.payslip','parties','docs','worklogs','auditlog'],
+            'View Only':['dashboard','transactions','ar','expenses','projexp','funds','payreq','direxp','pettycash','bank','tax','tax.certify','mis','staff','staff.list','staff.attendance','staff.documents','staff.payslip','parties','docs','worklogs','ghg','auditlog'],
             'CA':       ['dashboard','transactions','ar','expenses','projexp','payreq','direxp','pettycash','bank','tax','tax.certify','mis','parties','docs','worklogs','auditlog']
         };
 
