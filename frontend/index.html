@@ -37295,7 +37295,7 @@ Automated WFH alert — ${company} Attendance System.`;
 
             const d = existing || {
                 month: _ghgOfficeMonthKey(defY, defM),
-                chennai_kwh: '', mumbai_kwh: '',
+                mumbai_kwh: '',
                 water_kl: '', paper_reams: '',
                 generator_litres: '',
                 notes: ''
@@ -37313,15 +37313,9 @@ Automated WFH alert — ${company} Attendance System.`;
 
                         <div style="background:#ecfdf5;border:1px solid #bbf7d0;border-radius:10px;padding:12px;margin-bottom:12px">
                             <p style="font-size:12px;font-weight:700;color:#065f46;margin:0 0 8px">⚡ Electricity (from EB bill)</p>
-                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-                                <div>
-                                    <label style="font-size:10px;font-weight:600;color:#065f46">Chennai Office (kWh)</label>
-                                    <input type="number" id="ghgOM_chennai_kwh" value="${d.chennai_kwh}" min="0" step="1" class="field-input" style="font-size:13px" placeholder="e.g. 450"/>
-                                </div>
-                                <div>
-                                    <label style="font-size:10px;font-weight:600;color:#065f46">Mumbai Office (kWh)</label>
-                                    <input type="number" id="ghgOM_mumbai_kwh" value="${d.mumbai_kwh}" min="0" step="1" class="field-input" style="font-size:13px" placeholder="e.g. 320"/>
-                                </div>
+                            <div>
+                                <label style="font-size:10px;font-weight:600;color:#065f46">Mumbai Office (kWh)</label>
+                                <input type="number" id="ghgOM_mumbai_kwh" value="${d.mumbai_kwh}" min="0" step="1" class="field-input" style="font-size:13px" placeholder="e.g. 320"/>
                             </div>
                             <p style="font-size:9px;color:#6b7280;margin:4px 0 0">EF: ${_GHG_OFFICE_EF.electricity_kwh} kgCO₂e/kWh (CEA India 2023)</p>
                         </div>
@@ -37375,7 +37369,7 @@ Automated WFH alert — ${company} Attendance System.`;
             const month = document.getElementById('ghgOM_month').value;
             const entry = {
                 month,
-                chennai_kwh:      parseFloat(document.getElementById('ghgOM_chennai_kwh').value) || 0,
+                
                 mumbai_kwh:       parseFloat(document.getElementById('ghgOM_mumbai_kwh').value) || 0,
                 water_kl:         parseFloat(document.getElementById('ghgOM_water_kl').value) || 0,
                 paper_reams:      parseFloat(document.getElementById('ghgOM_paper_reams').value) || 0,
@@ -37384,7 +37378,7 @@ Automated WFH alert — ${company} Attendance System.`;
                 updatedAt:        new Date().toISOString()
             };
             // Compute emissions
-            entry.elec_emission = +((entry.chennai_kwh + entry.mumbai_kwh) * _GHG_OFFICE_EF.electricity_kwh).toFixed(2);
+            entry.elec_emission = +((entry.mumbai_kwh) * _GHG_OFFICE_EF.electricity_kwh).toFixed(2);
             entry.water_emission = +(entry.water_kl * _GHG_OFFICE_EF.water_kl).toFixed(2);
             entry.paper_emission = +(entry.paper_reams * _GHG_OFFICE_EF.paper_ream).toFixed(2);
             entry.generator_emission = +(entry.generator_litres * _GHG_OFFICE_EF.generator_diesel_litre).toFixed(2);
@@ -37477,7 +37471,7 @@ Automated WFH alert — ${company} Attendance System.`;
                                     const mLabel = new Date(e.month+'-15').toLocaleDateString('en-IN',{month:'short',year:'numeric'});
                                     return `<tr style="border-bottom:1px solid #f3f4f6;${i%2?'background:#f9fafb':''}">
                                         <td style="padding:6px 8px;font-weight:600">${mLabel}</td>
-                                        <td style="padding:6px 8px;text-align:right;color:#6b7280">${(e.chennai_kwh||0)+(e.mumbai_kwh||0)}</td>
+                                        <td style="padding:6px 8px;text-align:right;color:#6b7280">${(e.mumbai_kwh||0)}</td>
                                         <td style="padding:6px 8px;text-align:right;color:#059669;font-weight:500">${fmtKg(e.elec_emission||0)}</td>
                                         <td style="padding:6px 8px;text-align:right;color:#6b7280">${e.water_kl||0}</td>
                                         <td style="padding:6px 8px;text-align:right;color:#0ea5e9;font-weight:500">${fmtKg(e.water_emission||0)}</td>
@@ -37496,7 +37490,7 @@ Automated WFH alert — ${company} Attendance System.`;
                             <tfoot>
                                 <tr style="background:#065f46;color:#fff;font-weight:700">
                                     <td style="padding:6px 8px;border-radius:0 0 0 6px">TOTAL</td>
-                                    <td style="padding:6px 8px;text-align:right">${filtered.reduce((s,e)=>s+(e.chennai_kwh||0)+(e.mumbai_kwh||0),0)}</td>
+                                    <td style="padding:6px 8px;text-align:right">${filtered.reduce((s,e)=>s+(e.mumbai_kwh||0),0)}</td>
                                     <td style="padding:6px 8px;text-align:right">${fmtKg(totElec)}</td>
                                     <td style="padding:6px 8px;text-align:right">${filtered.reduce((s,e)=>s+(e.water_kl||0),0)}</td>
                                     <td style="padding:6px 8px;text-align:right">${fmtKg(totWater)}</td>
