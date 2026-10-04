@@ -37305,11 +37305,14 @@ Automated WFH alert — ${company} Attendance System.`;
             <div id="ghgOfficeModal" style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px">
                 <div style="background:#fff;border-radius:16px;max-width:500px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
                     <div style="background:linear-gradient(135deg,#065f46,#059669);padding:16px 20px;border-radius:16px 16px 0 0;display:flex;justify-content:space-between;align-items:center">
-                        <span style="color:#fff;font-weight:700;font-size:15px">🏢 Office Emissions — ${new Date(defY, defM-1).toLocaleDateString('en-IN',{month:'long',year:'numeric'})}</span>
+                        <span style="color:#fff;font-weight:700;font-size:15px">🏢 Office Emissions — Monthly Entry</span>
                         <button onclick="document.getElementById('ghgOfficeModal').remove()" style="background:none;border:none;color:#fff;font-size:22px;cursor:pointer">✕</button>
                     </div>
                     <div style="padding:20px">
-                        <input type="hidden" id="ghgOM_month" value="${d.month}"/>
+                        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:12px;margin-bottom:12px">
+                            <label style="font-size:11px;font-weight:600;color:#065f46">📅 Month</label>
+                            <input type="month" id="ghgOM_month" value="${d.month}" class="field-input" style="font-size:14px;font-weight:600"/>
+                        </div>
 
                         <div style="background:#ecfdf5;border:1px solid #bbf7d0;border-radius:10px;padding:12px;margin-bottom:12px">
                             <p style="font-size:12px;font-weight:700;color:#065f46;margin:0 0 8px">⚡ Electricity (from EB bill)</p>
@@ -37682,6 +37685,7 @@ Automated WFH alert — ${company} Attendance System.`;
                 <div style="background:#fff;border-radius:14px;padding:16px;border:1px solid #e5e7eb">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
                         <h3 style="font-size:14px;font-weight:700;color:#1e1b4b;margin:0">🏗️ Project Carbon Footprint</h3>
+                        <button onclick="_ghgExportPDF()" style="padding:6px 14px;border-radius:8px;background:#1e3a5f;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:600">📄 PDF Report</button>
                         <button onclick="_ghgExportCSV()" style="padding:6px 14px;border-radius:8px;background:#065f46;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:600">📥 Export CSV</button>
                     </div>
                     <div style="overflow-x:auto">
@@ -37747,6 +37751,175 @@ Automated WFH alert — ${company} Attendance System.`;
             a.download = 'IMSE_GHG_Emissions_' + new Date().toISOString().split('T')[0] + '.csv';
             a.click();
             _showToast('✅ GHG emissions exported to CSV','#16a34a');
+        }
+
+        async function _ghgExportPDF() {
+            _showToast('⏳ Generating GHG Report PDF…', '#065f46', 5000);
+            // Ensure jsPDF is loaded
+            if (!window.jspdf) {
+                await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
+                await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
+            }
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({orientation:'landscape',unit:'mm',format:'a4'});
+            const PW = doc.internal.pageSize.width;
+            const PH = doc.internal.pageSize.height;
+            const ML = 12, MR = 12, CW = PW - ML - MR;
+
+            // ── Compute data (same as dashboard) ──
+            const wls = workLogs || [];
+            const allProjects = wls.map(w => _ghgCalcProject(w));
+            const now = new Date();
+            const fy = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+            const filterYear = window._ghgFilterYear || 'fy';
+            let filtered = allProjects, periodLabel = '';
+            if (filterYear === 'fy') {
+                filtered = allProjects.filter(p => p.startDate >= `${fy}-04-01` && p.startDate <= `${fy+1}-03-31`);
+                periodLabel = `FY ${fy}-${String(fy+1).slice(2)}`;
+            } else if (filterYear === 'cy') {
+                filtered = allProjects.filter(p => p.startDate >= `${now.getFullYear()}-01-01` && p.startDate <= `${now.getFullYear()}-12-31`);
+                periodLabel = `CY ${now.getFullYear()}`;
+            } else { periodLabel = 'All Time'; }
+            filtered.sort((a,b) => b.totalEmission - a.totalEmission);
+
+            const totalTravel = filtered.reduce((s,p) => s + p.travelEmission, 0);
+            const totalLocal = filtered.reduce((s,p) => s + p.localTransportEmission, 0);
+            const totalAccom = filtered.reduce((s,p) => s + p.accommodationEmission, 0);
+            const totalProjEmission = filtered.reduce((s,p) => s + p.totalEmission, 0);
+
+            const officeData = _ghgRenderOfficeSection();
+            const grandTotal = +(totalProjEmission + officeData.totOffice).toFixed(2);
+            const scope1 = officeData.totGen;
+            const scope2 = officeData.totElec;
+            const scope3 = +(totalTravel + totalLocal + totalAccom + officeData.totWater + officeData.totPaper).toFixed(2);
+
+            // ── Header ──
+            const logoData = settings?.logoData || '';
+            if (logoData) { try { doc.addImage(logoData, 'PNG', ML, 6, 20, 16); } catch (e) {} }
+            const logoOff = logoData ? 24 : 0;
+            doc.setFontSize(14); doc.setFont('helvetica','bold'); doc.setTextColor(6,95,70);
+            doc.text('IMSE TECH - SERVICES PVT LTD', ML + logoOff, 12);
+            doc.setFontSize(9); doc.setFont('helvetica','normal'); doc.setTextColor(80,80,80);
+            doc.text('GHG Emission Monitoring Report', ML + logoOff, 17);
+            doc.text('Period: ' + periodLabel + '  |  Generated: ' + now.toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}), ML + logoOff, 22);
+            doc.setDrawColor(6,95,70); doc.setLineWidth(0.6); doc.line(ML, 26, PW-MR, 26);
+
+            // ── Summary Box ──
+            let y = 30;
+            const fmt = v => v >= 1000 ? (v/1000).toFixed(2) + ' tCO2e' : v.toFixed(1) + ' kgCO2e';
+            doc.setFillColor(240,253,244); doc.roundedRect(ML, y, CW, 20, 3, 3, 'F');
+            doc.setFontSize(10); doc.setFont('helvetica','bold'); doc.setTextColor(6,95,70);
+            doc.text('TOTAL CARBON FOOTPRINT: ' + fmt(grandTotal), ML + 6, y + 8);
+            doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.setTextColor(60,60,60);
+            doc.text('Projects: ' + fmt(totalProjEmission) + '  |  Office: ' + fmt(officeData.totOffice), ML + 6, y + 13);
+            doc.text('Scope 1 (Generator): ' + fmt(scope1) + '  |  Scope 2 (Electricity): ' + fmt(scope2) + '  |  Scope 3 (Travel+Other): ' + fmt(scope3), ML + 6, y + 17);
+            y += 24;
+
+            // ── Project Emissions Table ──
+            doc.setFontSize(11); doc.setFont('helvetica','bold'); doc.setTextColor(6,95,70);
+            doc.text('Project Carbon Footprint (' + filtered.length + ' projects)', ML, y + 4); y += 7;
+
+            doc.autoTable({
+                startY: y, margin:{left:ML,right:MR}, theme:'grid',
+                styles:{fontSize:7.5,cellPadding:2,valign:'middle',textColor:[0,0,0]},
+                headStyles:{fillColor:[6,95,70],textColor:[255,255,255],fontStyle:'bold',fontSize:8,halign:'center'},
+                head:[[
+                    {content:'Project',styles:{halign:'left',cellWidth:60}},
+                    {content:'Location',styles:{cellWidth:35}},
+                    'Techs','Days','Dist(km)','Mode',
+                    {content:'Travel\nkgCO2e',styles:{halign:'right'}},
+                    {content:'Local\nkgCO2e',styles:{halign:'right'}},
+                    {content:'Hotel\nkgCO2e',styles:{halign:'right'}},
+                    {content:'TOTAL\nkgCO2e',styles:{halign:'right',cellWidth:22}}
+                ]],
+                body: filtered.map(p => [
+                    {content:(p.ref?p.ref+' - ':'')+p.project,styles:{halign:'left'}},
+                    p.location||'--',
+                    {content:String(p.techCount),styles:{halign:'center'}},
+                    {content:String(p.totalDays),styles:{halign:'center'}},
+                    {content:p.distanceKm.toLocaleString('en-IN'),styles:{halign:'center'}},
+                    {content:p.travelMode,styles:{halign:'center'}},
+                    {content:p.travelEmission.toFixed(1),styles:{halign:'right'}},
+                    {content:p.localTransportEmission.toFixed(1),styles:{halign:'right'}},
+                    {content:p.accommodationEmission.toFixed(1),styles:{halign:'right'}},
+                    {content:p.totalEmission.toFixed(1),styles:{halign:'right',fontStyle:'bold'}}
+                ]),
+                foot: [[
+                    {content:'TOTAL (' + filtered.length + ' projects)',colSpan:6,styles:{halign:'left',fontStyle:'bold',fillColor:[6,95,70],textColor:[255,255,255]}},
+                    {content:totalTravel.toFixed(1),styles:{halign:'right',fontStyle:'bold',fillColor:[6,95,70],textColor:[255,255,255]}},
+                    {content:totalLocal.toFixed(1),styles:{halign:'right',fontStyle:'bold',fillColor:[6,95,70],textColor:[255,255,255]}},
+                    {content:totalAccom.toFixed(1),styles:{halign:'right',fontStyle:'bold',fillColor:[6,95,70],textColor:[255,255,255]}},
+                    {content:totalProjEmission.toFixed(1),styles:{halign:'right',fontStyle:'bold',fillColor:[6,95,70],textColor:[255,255,255]}}
+                ]]
+            });
+            y = doc.lastAutoTable.finalY + 8;
+
+            // ── Office Emissions Table ──
+            const offRows = officeData.filtered || [];
+            if (offRows.length) {
+                if (y > PH - 60) { doc.addPage(); y = 15; }
+                doc.setFontSize(11); doc.setFont('helvetica','bold'); doc.setTextColor(6,95,70);
+                doc.text('Office Emissions (' + offRows.length + ' months)', ML, y + 4); y += 7;
+                doc.autoTable({
+                    startY: y, margin:{left:ML,right:MR}, theme:'grid',
+                    styles:{fontSize:8,cellPadding:2.5,valign:'middle',textColor:[0,0,0]},
+                    headStyles:{fillColor:[6,95,70],textColor:[255,255,255],fontStyle:'bold',halign:'center'},
+                    head:[['Month','Elec (kWh)','Elec kgCO2e','Water (kL)','Water kgCO2e','Paper (reams)','Paper kgCO2e','DG (L)','DG kgCO2e','TOTAL kgCO2e']],
+                    body: offRows.map(e => {
+                        const mLabel = new Date(e.month+'-15').toLocaleDateString('en-IN',{month:'short',year:'numeric'});
+                        return [
+                            mLabel,
+                            {content:String((e.mumbai_kwh||0)),styles:{halign:'right'}},
+                            {content:(e.elec_emission||0).toFixed(1),styles:{halign:'right'}},
+                            {content:String(e.water_kl||0),styles:{halign:'right'}},
+                            {content:(e.water_emission||0).toFixed(1),styles:{halign:'right'}},
+                            {content:String(e.paper_reams||0),styles:{halign:'right'}},
+                            {content:(e.paper_emission||0).toFixed(1),styles:{halign:'right'}},
+                            {content:String(e.generator_litres||0),styles:{halign:'right'}},
+                            {content:(e.generator_emission||0).toFixed(1),styles:{halign:'right'}},
+                            {content:(e.total_emission||0).toFixed(1),styles:{halign:'right',fontStyle:'bold'}}
+                        ];
+                    }),
+                    foot:[[
+                        {content:'TOTAL',styles:{fontStyle:'bold',fillColor:[6,95,70],textColor:[255,255,255]}},
+                        {content:String(offRows.reduce((s,e)=>s+(e.mumbai_kwh||0),0)),styles:{halign:'right',fillColor:[6,95,70],textColor:[255,255,255]}},
+                        {content:officeData.totElec.toFixed(1),styles:{halign:'right',fillColor:[6,95,70],textColor:[255,255,255]}},
+                        {content:String(offRows.reduce((s,e)=>s+(e.water_kl||0),0)),styles:{halign:'right',fillColor:[6,95,70],textColor:[255,255,255]}},
+                        {content:officeData.totWater.toFixed(1),styles:{halign:'right',fillColor:[6,95,70],textColor:[255,255,255]}},
+                        {content:String(offRows.reduce((s,e)=>s+(e.paper_reams||0),0)),styles:{halign:'right',fillColor:[6,95,70],textColor:[255,255,255]}},
+                        {content:officeData.totPaper.toFixed(1),styles:{halign:'right',fillColor:[6,95,70],textColor:[255,255,255]}},
+                        {content:String(offRows.reduce((s,e)=>s+(e.generator_litres||0),0)),styles:{halign:'right',fillColor:[6,95,70],textColor:[255,255,255]}},
+                        {content:officeData.totGen.toFixed(1),styles:{halign:'right',fillColor:[6,95,70],textColor:[255,255,255]}},
+                        {content:officeData.totOffice.toFixed(1),styles:{halign:'right',fontStyle:'bold',fillColor:[6,95,70],textColor:[255,255,255]}}
+                    ]]
+                });
+                y = doc.lastAutoTable.finalY + 8;
+            }
+
+            // ── Emission Factors Reference ──
+            if (y > PH - 40) { doc.addPage(); y = 15; }
+            doc.setFontSize(9); doc.setFont('helvetica','bold'); doc.setTextColor(80,80,80);
+            doc.text('Emission Factors Reference:', ML, y + 3); y += 6;
+            doc.setFontSize(7); doc.setFont('helvetica','normal');
+            const refs = [
+                'Flight: ' + _GHG_EF.flight_domestic + ' kgCO2e/pkm (DEFRA 2024)',
+                'Train: ' + _GHG_EF.train + ' kgCO2e/pkm (Indian Railways/CEA)',
+                'Bus: ' + _GHG_EF.bus + ' kgCO2e/pkm (DEFRA 2024)',
+                'Taxi: ' + _GHG_EF.taxi + ' kgCO2e/vkm (DEFRA 2024)',
+                'Diesel: ' + _GHG_EF.diesel_litre + ' kgCO2e/L (DEFRA 2024)',
+                'Hotel: ' + _GHG_EF.hotel_india + ' kgCO2e/night (DEFRA 2024)',
+                'Electricity: ' + _GHG_OFFICE_EF.electricity_kwh + ' kgCO2e/kWh (CEA India 2023)',
+                'Water: ' + _GHG_OFFICE_EF.water_kl + ' kgCO2e/kL (DEFRA 2024)',
+                'Paper: ' + _GHG_OFFICE_EF.paper_ream + ' kgCO2e/ream (DEFRA 2024)',
+            ];
+            doc.text(refs.join('  |  '), ML, y + 3, {maxWidth: CW});
+            y += 10;
+            doc.setFontSize(7); doc.setTextColor(150,150,150);
+            doc.text('Travel mode auto-selected: >2000km = Flight, 500-2000km = Train, <500km = Bus/Taxi  |  Distance estimates from Chennai base', ML, y);
+            doc.text('Generated by IMSE Easy EMS — GHG Emission Monitoring Module', PW - MR, PH - 6, {align:'right'});
+
+            doc.save('IMSE_GHG_Report_' + periodLabel.replace(/\s+/g,'_') + '_' + now.toISOString().split('T')[0] + '.pdf');
+            _showToast('✅ GHG Report PDF downloaded', '#16a34a');
         }
 
         function renderAlerts(content) {
