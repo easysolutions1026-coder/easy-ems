@@ -6312,14 +6312,17 @@
     async function _syncWorkLogToCloudSQL(wlID) {
         try {
             const wl = workLogs.find(x => x.wlID === wlID);
-            if (!wl) return;
+            if (!wl || !accessToken) return;
             const res = await fetch('/api/data/workLogs', {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + accessToken
+                },
                 body: JSON.stringify(workLogs)
             });
             if (res.ok) console.log('[CloudSQL] workLogs synced (attachment update)');
-            else console.warn('[CloudSQL] workLogs sync failed:', res.status);
+            else console.warn('[CloudSQL] workLogs sync failed:', res.status, await res.text().catch(()=>''));
         } catch (e) { console.warn('[CloudSQL] workLogs sync error:', e.message); }
     }
 
