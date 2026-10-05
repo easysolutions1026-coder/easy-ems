@@ -588,3 +588,39 @@ model ReturnableToolsLetter {
   @@index([status])
   @@index([projectID])
 }
+
+//ALERTS
+
+model Alert {
+  id          String   @id @default(cuid())
+  alertID     String   @unique           // e.g. ALR1696012345678
+  type        String                      // newProject, jobAssigned, fundUpdate, urgentSafety, announcement
+  title       String
+  message     String
+  broadcast   Boolean  @default(false)
+  projectRef  String?                     // optional link to project ID
+  createdBy   String                      // office user email
+  createdByName String                    // office user display name
+  data        Json     @default("{}")     // flexible JSONB for type-specific fields
+  status      String   @default("active") // active, closed, cancelled
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  recipients  AlertRecipient[]
+}
+
+model AlertRecipient {
+  id          String   @id @default(cuid())
+  alertId     String
+  staffID     String
+  staffName   String
+  response    String   @default("sent")   // sent, confirmed, declined, not-available, acknowledged
+  respondedAt DateTime?
+  remarks     String?                     // technician can add a note
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  alert       Alert    @relation(fields: [alertId], references: [id], onDelete: Cascade)
+
+  @@unique([alertId, staffID])            // one response per technician per alert
+}
