@@ -7,145 +7,6 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="https://apis.google.com/js/api.js"></script>
-    
-    <!-- CLOUD_RUN_FIELD_GATE_START -->
-    <!-- Cloud Run: route field app's data reads/writes to Cloud SQL.
-         The 5 known data fileIds (projectExpenses, workLogs, staff, fundRequests,
-         fundPools) are intercepted at the fetch layer. Attachment operations
-         (photos in Drive) pass through untouched. -->
-    <script>
-    (function() {
-      window.__CLOUD_RUN_FIELD__ = true;
-
-      // Must match SHARED_FILE_IDS values in field app
-      var FILEID_TO_COLLECTION = {
-        '1OwJc4CdczowDWeHpCtSmfR0pYqhS49s0': 'projectExpenses',
-        '1P1sZh77q7w33eY2B9P20sYpT92Cb1FuK': 'workLogs',
-        '1JFS8ZZNkCXx8sIx6ssZzCbtbciRUrK3v': 'staff',
-        '1HMZBIrE59L6ZpXBa-94uWPaK2S2GG3N7': 'fundRequests',
-        '1x1NniCFB4hba29FxsO9b5rmKoMHE3J8s': 'fundPools'
-      };
-
-      function getToken() {
-        try {
-          if (window.gapi && gapi.client && gapi.client.getToken) {
-            var t = gapi.client.getToken();
-            if (t && t.access_token) return t.access_token;
-          }
-        } catch (e) {}
-        return window.accessToken || window._accessToken || null;
-      }
-
-      function jsonResponse(obj, status) {
-        return new Response(JSON.stringify(obj), {
-          status: status || 200,
-          headers: { 'Content-Type': 'application/json' }
-        });
-      }
-
-      // Match a Drive URL and identify if it targets one of our data files
-      function parseDriveOp(url) {
-        var m = url.match(/googleapis\.com\/(?:upload\/)?drive\/v3\/files\/([A-Za-z0-9_-]+)/);
-        if (!m) return null;
-        var fileId = m[1];
-        var collection = FILEID_TO_COLLECTION[fileId];
-        if (!collection) return null;
-        return { fileId: fileId, collection: collection };
-      }
-
-      var origFetch = window.fetch;
-      window.fetch = function(input, init) {
-        var url = typeof input === 'string' ? input : (input && input.url) || '';
-        var method = (init && init.method) ? init.method.toUpperCase() : 'GET';
-
-        var op = parseDriveOp(url);
-        if (!op) return origFetch.apply(this, arguments);  // Not our data file — pass through
-
-        var isUpload = /googleapis\.com\/upload\/drive/.test(url);
-        var isMedia = /[?&]alt=media/.test(url);
-        var isParents = /fields=parents/.test(url);
-        var isModTime = /fields=modifiedTime/.test(url);
-        var isSize = /fields=size,modifiedTime/.test(url);
-
-        // Parents lookup is used for attachment folder discovery — must reach real Drive.
-        if (isParents) {
-          console.info('[Cloud Run Field] Drive parents query passthrough:', op.collection);
-          return origFetch.apply(this, arguments);
-        }
-
-        var token = getToken();
-        var authHeaders = token ? { 'Authorization': 'Bearer ' + token } : {};
-
-        // Modtime/size checks -> /api/data/{col}/meta
-        if (isModTime || isSize) {
-          console.info('[Cloud Run Field] Meta check -> Cloud SQL:', op.collection);
-          return origFetch('/api/data/' + op.collection + '/meta', { headers: authHeaders })
-            .then(function(r) {
-              return r.json().then(function(d) {
-                // Shape the response like Drive would
-                return jsonResponse({
-                  modifiedTime: d.modifiedTime || null,
-                  size: String(d.recordCount || 0)
-                });
-              });
-            });
-        }
-
-        // Data read -> /api/data/{col}
-        if (isMedia && method === 'GET') {
-          console.info('[Cloud Run Field] Data read -> Cloud SQL:', op.collection);
-          return origFetch('/api/data/' + op.collection, { headers: authHeaders });
-        }
-
-        // Data write via multipart upload -> parse and POST as JSON
-        if (isUpload && (method === 'PATCH' || method === 'POST')) {
-          console.info('[Cloud Run Field] Data write -> Cloud SQL:', op.collection);
-          return extractJsonFromMultipart(init.body).then(function(payload) {
-            return origFetch('/api/data/' + op.collection, {
-              method: 'POST',
-              headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders),
-              body: JSON.stringify(payload)
-            }).then(function(r) {
-              if (r.ok) {
-                // Return a Drive-shaped success so writeFile() succeeds cleanly
-                return jsonResponse({ id: op.fileId, modifiedTime: new Date().toISOString() });
-              }
-              return r.text().then(function(t) {
-                return new Response(t, { status: r.status, headers: r.headers });
-              });
-            });
-          });
-        }
-
-        // Anything else on our data file (DELETE etc.) — pass through
-        console.warn('[Cloud Run Field] Unhandled op on data fileId - passing through:', method, url.slice(0, 120));
-        return origFetch.apply(this, arguments);
-      };
-
-      // Pull the JSON payload out of a multipart FormData body
-      function extractJsonFromMultipart(body) {
-        if (!body) return Promise.resolve([]);
-        return Promise.resolve(body).then(function(b) {
-          if (typeof b === 'string') return b;
-          if (typeof FormData !== 'undefined' && b instanceof FormData) {
-            var filePart = b.get('file');
-            if (filePart && typeof filePart.text === 'function') return filePart.text();
-            if (filePart && filePart instanceof Blob) return filePart.text();
-            return '';
-          }
-          if (b instanceof Blob) return b.text();
-          if (b && typeof b.text === 'function') return b.text();
-          return String(b);
-        }).then(function(text) {
-          try { return JSON.parse(text); } catch(e) { return []; }
-        });
-      }
-
-      console.info('[Cloud Run Field] Isolation active - Cloud SQL only mode');
-    })();
-    </script>
-    <!-- CLOUD_RUN_FIELD_GATE_END -->
-
     <style>
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
 
@@ -825,6 +686,123 @@
     </div>
 </div>
 
+
+<!-- Kick-Off Record Modal — ITSPL/QR/PKR form -->
+<div id="kickOffModal" class="modal">
+    <div class="modal-box" style="max-width:680px">
+        <div class="modal-hdr" style="background:linear-gradient(135deg,#4338ca,#6366f1)">
+            <span class="font-bold text-white text-lg">📝 Project Kick-Off Record</span>
+            <button type="button" onclick="closeKickOffModal()" style="background:none;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1">✕</button>
+        </div>
+        <form id="kickOffForm" onsubmit="saveKickOff(event)" class="p-5 space-y-3">
+            <input type="hidden" id="koWlID"/>
+            <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:10px;display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <div style="grid-column:1/-1">
+                    <label style="font-size:11px;font-weight:600;color:#4338ca">Project Number and Detail</label>
+                    <input type="text" id="koProjectDetail" class="field-input" required style="font-size:13px"/>
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:600;color:#4338ca">Expected Date Starting</label>
+                    <input type="date" id="koExpectedStart" class="field-input" style="font-size:13px"/>
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:600;color:#4338ca">Expected Date of Completion</label>
+                    <input type="date" id="koExpectedEnd" class="field-input" style="font-size:13px"/>
+                </div>
+                <div style="grid-column:1/-1">
+                    <label style="font-size:11px;font-weight:600;color:#4338ca">Team Details</label>
+                    <input type="text" id="koTeamDetails" class="field-input" style="font-size:13px" placeholder="e.g., G RAJESH, DILLIGANESH"/>
+                </div>
+            </div>
+            <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:10px">
+                <p style="font-size:12px;font-weight:700;color:#4338ca;margin-bottom:6px">DOCUMENTS CARRIED / VERIFIED</p>
+                <div id="koDocsContainer" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+            </div>
+            <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:10px">
+                <p style="font-size:12px;font-weight:700;color:#4338ca;margin-bottom:6px">LOCATION OF WORK</p>
+                <div id="koLocContainer" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+            </div>
+            <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:10px">
+                <label style="font-size:11px;font-weight:600;color:#4338ca">Specific Details (if any)</label>
+                <textarea id="koSpecificDetails" rows="2" class="field-input" style="font-size:12px"></textarea>
+            </div>
+            <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:10px">
+                <p style="font-size:12px;font-weight:700;color:#4338ca;margin-bottom:6px">MANUALS / REFERENCE DOCUMENTS</p>
+                <div id="koManualsContainer"></div>
+            </div>
+            <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:10px">
+                <p style="font-size:12px;font-weight:700;color:#4338ca;margin-bottom:6px">PERSONAL PROTECTIVE EQUIPMENT</p>
+                <div id="koPPEContainer" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+                <div style="margin-top:8px">
+                    <label style="font-size:11px;font-weight:600;color:#4338ca">PPE — Correct Donning / Usage Demonstrated</label>
+                    <select id="koPPEDonning" class="field-input" style="font-size:13px;width:auto;min-width:100px">
+                        <option value="">—</option><option value="yes">YES</option><option value="no">NO</option>
+                    </select>
+                </div>
+            </div>
+            <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:10px;display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <div><label style="font-size:11px;font-weight:600;color:#4338ca">Engineer / Technician</label><input type="text" id="koEngineerName" class="field-input" style="font-size:13px"/></div>
+                <div><label style="font-size:11px;font-weight:600;color:#4338ca">General Manager</label><input type="text" id="koGMName" class="field-input" style="font-size:13px"/></div>
+            </div>
+            <div style="background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:10px">
+                <label style="font-size:11px;font-weight:600;color:#854d0e;display:block;margin-bottom:4px">📎 Scanned/photographed signed form</label>
+                <input type="file" id="koSignedFile" accept="image/*,application/pdf" class="field-input" style="font-size:11px"/>
+                <div id="koSignedFilePreview" style="font-size:10px;color:#854d0e;margin-top:4px"></div>
+            </div>
+            <div class="flex justify-between gap-2 pt-2 flex-wrap">
+                <button type="button" onclick="printKickOffFromForm()" style="padding:8px 14px;border-radius:10px;background:#1e3a5f;color:#fff;border:none;cursor:pointer;font-size:13px;font-weight:600">🖨 Print Form</button>
+                <span style="flex:1"></span>
+                <button type="button" onclick="closeKickOffModal()" style="padding:8px 14px;border-radius:10px;border:1.5px solid var(--border);background:#fff;cursor:pointer;font-size:13px">Cancel</button>
+                <button type="submit" class="btn-primary" style="font-size:13px;padding:8px 16px;background:linear-gradient(135deg,#4338ca,#6366f1)">💾 Save Kick-Off</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Growth of Work / Re-Work Report Modal — ITSPL/QR/GW-RW-R form -->
+<div id="growthRWModal" class="modal">
+    <div class="modal-box" style="max-width:680px">
+        <div class="modal-hdr" style="background:linear-gradient(135deg,#9f1239,#e11d48)">
+            <span class="font-bold text-white text-lg">🔄 Growth of Work / Re-Work Report</span>
+            <button type="button" onclick="closeGrowthRWModal()" style="background:none;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1">✕</button>
+        </div>
+        <form id="growthRWForm" onsubmit="saveGrowthRW(event)" class="p-5 space-y-3">
+            <input type="hidden" id="gwWlID"/>
+            <div style="background:#fff1f2;border:1px solid #fecdd3;border-radius:8px;padding:10px;display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <div style="grid-column:1/-1"><label style="font-size:11px;font-weight:600;color:#9f1239">Project No</label><input type="text" id="gwProjectNo" class="field-input" required style="font-size:13px"/></div>
+                <div style="grid-column:1/-1"><label style="font-size:11px;font-weight:600;color:#9f1239">Customer</label><input type="text" id="gwCustomer" class="field-input" style="font-size:13px"/></div>
+                <div><label style="font-size:11px;font-weight:600;color:#9f1239">Date From</label><input type="date" id="gwDateFrom" class="field-input" style="font-size:13px"/></div>
+                <div><label style="font-size:11px;font-weight:600;color:#9f1239">Date To</label><input type="date" id="gwDateTo" class="field-input" style="font-size:13px"/></div>
+            </div>
+            <div style="background:#fff1f2;border:1px solid #fecdd3;border-radius:8px;padding:10px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                    <p style="font-size:12px;font-weight:700;color:#9f1239;margin:0">WORK ITEMS</p>
+                    <button type="button" onclick="_gwAddRow()" style="padding:4px 10px;border-radius:6px;background:#9f1239;color:#fff;border:none;cursor:pointer;font-size:11px;font-weight:600">+ Add Row</button>
+                </div>
+                <div id="gwWorkItemsContainer"></div>
+            </div>
+            <div style="background:#fff1f2;border:1px solid #fecdd3;border-radius:8px;padding:10px">
+                <label style="font-size:11px;font-weight:600;color:#9f1239">Remarks</label>
+                <textarea id="gwRemarks" rows="4" class="field-input" style="font-size:12px" placeholder="Detailed remarks on work progress, debriefing, analysis..."></textarea>
+            </div>
+            <div style="background:#fff1f2;border:1px solid #fecdd3;border-radius:8px;padding:10px;display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <div><label style="font-size:11px;font-weight:600;color:#9f1239">Prepared By</label><input type="text" id="gwPreparedBy" class="field-input" style="font-size:13px"/></div>
+                <div><label style="font-size:11px;font-weight:600;color:#9f1239">Date</label><input type="date" id="gwPreparedDate" class="field-input" style="font-size:13px"/></div>
+            </div>
+            <div style="background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:10px">
+                <label style="font-size:11px;font-weight:600;color:#854d0e;display:block;margin-bottom:4px">📎 Scanned/photographed signed form</label>
+                <input type="file" id="gwSignedFile" accept="image/*,application/pdf" class="field-input" style="font-size:11px"/>
+                <div id="gwSignedFilePreview" style="font-size:10px;color:#854d0e;margin-top:4px"></div>
+            </div>
+            <div class="flex justify-between gap-2 pt-2 flex-wrap">
+                <button type="button" onclick="printGrowthRWFromForm()" style="padding:8px 14px;border-radius:10px;background:#1e3a5f;color:#fff;border:none;cursor:pointer;font-size:13px;font-weight:600">🖨 Print Form</button>
+                <span style="flex:1"></span>
+                <button type="button" onclick="closeGrowthRWModal()" style="padding:8px 14px;border-radius:10px;border:1.5px solid var(--border);background:#fff;cursor:pointer;font-size:13px">Cancel</button>
+                <button type="submit" class="btn-primary" style="font-size:13px;padding:8px 16px;background:linear-gradient(135deg,#9f1239,#e11d48)">💾 Save Growth/RW</button>
+            </div>
+        </form>
+    </div>
+</div>
 <!-- Daily Entry Modal -->
 <div id="dayModal" class="modal">
     <div class="modal-box" style="max-width:640px">
@@ -1014,10 +992,6 @@
     let fundRequests = [], fundPools = [];   // NEW: pool-based fund tracking (Phase A+B)
     let currentView = 'projexp';  // 'projexp' | 'worklogs'
     let _wlPhotos = [], _editWlID = null;
-    // Work Logs SPA: 'list' shows the table of all logs, 'detail' shows one log.
-    // The New/Edit form still uses the existing wlModal overlay from either view.
-    let _wlSubView = 'list';    // 'list' | 'detail'
-    let _wlDetailID = null;     // wlID currently in detail view (null in list)
     let currentUser = null;  // { name, staffID } — set after login, persists for session
     let _signedInEmail = '';  // Google OAuth email (device-level), used for record stamping
 
@@ -1890,125 +1864,17 @@
     // ════════════════════════════════════════════════════════════════
     let _peSearchQ = '';
     let _wlSearchQ = '';
-
-    // ── Pagination state — persisted across sessions ──
-    // Each tab remembers its own page size in localStorage so the
-    // technician's choice survives reloads and browser restarts.
-    function _loadNum(key, dflt) {
-        try { const v = localStorage.getItem(key); const n = v ? parseInt(v, 10) : NaN; return isNaN(n) ? dflt : n; }
-        catch { return dflt; }
-    }
-    function _saveNum(key, val) { try { localStorage.setItem(key, String(val)); } catch {} }
-    let _peLimit = _loadNum('field_peLimit', 10);
-    let _pePage  = 0;
-    let _wlLimit = _loadNum('field_wlLimit', 10);
-    let _wlPage  = 0;
-
-    function _setPeLimit(n) { _peLimit = n; _pePage = 0; _saveNum('field_peLimit', n); renderView(); }
-    function _setPePage(n)  { _pePage = n; renderView(); try { window.scrollTo({ top: 0, behavior: 'instant' }); } catch { window.scrollTo(0, 0); } }
-    function _setWlLimit(n) { _wlLimit = n; _wlPage = 0; _saveNum('field_wlLimit', n); renderView(); }
-    function _setWlPage(n)  { _wlPage = n; renderView(); try { window.scrollTo({ top: 0, behavior: 'instant' }); } catch { window.scrollTo(0, 0); } }
-
-    // ── Project card expand/collapse state (in-memory, resets on reload) ──
-    // Projects start collapsed so the pagination stays scannable. Search-hits
-    // force-expand so matched items are visible without extra clicks.
-    let _peExpanded = new Set();
-    function _toggleProjExpanded(projExpID, ev) {
-        if (ev) { ev.stopPropagation(); }
-        if (_peExpanded.has(projExpID)) _peExpanded.delete(projExpID);
-        else _peExpanded.add(projExpID);
-        renderView();
-    }
-
-    // ── Freshness check before saving — prevents silent overwrites ──
-    // When User A saves a whole-collection POST, it replaces the entire
-    // collection on the server. If User B had just added a record that
-    // User A doesn't have locally, User A's save would silently delete it.
-    // This helper re-fetches the collection, compares IDs, and alerts if
-    // NEW records exist remotely that we don't know about. The user must
-    // Sync (top-right) to pull them, then retry.
-    //
-    // Returns true if safe to save (nothing new remotely).
-    // Returns false if the user should abort (new remote records exist).
-    //
-    // For a project-scoped collection (projectExpenses), we also check
-    // whether a new ITEM has been added inside any project we know about,
-    // not just whether a whole new PROJECT has appeared. Handled by the
-    // optional itemIdField parameter.
-    async function _checkFreshBeforeSave(collection, localArray, idField, itemIdField) {
-        try {
-            const remote = await loadFileFromDrive(collection + '.json');
-            if (!Array.isArray(remote)) return true; // no remote or fetch failed — allow save
-            const localIds = new Set((localArray || []).map(x => x[idField]).filter(Boolean));
-            const newRemote = remote.filter(r => r[idField] && !localIds.has(r[idField]));
-            let newItems = 0;
-            if (itemIdField) {
-                // Also scan into each project's items[] for records the local copy missed.
-                const localByProj = new Map();
-                (localArray || []).forEach(p => {
-                    localByProj.set(p[idField], new Set((p.items || []).map(it => it[itemIdField]).filter(Boolean)));
-                });
-                remote.forEach(rp => {
-                    const known = localByProj.get(rp[idField]);
-                    if (!known) return; // that's a whole new project, already counted above
-                    (rp.items || []).forEach(it => {
-                        if (it[itemIdField] && !known.has(it[itemIdField])) newItems++;
-                    });
-                });
-            }
-            const total = newRemote.length + newItems;
-            if (total > 0) {
-                const label = collection === 'projectExpenses' ? 'expense/project'
-                            : collection === 'workLogs'        ? 'work log'
-                            : 'record';
-                alert(
-                    `⚠️ ${total} new ${label}${total > 1 ? 's have' : ' has'} been added by someone else since you opened this.\n\n` +
-                    `Your entry has NOT been saved — saving now would silently overwrite their changes.\n\n` +
-                    `Please tap "🔄 Sync" at the top of the screen to pull the latest, then re-open the form and try again.`
-                );
-                return false;
-            }
-            return true;
-        } catch (e) {
-            // Network error, gate failure, etc. — don't block the save, just proceed.
-            // Safer to allow than to strand the user.
-            console.warn('[freshness] check failed, allowing save:', e);
-            return true;
-        }
-    }
-
-    // Page-size pill row: [10] [20] [100] — active one styled solid green.
-    function _pageSizePills(currentLimit, fnName) {
-        return [10, 20, 100].map(n => {
-            const active = n === currentLimit;
-            return `<button onclick="${fnName}(${n})" style="padding:6px 12px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid ${active?'#0d7c66':'var(--border)'};background:${active?'#0d7c66':'#fff'};color:${active?'#fff':'var(--muted)'};min-width:44px">${n}</button>`;
-        }).join('');
-    }
-
-    // Bottom pager: ← Prev  Page X of Y · N total  Next →
-    // Hidden entirely when everything fits on a single page.
-    function _pagerHtml(page, limit, total, setPageFn) {
-        const totalPages = Math.max(1, Math.ceil(total / limit));
-        const currentPage = Math.min(page, totalPages - 1);
-        if (total <= limit) return '';
-        const prevDisabled = currentPage === 0;
-        const nextDisabled = currentPage >= totalPages - 1;
-        return `
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;padding:8px 4px;font-size:13px;color:var(--muted);gap:8px;flex-wrap:wrap">
-            <button onclick="${setPageFn}(${currentPage - 1})" ${prevDisabled ? 'disabled' : ''}
-                style="padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:${prevDisabled ? '#f1f5f9' : '#fff'};color:${prevDisabled ? '#cbd5e1' : 'var(--navy)'};cursor:${prevDisabled ? 'not-allowed' : 'pointer'};font-weight:600">← Prev</button>
-            <span style="text-align:center">Page ${currentPage + 1} of ${totalPages} <span style="color:#94a3b8">· ${total} total</span></span>
-            <button onclick="${setPageFn}(${currentPage + 1})" ${nextDisabled ? 'disabled' : ''}
-                style="padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:${nextDisabled ? '#f1f5f9' : '#fff'};color:${nextDisabled ? '#cbd5e1' : 'var(--navy)'};cursor:${nextDisabled ? 'not-allowed' : 'pointer'};font-weight:600">Next →</button>
-        </div>`;
-    }
+    const _peExpanded = new Set(); // projExpIDs that are expanded (collapsed by default)
+    const _wlExpanded = new Set(); // wlIDs that are expanded (collapsed by default)
+    function _togglePE(id) { _peExpanded.has(id) ? _peExpanded.delete(id) : _peExpanded.add(id); renderView(); }
+    function _toggleWL(id) { _wlExpanded.has(id) ? _wlExpanded.delete(id) : _wlExpanded.add(id); renderView(); }
 
     // Update the query and re-render, then restore focus + caret.
     // The whole point: typing should feel uninterrupted even though
     // we're triggering a full innerHTML rewrite on every keystroke.
     function _setSearch(field, value, inputId) {
-        if (field === 'pe') { _peSearchQ = value; _pePage = 0; }
-        else if (field === 'wl') { _wlSearchQ = value; _wlPage = 0; }
+        if (field === 'pe') _peSearchQ = value;
+        else if (field === 'wl') _wlSearchQ = value;
         renderView();
         // Re-focus the SAME input (matched by id) and put the caret at the end.
         // requestAnimationFrame waits for the new DOM to be in place.
@@ -2145,6 +2011,12 @@
                     Sign in with Google
                 </button>
                 <p class="text-xs mt-4" style="color:var(--muted)">Field personnel access only</p>
+                <div style="margin-top:20px;padding-top:16px;border-top:1px solid #e5e7eb">
+                    <p style="font-size:11px;color:#6b7280;margin-bottom:8px">Technician? No Google account needed:</p>
+                    <button onclick="_techSSShowLogin()" style="width:100%;padding:12px;background:#f59e0b;color:#fff;border:none;border-radius:10px;font-weight:700;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px">
+                        👷 Technician Self-Service (PIN Login)
+                    </button>
+                </div>
             </div>
         </div>`;
     }
@@ -2389,13 +2261,6 @@
             ${_peSearchQ ? `<button onclick="_clearSearch('pe','peSearchInput')" title="Clear search" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;font-size:18px;color:#94a3b8;cursor:pointer;padding:4px 8px;line-height:1">✕</button>` : ''}
         </div>
 
-        <!-- Page-size selector — persists in localStorage -->
-        <div style="display:flex;justify-content:flex-end;align-items:center;gap:6px;margin-bottom:12px;font-size:12px;color:var(--muted)">
-            <span>Show:</span>
-            ${_pageSizePills(_peLimit, '_setPeLimit')}
-            <span>per page</span>
-        </div>
-
         <!-- Project cards -->
         ${(() => {
             // ── Item-level search ──
@@ -2461,7 +2326,7 @@
             `<div class="card p-10 text-center"><div style="font-size:48px;margin-bottom:8px">🧳</div><p class="font-medium text-gray-400">No projects yet</p><p class="text-sm text-gray-400 mt-1">Projects will appear here once created by the office team.</p></div>` :
             !_filtered.length ?
             `<div class="card p-10 text-center"><div style="font-size:36px;margin-bottom:8px">🔍</div><p class="font-medium text-gray-500">No projects match "${_peSearchQ.replace(/</g,'&lt;')}"</p><p class="text-sm text-gray-400 mt-1">Try a different search term or <button onclick="_clearSearch('pe','peSearchInput')" style="color:#0d7c66;background:none;border:none;text-decoration:underline;cursor:pointer;font-size:13px">clear the filter</button>.</p></div>` :
-            _filtered.slice(_pePage * _peLimit, (_pePage + 1) * _peLimit).map(({ p, items: _visibleItems, showAllItems: _showAllItems }) => {
+            _filtered.map(({ p, items: _visibleItems, showAllItems: _showAllItems }) => {
             const funds   = parseFloat(p.totalFunds)||0;
             const spent   = (p.items||[]).reduce((a,i)=>a+(parseFloat(i.amount)||0),0);
             const tfIn    = (p.fundTransfers||[]).filter(t=>t.direction==='in').reduce((a,t)=>a+(parseFloat(t.amount)||0),0);
@@ -2473,35 +2338,33 @@
             const pendReq = 0; // Old per-project requests deprecated — pool-based now
             const totalReq= 0;
 
-            // Expand/collapse: force-expand when search is active (so hit context
-            // is visible) or when the user has toggled it open. Body sections
-            // (fund requests, transfers, expense entries) only render when open.
-            const _isExpanded = !!_peSearchQ || _peExpanded.has(p.projExpID);
-            const _fundReqCount = (p.fundRequests || []).length;
-            const _fundTfCount  = (p.fundTransfers || []).length;
-            const _itemCount    = (p.items || []).length;
-            // Short summary on the collapsed header so user knows there is content.
-            const _bodySummary  = [
-                _fundReqCount ? `${_fundReqCount} fund req${_fundReqCount>1?'s':''}` : '',
-                _fundTfCount  ? `${_fundTfCount} transfer${_fundTfCount>1?'s':''}` : '',
-                _itemCount    ? `${_itemCount} expense${_itemCount>1?'s':''}` : ''
-            ].filter(Boolean).join(' · ') || 'No entries yet';
-
+            const _peOpen = _peExpanded.has(p.projExpID);
             return `
             <div class="card mb-4" style="border-left:4px solid ${bal>=0?'#0d7c66':'#dc2626'}">
-                <!-- Project header — click to expand/collapse -->
-                <div class="p-4" onclick="_toggleProjExpanded('${p.projExpID}', event)" style="cursor:pointer">
-                    <div class="flex justify-between items-start mb-2">
-                        <div class="flex-1 min-w-0 mr-2">
-                            <p class="font-bold" style="color:var(--navy);font-size:15px">
-                                <span style="display:inline-block;transition:transform .15s;transform:rotate(${_isExpanded ? '90' : '0'}deg);color:var(--muted);margin-right:6px;font-size:12px">▶</span>${p.projectName}
-                            </p>
-                            ${p.projectRef?`<p style="font-size:11px;color:var(--muted);margin-left:18px">Ref: ${p.projectRef}</p>`:''}
-                            ${p.startDate?`<p style="font-size:11px;color:var(--muted);margin-left:18px">${p.startDate}${p.endDate?' → '+p.endDate:''}</p>`:''}
+                <!-- Project header — tap to collapse/expand -->
+                <div onclick="_togglePE('${p.projExpID}')" style="cursor:pointer;padding:14px;display:flex;align-items:flex-start;gap:8px">
+                    <span style="font-size:14px;color:#6b7280;margin-top:2px;transition:transform .2s;transform:rotate(${_peOpen?'90':'0'}deg)">${_peOpen?'▾':'▸'}</span>
+                    <div style="flex:1;min-width:0">
+                        <div class="flex justify-between items-start">
+                            <div class="flex-1 min-w-0 mr-2">
+                                <p class="font-bold" style="color:var(--navy);font-size:15px">${p.projectName}</p>
+                                ${p.projectRef?`<p style="font-size:11px;color:var(--muted)">Ref: ${p.projectRef}</p>`:''}
+                                ${p.startDate?`<p style="font-size:11px;color:var(--muted)">${p.startDate}${p.endDate?' → '+p.endDate:''}</p>`:''}
+                            </div>
+                            <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+                                <span class="badge" style="background:${bal>=0?'#f0fdf4':'#fef2f2'};color:${bal>=0?'#15803d':'#dc2626'};font-size:12px">Bal: ${fmt(bal)}</span>
+                                <span class="badge" style="background:#f0f9ff;color:#0369a1;font-size:10px">${(p.items||[]).length} expense${(p.items||[]).length!==1?'s':''}</span>
+                            </div>
                         </div>
-                        <span class="badge" style="background:${bal>=0?'#f0fdf4':'#fef2f2'};color:${bal>=0?'#15803d':'#dc2626'};font-size:12px">Bal: ${fmt(bal)}</span>
+                        <!-- Compact summary always visible -->
+                        <div style="display:flex;gap:12px;font-size:10px;color:var(--muted);margin-top:6px">
+                            <span>Fund: <strong>${fmt(funds)}</strong></span>
+                            <span>Spent: <strong style="color:#b45309">${fmt(spent)}</strong></span>
+                        </div>
                     </div>
-
+                </div>
+                ${_peOpen ? `
+                <div style="padding:0 14px 10px">
                     <!-- Fund bar -->
                     <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:4px">
                         <span>Office Fund: <strong>${fmt(funds)}</strong>${tfIn>0?` <span style="color:#15803d">+${fmt(tfIn)} received</span>`:''}</span>
@@ -2511,22 +2374,15 @@
                     <div class="prog-track"><div class="prog-fill" style="width:${pct}%;background:${barCol}"></div></div>
                     ${pendReq>0?`<p style="font-size:11px;color:#1d4ed8;margin-top:4px">⏳ ${pendReq} pending fund request${pendReq>1?'s':''}</p>`:''}
 
-                    <!-- Body summary — always visible; hints what expanding reveals -->
-                    <p style="font-size:11px;color:#94a3b8;margin-top:6px">
-                        <span style="font-weight:600;color:var(--muted)">${_isExpanded ? '▼ Showing' : '▶ Tap to view'}:</span> ${_bodySummary}
-                    </p>
-
-                    <!-- Action buttons — clicks don't collapse the card -->
-                    <div class="flex gap-2 mt-3 flex-wrap" onclick="event.stopPropagation()">
-                        <button onclick="openExpItemModal('${p.projExpID}')" class="btn-primary" style="padding:7px 12px;font-size:12px">+ Add Expense</button>
-                        <button onclick="reconcilePDF('${p.projExpID}')" style="padding:7px 12px;border-radius:9px;background:#7c3aed;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:600">📄 Reconcile PDF</button>
-                        <button onclick="reconcileCSV('${p.projExpID}')" style="padding:7px 12px;border-radius:9px;background:#15803d;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:600">📊 Reconcile CSV</button>
+                    <!-- Action buttons -->
+                    <div class="flex gap-2 mt-3 flex-wrap">
+                        <button onclick="event.stopPropagation();openExpItemModal('${p.projExpID}')" class="btn-primary" style="padding:7px 12px;font-size:12px">+ Add Expense</button>
+                        <button onclick="event.stopPropagation();reconcilePDF('${p.projExpID}')" style="padding:7px 12px;border-radius:9px;background:#7c3aed;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:600">📄 Reconcile PDF</button>
+                        <button onclick="event.stopPropagation();reconcileCSV('${p.projExpID}')" style="padding:7px 12px;border-radius:9px;background:#15803d;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:600">📊 Reconcile CSV</button>
                     </div>
-                </div>
+                </div>` : ''}
 
-                ${_isExpanded ? `
-                <!-- Fund requests section -->
-                ${(p.fundRequests||[]).length ? `
+                ${!_peOpen ? '' : (p.fundRequests||[]).length ? `
                 <div style="border-top:1px solid var(--border);background:#f0f9ff">
                     <div style="padding:8px 14px;font-size:11px;font-weight:700;color:#1d4ed8;letter-spacing:.04em">FUND REQUESTS</div>
                     ${(p.fundRequests||[]).map(r=>`
@@ -2545,8 +2401,7 @@
                     </div>`).join('')}
                 </div>` : ''}
 
-                <!-- Fund transfers section -->
-                ${(p.fundTransfers||[]).length ? `
+                ${!_peOpen ? '' : (p.fundTransfers||[]).length ? `
                 <div style="border-top:1px solid var(--border);background:#f0f9ff">
                     <div style="padding:8px 14px;font-size:11px;font-weight:700;color:#0369a1;letter-spacing:.04em">FUND TRANSFERS</div>
                     ${(p.fundTransfers||[]).map(t=>`
@@ -2559,8 +2414,7 @@
                     </div>`).join('')}
                 </div>` : ''}
 
-                <!-- Expense items section -->
-                ${_visibleItems.length ? `
+                ${_peOpen && _visibleItems.length ? `
                 <div style="border-top:1px solid var(--border)">
                     <div style="padding:8px 14px;font-size:11px;font-weight:700;color:#0d7c66;letter-spacing:.04em;display:flex;justify-content:space-between;align-items:center">
                         <span>EXPENSE ENTRIES${(!_showAllItems && _peSearchQ) ? ` <span style="font-weight:500;color:#94a3b8;font-size:10px">· showing ${_visibleItems.length} of ${(p.items||[]).length} (filtered)</span>` : ''}</span>
@@ -2594,10 +2448,9 @@
                             </div>
                         </div>`;
                     }).join('')}
-                </div>` : `<p style="padding:10px 14px;font-size:12px;color:var(--muted);border-top:1px solid var(--border)">No expenses recorded yet.</p>`}
-                ` : ''}
+                </div>` : _peOpen ? `<p style="padding:10px 14px;font-size:12px;color:var(--muted);border-top:1px solid var(--border)">No expenses recorded yet.</p>` : ''}
             </div>`;
-        }).join('') + _pagerHtml(_pePage, _peLimit, _filtered.length, '_setPePage');
+        }).join('');
         })()}`;
     }
 
@@ -4135,13 +3988,6 @@
         const retry = _fieldAutoRetryUnallocated();
         if (retry.allocated > 0) anyPoolChanged = true;
 
-        // Freshness check — abort if someone else added an expense while we were
-        // filling this out. The whole-collection save would silently overwrite it.
-        if (!(await _checkFreshBeforeSave('projectExpenses', projectExpenses, 'projExpID', 'itemID'))) {
-            _releaseBtn();
-            return;
-        }
-
         try {
             await saveData('projectExpenses', projectExpenses);
             // Field app cannot write fundPools (Viewer-only). Pool status changes will sync next time
@@ -4149,9 +3995,6 @@
             // So we DON'T saveData('fundPools', ...) — that would fail with permission error.
             _concurEndEdit();
             closeExpItemModal();
-            // Auto-expand the project card so the just-saved expense is visible
-            // instead of hidden behind a collapsed header.
-            _peExpanded.add(projID);
             renderView();
             const baseToast = newPoolID
                 ? `✅ Expense saved · allocated to ${newPoolID}`
@@ -5446,272 +5289,221 @@
     //     recommendations, witnessName, witnessDesig, witnessRemarks,
     //     photos[]}]
 
-    // ── Work Logs helpers: navigate between list and detail sub-views ──
-    function _openWorkLog(wlID) {
-        _wlDetailID = wlID;
-        _wlSubView = 'detail';
-        renderView();
-        try { window.scrollTo({ top: 0, behavior: 'instant' }); } catch { window.scrollTo(0, 0); }
-    }
-
-    function _backToWlList() {
-        _wlDetailID = null;
-        _wlSubView = 'list';
-        renderView();
-    }
-
-    // ── Status style map — shared between list and detail views ──
-    const _wlStatusSty = {
-        'Completed':  {bg:'#dcfce7',col:'#15803d',dot:'#16a34a'},
-        'In Progress':{bg:'#fef3c7',col:'#b45309',dot:'#d97706'},
-        'Pending':    {bg:'#f1f5f9',col:'#475569',dot:'#94a3b8'},
-        'On Hold':    {bg:'#fee2e2',col:'#dc2626',dot:'#ef4444'}
-    };
-
     function renderWorkLogs(el) {
-        if (_wlSubView === 'detail' && _wlDetailID) {
-            return _renderWlDetail(el);
-        }
-        return _renderWlList(el);
-    }
-
-    // ── LIST VIEW — table of Project | Status, click row to open detail ──
-    function _renderWlList(el) {
-        // Sort: most recent activity first (latest daily entry date, else workEndDate,
-        // else workStartDate, else createdAt). Falls back through the chain so a log
-        // with recent daily entries always outranks an older log with none.
-        const _activity = w => {
-            const dates = (w.dailyEntries || []).map(e => e.date).filter(Boolean);
-            const latest = dates.length ? dates.sort().pop() : '';
-            return latest || w.workEndDate || w.workStartDate || w.createdAt || '';
+        const statusSty = {
+            'Completed':  {bg:'#dcfce7',col:'#15803d',dot:'#16a34a'},
+            'In Progress':{bg:'#fef3c7',col:'#b45309',dot:'#d97706'},
+            'Pending':    {bg:'#f1f5f9',col:'#475569',dot:'#94a3b8'},
+            'On Hold':    {bg:'#fee2e2',col:'#dc2626',dot:'#ef4444'}
         };
-        const sorted = [...workLogs].sort((a, b) => (_activity(b) || '').localeCompare(_activity(a) || ''));
+        const sorted=[...workLogs].sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
 
-        // Search filter — simplified for list view: only match log-level fields
-        // (project, location, status, technicians, dates). Daily-entry search is
-        // available inside the detail view.
-        const filtered = !_wlSearchQ ? sorted : sorted.filter(w => {
-            const hay = [
+        // Apply search filter — same item-level approach as Project Expenses screen:
+        //   1. If query matches the work log itself (project, location, status,
+        //      technicians, period dates), include the work log with all daily entries.
+        //   2. Otherwise, filter daily entries by the query. Each entry's haystack
+        //      includes the parent work log fields so cross-level AND works
+        //      (e.g. "completed apr 06" — project status at log level, date at entry).
+        //   3. Include only work logs with at least one matching daily entry.
+        const filtered = !_wlSearchQ ? sorted.map(w => ({ w, entries: w.dailyEntries || [], showAllEntries: true })) :
+        sorted.map(w => {
+            // Step 1: log-level match → include with all entries
+            const logHay = [
                 w.project, w.location, w.status,
                 _dateHaystack(w.workStartDate), _dateHaystack(w.workEndDate),
-                ...(w.technicians || []).map(t => t.name)
+                ...(w.technicians||[]).map(t => t.name)
             ].filter(Boolean).join(' ');
-            return _matchTokens(hay, _wlSearchQ);
-        });
+            if (_matchTokens(logHay, _wlSearchQ)) {
+                return { w, entries: w.dailyEntries || [], showAllEntries: true };
+            }
+            // Step 2: entry-level filtering. Fold logHay into each entry's haystack
+            // so cross-level AND works.
+            const matchingEntries = (w.dailyEntries||[]).filter(e => {
+                const eHay = [
+                    logHay,    // ← parent fields for cross-level AND
+                    e.description, e.remarks, e.category,
+                    _dateHaystack(e.date),
+                    ...(e.technicians||[]).map(t => t.name)
+                ].filter(Boolean).join(' ');
+                return _matchTokens(eHay, _wlSearchQ);
+            });
+            if (matchingEntries.length > 0) {
+                return { w, entries: matchingEntries, showAllEntries: false };
+            }
+            return null;
+        }).filter(Boolean);
 
-        el.innerHTML = `
+        el.innerHTML=`
         <button onclick="openWlModal()" class="btn-primary w-full mb-4 flex items-center justify-center gap-2" style="background:linear-gradient(135deg,#1e3a5f,#1d4ed8)">
             <span style="font-size:18px">+</span> New Project Work Log
         </button>
 
-        <!-- Search bar — filters project name, location, status, technicians, dates -->
+        <!-- ── Work-log search ──
+             Live filter. Matches project, location, status, technician names,
+             and daily-entry descriptions/remarks/category. -->
         <div style="position:relative;margin-bottom:12px">
             <input type="search" id="wlSearchInput"
                 value="${_wlSearchQ.replace(/"/g,'&quot;')}"
-                placeholder="🔍 Search by project, technician, status, date…"
+                placeholder="🔍 Search by project, technician, status, date (e.g. 'completed apr')…"
                 oninput="_setSearch('wl', this.value, 'wlSearchInput')"
                 autocomplete="off"
                 style="width:100%;padding:10px 36px 10px 14px;border:1px solid var(--border);border-radius:10px;font-size:14px;background:#fff;outline:none"/>
             ${_wlSearchQ ? `<button onclick="_clearSearch('wl','wlSearchInput')" title="Clear search" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;font-size:18px;color:#94a3b8;cursor:pointer;padding:4px 8px;line-height:1">✕</button>` : ''}
         </div>
 
-        <!-- Page-size selector — persists in localStorage -->
-        <div style="display:flex;justify-content:flex-end;align-items:center;gap:6px;margin-bottom:12px;font-size:12px;color:var(--muted)">
-            <span>Show:</span>
-            ${_pageSizePills(_wlLimit, '_setWlLimit')}
-            <span>per page</span>
-        </div>
-
-        ${!sorted.length ? `<div class="card p-10 text-center"><div style="font-size:48px;margin-bottom:8px">📋</div><p class="font-medium text-gray-400">No work logs yet</p><p class="text-sm text-gray-400 mt-1">Create a Project Work Log, then add daily entries</p></div>`
-        : !filtered.length ? `<div class="card p-10 text-center"><div style="font-size:36px;margin-bottom:8px">🔍</div><p class="font-medium text-gray-500">No work logs match "${_wlSearchQ.replace(/</g,'&lt;')}"</p><p class="text-sm text-gray-400 mt-1">Try a different search term or <button onclick="_clearSearch('wl','wlSearchInput')" style="color:#0d7c66;background:none;border:none;text-decoration:underline;cursor:pointer;font-size:13px">clear the filter</button>.</p></div>`
-        : `<div class="card" style="overflow:hidden">
-            <table style="width:100%;border-collapse:collapse;font-size:14px">
-                <thead>
-                    <tr style="background:#f8fafc;border-bottom:1px solid var(--border)">
-                        <th style="padding:10px 14px;text-align:left;font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.04em;text-transform:uppercase">Project</th>
-                        <th style="padding:10px 14px;text-align:right;font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;white-space:nowrap">Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${filtered.slice(_wlPage * _wlLimit, (_wlPage + 1) * _wlLimit).map(w => {
-                        const ss = _wlStatusSty[w.status] || _wlStatusSty['Pending'];
-                        return `
-                        <tr onclick="_openWorkLog('${w.wlID}')"
-                            style="cursor:pointer;border-bottom:1px solid var(--border);transition:background .12s"
-                            onmouseover="this.style.background='#f8fafc'"
-                            onmouseout="this.style.background='#fff'">
-                            <td style="padding:12px 14px;color:var(--navy);font-weight:600;line-height:1.4">
-                                ${w.project || '—'}
-                            </td>
-                            <td style="padding:12px 14px;text-align:right;white-space:nowrap">
-                                <span class="badge" style="background:${ss.bg};color:${ss.col}">${w.status || '—'}</span>
-                            </td>
-                        </tr>`;
-                    }).join('')}
-                </tbody>
-            </table>
-        </div>${_pagerHtml(_wlPage, _wlLimit, filtered.length, '_setWlPage')}`}`;
-    }
-
-    // ── DETAIL VIEW — one work log with full daily-entry breakdown ──
-    // Reuses the exact card layout the app rendered before the list/detail
-    // split, so all inline actions (Add Daily Update, Report, Feedback, Edit,
-    // Delete, per-entry buttons) keep working unchanged.
-    function _renderWlDetail(el) {
-        const w = workLogs.find(x => x.wlID === _wlDetailID);
-        if (!w) {
-            // Log was deleted or never existed — fall back to list.
-            _backToWlList();
-            return;
-        }
-
-        const ss = _wlStatusSty[w.status] || _wlStatusSty['Pending'];
-        const techNames = (w.technicians || []).map(t => t.name).join(', ') || '—';
-        const days = (w.dailyEntries || []).length;
-
-        // In detail view, no filtering — show every daily entry.
-        const _visibleEntries = w.dailyEntries || [];
-        const _showAllEntries = true;
-
-        el.innerHTML = `
-        <button onclick="_backToWlList()" class="mb-3 flex items-center gap-1.5" style="background:none;border:none;color:var(--navy);font-size:14px;font-weight:600;cursor:pointer;padding:6px 0">
-            <span style="font-size:18px">←</span> Back to work logs
-        </button>
-
-        <div class="card mb-4" style="border-left:4px solid ${ss.dot}">
-            <!-- Project header -->
-            <div class="p-4">
-                <div class="flex justify-between items-start mb-2">
-                    <div class="flex-1 min-w-0 mr-2">
-                        <p class="font-bold" style="color:var(--navy);font-size:15px">${w.project || '—'}</p>
-                        <p style="font-size:12px;color:var(--muted)">📍 ${w.location || '—'}${w.workStartDate ? ' · ' + w.workStartDate + (w.workEndDate ? ' → ' + w.workEndDate : '') : ''}</p>
-                        <p style="font-size:12px;color:var(--muted)">👷 ${techNames}</p>
-                    </div>
-                    <div style="display:flex;flex-direction:column;gap:5px;align-items:flex-end">
-                        <span class="badge" style="background:${ss.bg};color:${ss.col}">${w.status || '—'}</span>
-                        <span class="badge" style="background:#f0f9ff;color:#0369a1">${days} day${days !== 1 ? 's' : ''}</span>
-                    </div>
-                </div>
-                <!-- Action buttons -->
-                <div class="flex gap-2 mt-3 flex-wrap">
-                    <button onclick="openDayModal('${w.wlID}')" class="btn-primary flex-1" style="font-size:12px;padding:8px 10px;background:linear-gradient(135deg,#065f46,#0d9488);min-width:140px">
-                        + Add Daily Update
-                    </button>
-                    <button onclick="wlPDF('${w.wlID}')" style="padding:8px 12px;border-radius:10px;background:#1e3a5f;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:600">📄 Report</button>
-                    <button onclick="openFeedbackModal('${w.wlID}')" style="padding:8px 12px;border-radius:10px;background:${w.customerFeedback ? '#f59e0b' : '#fff'};color:${w.customerFeedback ? '#fff' : '#92400e'};border:1.5px solid #f59e0b;cursor:pointer;font-size:12px;font-weight:600" title="${w.customerFeedback ? 'View / re-print customer feedback (already captured)' : 'Capture customer feedback at project completion'}">📋 Feedback${w.customerFeedback ? ' ✓' : ''}</button>
-                    <button onclick="editWorkLog('${w.wlID}')" style="padding:8px 10px;border-radius:10px;border:1.5px solid var(--border);background:#fff;cursor:pointer;font-size:12px;color:var(--muted)">✏️</button>
-                    <button onclick="deleteWorkLog('${w.wlID}')" style="padding:8px 10px;border-radius:10px;border:1.5px solid #fecaca;background:#fff;cursor:pointer;font-size:12px;color:#dc2626">✕</button>
-                </div>
-            </div>
-            <!-- Daily entries -->
-            ${!_visibleEntries.length ? `<div style="padding:10px 16px;border-top:1px solid var(--border);font-size:12px;color:var(--muted)">No daily entries yet — tap "+ Add Daily Update" to begin.</div>` : `
-            <div style="border-top:1px solid var(--border)">
-                ${(() => {
-                    // Pre-compute the original chronological day number for every entry
-                    // so filtered views still show "Day N" with the correct N relative to
-                    // the whole work log (not the filtered slice).
-                    const allSortedDesc = [...(w.dailyEntries || [])].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-                    const dayNumByID = {};
-                    allSortedDesc.forEach((e, i) => { if (e.entryID) dayNumByID[e.entryID] = days - i; });
-                    return [..._visibleEntries].sort((a, b) => (b.date || '').localeCompare(a.date || '')).map((d, idx) => {
-                        const dayNum = dayNumByID[d.entryID] || '?';
-                        const dur = (d.startTime && d.endTime) ? calcDuration(d.startTime, d.endTime) : '';
-                        const dayTechs = (d.technicians || []).map(t => t.name).join(', ') || (w.technicians || []).map(t => t.name).join(', ') || '—';
-                    return `
-                    <div style="padding:12px 16px;border-bottom:1px solid var(--border);background:${idx % 2 === 0 ? '#fff' : '#f8fafc'}">
-                        <!-- Header row: day number, date, time, category, actions -->
-                        <div class="flex justify-between items-start mb-2">
-                            <div>
-                                <span class="font-semibold" style="font-size:13px;color:var(--navy)">Day ${dayNum} — ${d.date || '—'}</span>
-                                ${d.startTime ? `<span style="font-size:11px;color:var(--muted);margin-left:8px">⏱ ${d.startTime}–${d.endTime || '?'}${dur ? ' (' + dur + ')' : ''}</span>` : ''}
-                                ${d.category ? `<span class="badge" style="margin-left:6px;background:#eff6ff;color:#1d4ed8;font-size:10px">${d.category}</span>` : ''}
+        ${!sorted.length?`<div class="card p-10 text-center"><div style="font-size:48px;margin-bottom:8px">📋</div><p class="font-medium text-gray-400">No work logs yet</p><p class="text-sm text-gray-400 mt-1">Create a Project Work Log, then add daily entries</p></div>`
+        :!filtered.length?`<div class="card p-10 text-center"><div style="font-size:36px;margin-bottom:8px">🔍</div><p class="font-medium text-gray-500">No work logs match "${_wlSearchQ.replace(/</g,'&lt;')}"</p><p class="text-sm text-gray-400 mt-1">Try a different search term or <button onclick="_clearSearch('wl','wlSearchInput')" style="color:#0d7c66;background:none;border:none;text-decoration:underline;cursor:pointer;font-size:13px">clear the filter</button>.</p></div>`
+        :filtered.map(({ w, entries: _visibleEntries, showAllEntries: _showAllEntries })=>{
+            const ss=statusSty[w.status]||statusSty['Pending'];
+            const techNames=(w.technicians||[]).map(t=>t.name).join(', ')||'—';
+            const days=(w.dailyEntries||[]).length;
+            const lastEntry=days?[...w.dailyEntries].sort((a,b)=>(b.date||'').localeCompare(a.date||''))[0]:null;
+            const _wlOpen = _wlExpanded.has(w.wlID);
+            return `
+            <div class="card mb-4" style="border-left:4px solid ${ss.dot}">
+                <!-- Project header — tap to collapse/expand -->
+                <div onclick="_toggleWL('${w.wlID}')" style="cursor:pointer;padding:14px;display:flex;align-items:flex-start;gap:8px">
+                    <span style="font-size:14px;color:#6b7280;margin-top:2px;transition:transform .2s;transform:rotate(${_wlOpen?'90':'0'}deg)">${_wlOpen?'▾':'▸'}</span>
+                    <div style="flex:1;min-width:0">
+                        <div class="flex justify-between items-start">
+                            <div class="flex-1 min-w-0 mr-2">
+                                <p class="font-bold" style="color:var(--navy);font-size:15px">${w.project||'—'}</p>
+                                <p style="font-size:12px;color:var(--muted)">📍 ${w.location||'—'}${w.workStartDate?' · '+w.workStartDate+(w.workEndDate?' → '+w.workEndDate:''):''}</p>
+                                <p style="font-size:12px;color:var(--muted)">👷 ${techNames}</p>
                             </div>
-                            <div class="flex gap-1.5 flex-wrap">
-                                <button onclick="editDayEntry('${w.wlID}','${d.entryID}')" style="padding:4px 8px;border-radius:6px;border:1.5px solid var(--border);background:#fff;cursor:pointer;font-size:11px;color:var(--muted)" title="Edit entry">✏️</button>
-                                <button onclick="openCalibModal('${w.wlID}','${d.entryID}')" style="padding:4px 8px;border-radius:6px;border:1.5px solid #e9d5ff;background:#faf5ff;cursor:pointer;font-size:11px;color:#7c3aed;font-weight:600" title="Add/edit calibration">📐 ${(d.calibrations || []).length ? d.calibrations.length + ' Cal' : '+ Cal'}</button>
-                                <button onclick="dayEntryPDF('${w.wlID}','${d.entryID}')" style="padding:4px 8px;border-radius:6px;border:1.5px solid #bfdbfe;background:#eff6ff;cursor:pointer;font-size:11px;color:#1d4ed8;font-weight:600" title="Download this day's activity as PDF">📄 PDF</button>
-                                <button onclick="deleteDayEntry('${w.wlID}','${d.entryID}')" style="padding:4px 8px;border-radius:6px;border:1.5px solid #fecaca;background:#fff;cursor:pointer;font-size:11px;color:#dc2626" title="Delete entry">✕</button>
+                            <div style="display:flex;flex-direction:column;gap:5px;align-items:flex-end">
+                                <span class="badge" style="background:${ss.bg};color:${ss.col}">${w.status||'—'}</span>
+                                <span class="badge" style="background:#f0f9ff;color:#0369a1">${days} day${days!==1?'s':''}</span>
                             </div>
                         </div>
-                        <!-- Technicians -->
-                        <p style="font-size:11px;color:#7c3aed;margin-bottom:4px">👷 <strong>On Site:</strong> ${dayTechs}</p>
-                        <!-- Work done -->
-                        ${d.description ? `<div style="background:#fffbeb;border-left:3px solid #f59e0b;padding:6px 10px;border-radius:0 6px 6px 0;margin-bottom:4px">
-                            <p style="font-size:10px;font-weight:700;color:#b45309;letter-spacing:.04em;margin-bottom:2px">🔧 WORK CARRIED OUT</p>
-                            <p style="font-size:12px;color:var(--text);line-height:1.6">${d.description}</p>
-                        </div>` : ''}
-                        <!-- Observations -->
-                        ${d.observations ? `<div style="background:#eff6ff;border-left:3px solid #3b82f6;padding:5px 10px;border-radius:0 6px 6px 0;margin-bottom:4px">
-                            <p style="font-size:10px;font-weight:700;color:#1d4ed8;margin-bottom:2px">🔍 OBSERVATIONS / FINDINGS</p>
-                            <p style="font-size:12px;color:var(--text)">${d.observations}</p>
-                        </div>` : ''}
-                        <!-- Exclusions -->
-                        ${d.exclusions ? `<div style="background:#fff7ed;border-left:3px solid #f97316;padding:5px 10px;border-radius:0 6px 6px 0;margin-bottom:4px">
-                            <p style="font-size:10px;font-weight:700;color:#b45309;margin-bottom:2px">⚠️ EXCLUSIONS / REMARKS</p>
-                            <p style="font-size:12px;color:var(--text)">${d.exclusions}</p>
-                        </div>` : ''}
-                        <!-- Recommendations -->
-                        ${d.recommendations ? `<div style="background:#f0fdf4;border-left:3px solid #22c55e;padding:5px 10px;border-radius:0 6px 6px 0;margin-bottom:4px">
-                            <p style="font-size:10px;font-weight:700;color:#15803d;margin-bottom:2px">💡 RECOMMENDATIONS</p>
-                            <p style="font-size:12px;color:var(--text)">${d.recommendations}</p>
-                        </div>` : ''}
-                        <!-- Witness -->
-                        ${d.witnessName ? `<div style="background:#fff1f2;border-left:3px solid #f43f5e;padding:5px 10px;border-radius:0 6px 6px 0;margin-bottom:4px">
-                            <p style="font-size:10px;font-weight:700;color:#be123c;margin-bottom:2px">✍️ WITNESSED BY</p>
-                            <p style="font-size:12px;color:var(--text)">${d.witnessName}${d.witnessDesig ? ' — ' + d.witnessDesig : ''}</p>
-                            ${d.witnessRemarks ? `<p style="font-size:11px;color:var(--muted);margin-top:2px">"${d.witnessRemarks}"</p>` : ''}
-                        </div>` : ''}
-                        <!-- Calibration Records -->
-                        ${(d.calibrations || []).length ? `<div style="margin-top:8px">
-                            <p style="font-size:10px;font-weight:700;color:#7c3aed;margin-bottom:4px">📐 CALIBRATION / INSPECTION RECORDS (${d.calibrations.length})</p>
-                            ${d.calibrations.map(c => `
-                            <div style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:8px;padding:8px 10px;margin-bottom:6px">
-                                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-                                    <span style="font-size:12px;font-weight:600;color:#7c3aed">
-                                        ${c._isCustom ? '🆕 ' : ''}${c.component}${c.unitNo ? ' — ' + c.unitNo : ''}${c._isCustom && c.customTitle ? ' · ' + c.customTitle : ''}
-                                    </span>
-                                    <div style="display:flex;gap:4px;align-items:center">
-                                        <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;background:${c.overall === 'PASS' ? '#dcfce7' : c.overall === 'FAIL' ? '#fee2e2' : '#fef3c7'};color:${c.overall === 'PASS' ? '#15803d' : c.overall === 'FAIL' ? '#dc2626' : '#b45309'}">${c.overall}</span>
-                                        <button onclick="openCalibModal('${w.wlID}','${d.entryID}','${c.calibID}')" style="font-size:10px;padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:#fff;cursor:pointer;color:var(--muted)">✏️</button>
-                                        <button onclick="openCopyCalibModal('${w.wlID}','${d.entryID}','${c.calibID}')" style="font-size:10px;padding:2px 6px;border-radius:4px;border:1px solid #bfdbfe;background:#eff6ff;cursor:pointer;color:#1d4ed8" title="Copy this table to another date">📋</button>
-                                        <button onclick="deleteCalibRecord('${w.wlID}','${d.entryID}','${c.calibID}')" style="font-size:10px;padding:2px 6px;border-radius:4px;border:1px solid #fecaca;background:#fff;cursor:pointer;color:#dc2626">✕</button>
-                                    </div>
+                    </div>
+                </div>
+                ${_wlOpen ? `
+                <!-- Action buttons -->
+                <div style="padding:0 14px 10px">
+                    <div class="flex gap-2 flex-wrap">
+                        <button onclick="event.stopPropagation();openDayModal('${w.wlID}')" class="btn-primary flex-1" style="font-size:12px;padding:8px 10px;background:linear-gradient(135deg,#065f46,#0d9488);min-width:140px">
+                            + Add Daily Update
+                        </button>
+                        <button onclick="event.stopPropagation();wlPDF('${w.wlID}')" style="padding:8px 12px;border-radius:10px;background:#1e3a5f;color:#fff;border:none;cursor:pointer;font-size:12px;font-weight:600">📄 Report</button>
+                        <button onclick="event.stopPropagation();openKickOffModal('${w.wlID}')" style="padding:8px 12px;border-radius:10px;background:${w.kickOffRecord?'#4338ca':'#fff'};color:${w.kickOffRecord?'#fff':'#4338ca'};border:1.5px solid #4338ca;cursor:pointer;font-size:12px;font-weight:600" title="${w.kickOffRecord?'View Kick-Off Record':'Not yet captured'}">📝 Kick-Off${w.kickOffRecord?' ✓':''}</button>
+                        <button onclick="event.stopPropagation();openGrowthRWModal('${w.wlID}')" style="padding:8px 12px;border-radius:10px;background:${w.growthOfWorkReport?'#9f1239':'#fff'};color:${w.growthOfWorkReport?'#fff':'#9f1239'};border:1.5px solid #9f1239;cursor:pointer;font-size:12px;font-weight:600" title="${w.growthOfWorkReport?'View Growth of Work Report':'Not yet captured'}">🔄 Growth/RW${w.growthOfWorkReport?' ✓':''}</button>
+                        <button onclick="event.stopPropagation();openFeedbackModal('${w.wlID}')" style="padding:8px 12px;border-radius:10px;background:${w.customerFeedback?'#f59e0b':'#fff'};color:${w.customerFeedback?'#fff':'#92400e'};border:1.5px solid #f59e0b;cursor:pointer;font-size:12px;font-weight:600" title="${w.customerFeedback ? 'View / re-print customer feedback (already captured)' : 'Capture customer feedback at project completion'}">📋 Feedback${w.customerFeedback ? ' ✓' : ''}</button>
+                        <button onclick="event.stopPropagation();editWorkLog('${w.wlID}')" style="padding:8px 10px;border-radius:10px;border:1.5px solid var(--border);background:#fff;cursor:pointer;font-size:12px;color:var(--muted)">✏️</button>
+                        <button onclick="event.stopPropagation();deleteWorkLog('${w.wlID}')" style="padding:8px 10px;border-radius:10px;border:1.5px solid #fecaca;background:#fff;cursor:pointer;font-size:12px;color:#dc2626">✕</button>
+                    </div>
+                </div>` : ''}
+                <!-- Daily entries -->
+                ${!_wlOpen ? '' : !_visibleEntries.length?`<div style="padding:10px 16px;border-top:1px solid var(--border);font-size:12px;color:var(--muted)">${days?`No matching daily entries.`:`No daily entries yet — tap "+ Add Daily Update" to begin.`}</div>`:`
+                <div style="border-top:1px solid var(--border)">
+                    ${(!_showAllEntries && _wlSearchQ) ? `<div style="padding:6px 16px;font-size:10px;color:#94a3b8;background:#fafafa">Showing ${_visibleEntries.length} of ${days} daily entries (filtered)</div>` : ''}
+                    ${(() => {
+                        // Pre-compute the original chronological day number for every entry
+                        // so filtered views still show "Day N" with the correct N relative to
+                        // the whole work log (not the filtered slice).
+                        const allSortedDesc = [...(w.dailyEntries||[])].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+                        const dayNumByID = {};
+                        allSortedDesc.forEach((e, i) => { if (e.entryID) dayNumByID[e.entryID] = days - i; });
+                        return [..._visibleEntries].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map((d, idx)=>{
+                            const dayNum = dayNumByID[d.entryID] || '?';
+                            const dur=(d.startTime&&d.endTime)?calcDuration(d.startTime,d.endTime):'';
+                            const dayTechs=(d.technicians||[]).map(t=>t.name).join(', ')||(w.technicians||[]).map(t=>t.name).join(', ')||'—';
+                        return `
+                        <div style="padding:12px 16px;border-bottom:1px solid var(--border);background:${idx%2===0?'#fff':'#f8fafc'}">
+                            <!-- Header row: day number, date, time, category, actions -->
+                            <div class="flex justify-between items-start mb-2">
+                                <div>
+                                    <span class="font-semibold" style="font-size:13px;color:var(--navy)">Day ${dayNum} — ${d.date||'—'}</span>
+                                    ${d.startTime?`<span style="font-size:11px;color:var(--muted);margin-left:8px">⏱ ${d.startTime}–${d.endTime||'?'}${dur?' ('+dur+')':''}</span>`:''}
+                                    ${d.category?`<span class="badge" style="margin-left:6px;background:#eff6ff;color:#1d4ed8;font-size:10px">${d.category}</span>`:''}
                                 </div>
-                                ${c.maker ? `<p style="font-size:10px;color:var(--muted)">Maker: ${c.maker}${c.nominal ? ' | Nominal: ' + c.nominal + ' mm' : ''}</p>` : ''}
-                                ${c.wearLimit ? `<p style="font-size:10px;color:var(--muted)">Wear Limit: ${c.wearLimit} mm${c.stdValue ? ' | Standard: ' + c.stdValue + ' mm' : ''}</p>` : ''}
-                                ${c.rows?.length ? `<div style="overflow-x:auto;margin-top:6px">
-                                    <table style="width:100%;border-collapse:collapse;font-size:10px">
-                                        <thead><tr>${(c.columns || []).map(h => `<th style="padding:3px 6px;background:#1e3a5f;color:#fff;font-size:10px;white-space:nowrap">${h}</th>`).join('')}</tr></thead>
-                                        <tbody>${c.rows.map(r => `<tr>${(c.rowKeys || []).map(k => {
-                                            const v = r[k] || '';
-                                            const bg = k === 'result' ? (v === 'PASS' ? '#dcfce7' : v === 'FAIL' ? '#fee2e2' : '#fff') : '#fff';
-                                            const col = k === 'result' ? (v === 'PASS' ? '#15803d' : v === 'FAIL' ? '#dc2626' : '#374151') : '#374151';
-                                            return `<td style="padding:3px 6px;border:1px solid #e9d5ff;background:${bg};color:${col};font-weight:${k === 'result' ? '700' : '400'}">${v || '—'}</td>`;
-                                        }).join('')}</tr>`).join('')}</tbody>
-                                    </table>
-                                </div>` : ''}
-                                ${c.remarks ? `<p style="font-size:10px;color:#64748b;margin-top:4px;font-style:italic">"${c.remarks}"</p>` : ''}
-                            </div>`).join('')}
-                        </div>` : ''}
-                        <!-- Photos -->
-                        ${(d.photos || []).length ? `<div style="margin-top:8px">
-                            <p style="font-size:10px;font-weight:700;color:var(--muted);margin-bottom:4px">📷 PHOTOS (${d.photos.length})</p>
-                            <div style="display:flex;gap:8px;flex-wrap:wrap">${d.photos.map((ph, i) => {
-                                        const src = _photoSrc(ph);
-                                        const title = _photoTitle(ph);
-                                        const hasTitle = !!title;
-                                        return `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;max-width:60px">
-                                            <img src="${src}" onclick="viewDayPhoto('${w.wlID}','${d.entryID}',${i})" style="width:60px;height:60px;border-radius:8px;object-fit:cover;cursor:pointer;border:2px solid ${hasTitle ? '#10b981' : 'var(--border)'}" title="${title || 'Untitled'}"
-                                                onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2260%22 height=%2260%22><rect width=%2260%22 height=%2260%22 fill=%22%23e0f2fe%22/><text x=%2250%%22 y=%2265%%22 text-anchor=%22middle%22 font-size=%2226%22>📷</text></svg>'"/>
-                                            <div style="font-size:9px;color:${hasTitle ? '#0f172a' : '#94a3b8'};font-style:${hasTitle ? 'normal' : 'italic'};max-width:60px;line-height:1.1;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${title || 'Untitled'}</div>
-                                        </div>`;
-                                    }).join('')}</div>
-                        </div>` : ''}
-                    </div>`;
-                }).join('');
-                })()}
-            </div>`}
-        </div>`;
+                                <div class="flex gap-1.5 flex-wrap">
+                                    <button onclick="editDayEntry('${w.wlID}','${d.entryID}')" style="padding:4px 8px;border-radius:6px;border:1.5px solid var(--border);background:#fff;cursor:pointer;font-size:11px;color:var(--muted)" title="Edit entry">✏️</button>
+                                    <button onclick="openCalibModal('${w.wlID}','${d.entryID}')" style="padding:4px 8px;border-radius:6px;border:1.5px solid #e9d5ff;background:#faf5ff;cursor:pointer;font-size:11px;color:#7c3aed;font-weight:600" title="Add/edit calibration">📐 ${(d.calibrations||[]).length?d.calibrations.length+' Cal':'+ Cal'}</button>
+                                    <button onclick="dayEntryPDF('${w.wlID}','${d.entryID}')" style="padding:4px 8px;border-radius:6px;border:1.5px solid #bfdbfe;background:#eff6ff;cursor:pointer;font-size:11px;color:#1d4ed8;font-weight:600" title="Download this day's activity as PDF">📄 PDF</button>
+                                    <button onclick="deleteDayEntry('${w.wlID}','${d.entryID}')" style="padding:4px 8px;border-radius:6px;border:1.5px solid #fecaca;background:#fff;cursor:pointer;font-size:11px;color:#dc2626" title="Delete entry">✕</button>
+                                </div>
+                            </div>
+                            <!-- Technicians -->
+                            <p style="font-size:11px;color:#7c3aed;margin-bottom:4px">👷 <strong>On Site:</strong> ${dayTechs}</p>
+                            <!-- Work done -->
+                            ${d.description?`<div style="background:#fffbeb;border-left:3px solid #f59e0b;padding:6px 10px;border-radius:0 6px 6px 0;margin-bottom:4px">
+                                <p style="font-size:10px;font-weight:700;color:#b45309;letter-spacing:.04em;margin-bottom:2px">🔧 WORK CARRIED OUT</p>
+                                <p style="font-size:12px;color:var(--text);line-height:1.6">${d.description}</p>
+                            </div>`:''}
+                            <!-- Observations -->
+                            ${d.observations?`<div style="background:#eff6ff;border-left:3px solid #3b82f6;padding:5px 10px;border-radius:0 6px 6px 0;margin-bottom:4px">
+                                <p style="font-size:10px;font-weight:700;color:#1d4ed8;margin-bottom:2px">🔍 OBSERVATIONS / FINDINGS</p>
+                                <p style="font-size:12px;color:var(--text)">${d.observations}</p>
+                            </div>`:''}
+                            <!-- Exclusions -->
+                            ${d.exclusions?`<div style="background:#fff7ed;border-left:3px solid #f97316;padding:5px 10px;border-radius:0 6px 6px 0;margin-bottom:4px">
+                                <p style="font-size:10px;font-weight:700;color:#b45309;margin-bottom:2px">⚠️ EXCLUSIONS / REMARKS</p>
+                                <p style="font-size:12px;color:var(--text)">${d.exclusions}</p>
+                            </div>`:''}
+                            <!-- Recommendations -->
+                            ${d.recommendations?`<div style="background:#f0fdf4;border-left:3px solid #22c55e;padding:5px 10px;border-radius:0 6px 6px 0;margin-bottom:4px">
+                                <p style="font-size:10px;font-weight:700;color:#15803d;margin-bottom:2px">💡 RECOMMENDATIONS</p>
+                                <p style="font-size:12px;color:var(--text)">${d.recommendations}</p>
+                            </div>`:''}
+                            <!-- Witness -->
+                            ${d.witnessName?`<div style="background:#fff1f2;border-left:3px solid #f43f5e;padding:5px 10px;border-radius:0 6px 6px 0;margin-bottom:4px">
+                                <p style="font-size:10px;font-weight:700;color:#be123c;margin-bottom:2px">✍️ WITNESSED BY</p>
+                                <p style="font-size:12px;color:var(--text)">${d.witnessName}${d.witnessDesig?' — '+d.witnessDesig:''}</p>
+                                ${d.witnessRemarks?`<p style="font-size:11px;color:var(--muted);margin-top:2px">"${d.witnessRemarks}"</p>`:''}
+                            </div>`:''}
+                            <!-- Calibration Records -->
+                            ${(d.calibrations||[]).length?`<div style="margin-top:8px">
+                                <p style="font-size:10px;font-weight:700;color:#7c3aed;margin-bottom:4px">📐 CALIBRATION / INSPECTION RECORDS (${d.calibrations.length})</p>
+                                ${d.calibrations.map(c=>`
+                                <div style="background:#faf5ff;border:1px solid #e9d5ff;border-radius:8px;padding:8px 10px;margin-bottom:6px">
+                                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                                        <span style="font-size:12px;font-weight:600;color:#7c3aed">
+                                            ${c._isCustom ? '🆕 ' : ''}${c.component}${c.unitNo?' — '+c.unitNo:''}${c._isCustom && c.customTitle ? ' · ' + c.customTitle : ''}
+                                        </span>
+                                        <div style="display:flex;gap:4px;align-items:center">
+                                            <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;background:${c.overall==='PASS'?'#dcfce7':c.overall==='FAIL'?'#fee2e2':'#fef3c7'};color:${c.overall==='PASS'?'#15803d':c.overall==='FAIL'?'#dc2626':'#b45309'}">${c.overall}</span>
+                                            <button onclick="openCalibModal('${w.wlID}','${d.entryID}','${c.calibID}')" style="font-size:10px;padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:#fff;cursor:pointer;color:var(--muted)">✏️</button>
+                                            <button onclick="openCopyCalibModal('${w.wlID}','${d.entryID}','${c.calibID}')" style="font-size:10px;padding:2px 6px;border-radius:4px;border:1px solid #bfdbfe;background:#eff6ff;cursor:pointer;color:#1d4ed8" title="Copy this table to another date">📋</button>
+                                            <button onclick="deleteCalibRecord('${w.wlID}','${d.entryID}','${c.calibID}')" style="font-size:10px;padding:2px 6px;border-radius:4px;border:1px solid #fecaca;background:#fff;cursor:pointer;color:#dc2626">✕</button>
+                                        </div>
+                                    </div>
+                                    ${c.maker?`<p style="font-size:10px;color:var(--muted)">Maker: ${c.maker}${c.nominal?' | Nominal: '+c.nominal+' mm':''}</p>`:''}
+                                    ${c.wearLimit?`<p style="font-size:10px;color:var(--muted)">Wear Limit: ${c.wearLimit} mm${c.stdValue?' | Standard: '+c.stdValue+' mm':''}</p>`:''}
+                                    ${c.rows?.length?`<div style="overflow-x:auto;margin-top:6px">
+                                        <table style="width:100%;border-collapse:collapse;font-size:10px">
+                                            <thead><tr>${(c.columns||[]).map(h=>`<th style="padding:3px 6px;background:#1e3a5f;color:#fff;font-size:10px;white-space:nowrap">${h}</th>`).join('')}</tr></thead>
+                                            <tbody>${c.rows.map(r=>`<tr>${(c.rowKeys||[]).map(k=>{
+                                                const v=r[k]||'';
+                                                const bg=k==='result'?(v==='PASS'?'#dcfce7':v==='FAIL'?'#fee2e2':'#fff'):'#fff';
+                                                const col=k==='result'?(v==='PASS'?'#15803d':v==='FAIL'?'#dc2626':'#374151'):'#374151';
+                                                return `<td style="padding:3px 6px;border:1px solid #e9d5ff;background:${bg};color:${col};font-weight:${k==='result'?'700':'400'}">${v||'—'}</td>`;
+                                            }).join('')}</tr>`).join('')}</tbody>
+                                        </table>
+                                    </div>`:''}
+                                    ${c.remarks?`<p style="font-size:10px;color:#64748b;margin-top:4px;font-style:italic">"${c.remarks}"</p>`:''}
+                                </div>`).join('')}
+                            </div>`:''}
+                            <!-- Photos -->
+                            ${(d.photos||[]).length?`<div style="margin-top:8px">
+                                <p style="font-size:10px;font-weight:700;color:var(--muted);margin-bottom:4px">📷 PHOTOS (${d.photos.length})</p>
+                                <div style="display:flex;gap:8px;flex-wrap:wrap">${d.photos.map((ph,i)=>{
+                                            const src=_photoSrc(ph);
+                                            const title=_photoTitle(ph);
+                                            const hasTitle=!!title;
+                                            return `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;max-width:60px">
+                                                <img src="${src}" onclick="viewDayPhoto('${w.wlID}','${d.entryID}',${i})" style="width:60px;height:60px;border-radius:8px;object-fit:cover;cursor:pointer;border:2px solid ${hasTitle?'#10b981':'var(--border)'}" title="${title||'Untitled'}"
+                                                    onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2260%22 height=%2260%22><rect width=%2260%22 height=%2260%22 fill=%22%23e0f2fe%22/><text x=%2250%%22 y=%2265%%22 text-anchor=%22middle%22 font-size=%2226%22>📷</text></svg>'"/>
+                                                <div style="font-size:9px;color:${hasTitle?'#0f172a':'#94a3b8'};font-style:${hasTitle?'normal':'italic'};max-width:60px;line-height:1.1;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${title||'Untitled'}</div>
+                                            </div>`;
+                                        }).join('')}</div>
+                            </div>`:''}
+                        </div>`;
+                    }).join('');
+                    })()}
+                </div>`}
+            </div>`;
+        }).join('')}`;
     }
 
     function calcDuration(start,end){
@@ -5799,42 +5591,18 @@
             createdAt:    existing?.createdAt||new Date().toISOString()
         };
         _stampRecord(obj);
-        // Freshness check — abort if someone else added a work log while we were
-        // filling this out. Only guard on NEW records (not edits — edits are
-        // covered by _concurBlockIfStale above).
-        if (!_editWlID) {
-            if (!(await _checkFreshBeforeSave('workLogs', workLogs, 'wlID'))) {
-                return;
-            }
-        }
         if(_editWlID){const i=workLogs.findIndex(x=>x.wlID===_editWlID);if(i>=0)workLogs[i]=obj;else workLogs.push(obj);}
         else workLogs.push(obj);
         await saveData('workLogs',workLogs);
         _concurEndEdit();
-        // On new-log creation from list view, jump the user into the new log's
-        // detail view. On edit (or if already viewing detail), just re-render.
-        const wasNew = !_editWlID;
-        closeWlModal();
-        if (wasNew) {
-            _openWorkLog(obj.wlID);
-        } else {
-            renderView();
-        }
-        showToast('✅ Work log saved');
+        closeWlModal();renderView();showToast('✅ Work log saved');
     }
 
     async function deleteWorkLog(id){
         if(!confirm('Delete this project work log and ALL daily entries? This cannot be undone.'))return;
         if (await _concurBlockIfStale('workLogs', [{ id, idKey: 'wlID' }])) return;
         workLogs=workLogs.filter(x=>x.wlID!==id);
-        await saveData('workLogs',workLogs);
-        // If we were viewing the log we just deleted, snap back to the list.
-        if (_wlSubView === 'detail' && _wlDetailID === id) {
-            _backToWlList();
-        } else {
-            renderView();
-        }
-        showToast('🗑️ Work log deleted');
+        await saveData('workLogs',workLogs);renderView();showToast('🗑️ Work log deleted');
     }
 
     // ── DAILY ENTRY CRUD ─────────────────────────────────────────
@@ -6195,14 +5963,6 @@
         }
         // Stamp the daily entry itself — this is the lock unit
         _stampRecord(entry);
-        // Freshness check for NEW daily entries — guards against silent overwrite
-        // if someone else added a work log or daily entry while this form was open.
-        // Edits are already protected by _concurBlockIfStale earlier in this flow.
-        if(!entryID){
-            if (!(await _checkFreshBeforeSave('workLogs', workLogs, 'wlID'))) {
-                return;
-            }
-        }
         if(entryID){
             const ei=workLogs[wlIdx].dailyEntries.findIndex(x=>x.entryID===entryID);
             if(ei>=0)workLogs[wlIdx].dailyEntries[ei]=entry;else workLogs[wlIdx].dailyEntries.push(entry);
@@ -6355,8 +6115,7 @@
             try {
                 showToast('⏳ Uploading signed copy…');
                 const f = fileInput.files[0];
-                const folder = await getOrCreateSubFolder('CustomerFeedback');
-                const uploaded = await uploadFileToDriveFolder(folder, f);
+                const uploaded = await uploadFieldAttach(f, 'CustomerFeedback');
                 _fbSignedAttachment = {
                     driveFileId: uploaded.id,
                     name: f.name,
@@ -6444,6 +6203,287 @@
         if (!wlID) { showToast('Open a work log first'); return; }
         const formData = _collectFeedbackFromForm();
         await feedbackPDF(wlID, formData);
+    }
+
+
+    async function _ensureJsPDF() {
+        if (!window.jspdf) {
+            await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
+            await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
+        }
+    }
+
+
+    // ── KICK-OFF RECORD (ITSPL/QR/PKR) ───────────────────────────────
+    const _KO_DOCUMENTS = [
+        {key:'passport',label:'Passport'},{key:'aadhaar',label:'Aadhaar'},{key:'safetyTraining',label:'Safety Training'},
+        {key:'medicalCert',label:'Medical Certificate'},{key:'cdc',label:'CDC'},{key:'articleAgreement',label:'Article of Agreement'}
+    ];
+    const _KO_LOCATIONS = [
+        {key:'at-site',label:'At Site'},{key:'port',label:'Port'},{key:'anchorage',label:'Anchorage'},
+        {key:'sailing',label:'Sailing'},{key:'workshop',label:'Workshop'},{key:'drydock',label:'Drydock'}
+    ];
+    const _KO_MANUALS = [
+        {key:'manual',label:'Manual'},{key:'clearanceTable',label:'Clearance Table'},{key:'importantNotes',label:'Important Notes'},
+        {key:'reportingForms',label:'Reporting Forms'},{key:'dailyReport',label:'Daily Report'},{key:'workInstruction',label:'Work Instruction (Read & Understood)'}
+    ];
+    const _KO_PPE = [
+        {key:'safetyShoe',label:'Safety Shoe'},{key:'helmet',label:'Helmet'},{key:'earPlug',label:'Ear Plug'},
+        {key:'goggle',label:'Goggle'},{key:'boilerSuit',label:'Boiler Suits'},{key:'handGlove',label:'Hand Glove'},{key:'mask',label:'Mask'}
+    ];
+    let _koDocState = {}, _koLocState = '', _koManualState = {}, _koPPEState = {}, _koSignedAttachment = null;
+
+    function _koRenderToggles() {
+        const dc = document.getElementById('koDocsContainer');
+        dc.innerHTML = _KO_DOCUMENTS.map(d => {
+            const on = !!_koDocState[d.key];
+            return `<button type="button" onclick="_koDocState['${d.key}']=!_koDocState['${d.key}'];_koRenderToggles()" style="padding:4px 10px;border-radius:20px;font-size:11px;cursor:pointer;border:1.5px solid ${on?'#4338ca':'#d1d5db'};background:${on?'#4338ca':'#fff'};color:${on?'#fff':'#6b7280'};font-weight:${on?'600':'400'}">${on?'✓ ':''}${d.label}</button>`;
+        }).join('');
+        const lc = document.getElementById('koLocContainer');
+        lc.innerHTML = _KO_LOCATIONS.map(l => {
+            const on = _koLocState === l.key;
+            return `<button type="button" onclick="_koLocState='${l.key}';_koRenderToggles()" style="padding:4px 10px;border-radius:20px;font-size:11px;cursor:pointer;border:1.5px solid ${on?'#4338ca':'#d1d5db'};background:${on?'#4338ca':'#fff'};color:${on?'#fff':'#6b7280'};font-weight:${on?'600':'400'}">${on?'✓ ':''}${l.label}</button>`;
+        }).join('');
+        const mc = document.getElementById('koManualsContainer');
+        mc.innerHTML = _KO_MANUALS.map(m => {
+            const v = _koManualState[m.key];
+            return `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid #ede9fe">
+                <span style="font-size:12px;color:#1f2937">${m.label}</span>
+                <span style="display:flex;gap:4px">
+                    <button type="button" onclick="_koManualState['${m.key}']=true;_koRenderToggles()" style="padding:2px 8px;border-radius:4px;font-size:10px;cursor:pointer;border:1px solid ${v===true?'#16a34a':'#d1d5db'};background:${v===true?'#16a34a':'#fff'};color:${v===true?'#fff':'#6b7280'};font-weight:600">YES</button>
+                    <button type="button" onclick="_koManualState['${m.key}']=false;_koRenderToggles()" style="padding:2px 8px;border-radius:4px;font-size:10px;cursor:pointer;border:1px solid ${v===false?'#dc2626':'#d1d5db'};background:${v===false?'#dc2626':'#fff'};color:${v===false?'#fff':'#6b7280'};font-weight:600">NO</button>
+                </span>
+            </div>`;
+        }).join('');
+        const pc = document.getElementById('koPPEContainer');
+        pc.innerHTML = _KO_PPE.map(p => {
+            const on = !!_koPPEState[p.key];
+            return `<button type="button" onclick="_koPPEState['${p.key}']=!_koPPEState['${p.key}'];_koRenderToggles()" style="padding:4px 10px;border-radius:20px;font-size:11px;cursor:pointer;border:1.5px solid ${on?'#16a34a':'#d1d5db'};background:${on?'#dcfce7':'#fff'};color:${on?'#166534':'#6b7280'};font-weight:${on?'600':'400'}">${on?'✓ ':''}${p.label}</button>`;
+        }).join('');
+    }
+
+    function openKickOffModal(wlID) {
+        const wl = workLogs.find(x => x.wlID === wlID);
+        if (!wl) return;
+        document.getElementById('koWlID').value = wlID;
+        const ko = wl.kickOffRecord || {};
+        document.getElementById('koProjectDetail').value = ko.projectDetail || ((wl.ref ? wl.ref + ' - ' : '') + (wl.project || ''));
+        document.getElementById('koExpectedStart').value = ko.expectedStartDate || wl.workStartDate || '';
+        document.getElementById('koExpectedEnd').value = ko.expectedCompletionDate || wl.workEndDate || '';
+        document.getElementById('koTeamDetails').value = ko.teamDetails || (wl.technicians||[]).map(t=>t.name).join(', ') || '';
+        document.getElementById('koSpecificDetails').value = ko.specificDetails || '';
+        document.getElementById('koEngineerName').value = ko.engineerName || '';
+        document.getElementById('koGMName').value = ko.generalManagerName || '';
+        document.getElementById('koPPEDonning').value = ko.ppeDonningVerified === true ? 'yes' : ko.ppeDonningVerified === false ? 'no' : '';
+        _koDocState = {...(ko.documents || {})};
+        _koLocState = ko.locationOfWork || '';
+        _koManualState = {...(ko.manualsRefDocs || {})};
+        _koPPEState = {...(ko.ppe || {})};
+        _koSignedAttachment = ko.signedAttachment || null;
+        const fp = document.getElementById('koSignedFilePreview');
+        fp.innerHTML = _koSignedAttachment ? `Attached: <a href="https://drive.google.com/file/d/${_koSignedAttachment.driveFileId}/view" target="_blank" style="color:#1d4ed8;text-decoration:underline">${_koSignedAttachment.name||'signed'}</a> <button type="button" onclick="_koSignedAttachment=null;document.getElementById('koSignedFilePreview').innerHTML=''" style="color:#dc2626;background:none;border:none;cursor:pointer;font-size:11px">[remove]</button>` : '';
+        document.getElementById('koSignedFile').value = '';
+        _koRenderToggles();
+        document.getElementById('kickOffModal').classList.add('show');
+    }
+    function closeKickOffModal() { document.getElementById('kickOffModal').classList.remove('show'); }
+
+    function _collectKickOffFromForm() {
+        return {
+            projectDetail: document.getElementById('koProjectDetail').value.trim(),
+            expectedStartDate: document.getElementById('koExpectedStart').value,
+            expectedCompletionDate: document.getElementById('koExpectedEnd').value,
+            teamDetails: document.getElementById('koTeamDetails').value.trim(),
+            specificDetails: document.getElementById('koSpecificDetails').value.trim(),
+            documents: {..._koDocState},
+            locationOfWork: _koLocState,
+            manualsRefDocs: {..._koManualState},
+            ppe: {..._koPPEState},
+            ppeDonningVerified: document.getElementById('koPPEDonning').value === 'yes' ? true : document.getElementById('koPPEDonning').value === 'no' ? false : null,
+            engineerName: document.getElementById('koEngineerName').value.trim(),
+            generalManagerName: document.getElementById('koGMName').value.trim(),
+            signedAttachment: _koSignedAttachment
+        };
+    }
+
+    async function saveKickOff(ev) {
+        ev.preventDefault();
+        const wlID = document.getElementById('koWlID').value;
+        const wi = workLogs.findIndex(x => x.wlID === wlID);
+        if (wi < 0) return;
+        const koData = _collectKickOffFromForm();
+        // Handle file upload
+        const fileInput = document.getElementById('koSignedFile');
+        if (fileInput.files.length) {
+            showToast('📤 Uploading signed form…', '#4338ca', 5000);
+            try {
+                
+                const uploaded = await uploadFieldAttach(fileInput.files[0], 'KickOffRecords');
+                koData.signedAttachment = uploaded;
+            } catch (e) { console.error('KO upload failed:', e); showToast('Upload failed: ' + e.message, '#dc2626'); }
+        }
+        const existing = workLogs[wi].kickOffRecord;
+        koData.createdAt = existing?.createdAt || new Date().toISOString();
+        koData.createdBy = existing?.createdBy || currentUser?.name || currentUser?.email || 'Field App';
+        koData.updatedAt = new Date().toISOString();
+        koData.updatedBy = currentUser?.name || currentUser?.email || 'Field App';
+        workLogs[wi].kickOffRecord = koData;
+        await saveData('workLogs', workLogs);
+        closeKickOffModal();
+        renderView();
+        showToast('✅ Kick-Off Record saved', '#16a34a');
+    }
+
+    async function printKickOffFromForm() {
+        const wlID = document.getElementById('koWlID').value;
+        const wl = workLogs.find(x => x.wlID === wlID);
+        const ko = _collectKickOffFromForm();
+        await _ensureJsPDF();
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+        const PW = doc.internal.pageSize.width, ML = 15, MR = 15, CW = PW - ML - MR;
+        doc.setFontSize(13);doc.setFont('helvetica','bold');doc.setTextColor(15,58,95);
+        doc.text('IMSE TECH - SERVICES PVT LTD', ML, 14);
+        doc.setFontSize(8);doc.setFont('helvetica','normal');doc.setTextColor(80,80,80);
+        doc.text('ITSPL/QR/PKR', ML, 19);
+        const mx = PW-MR-60;doc.setDrawColor(120,120,120);doc.setLineWidth(0.2);doc.rect(mx,8,60,18);
+        doc.setFontSize(7);doc.text('ISSUE NO:',mx+2,12);doc.text('01',mx+30,12);doc.text('DATE:',mx+2,15);doc.text('01.08.2018',mx+30,15);doc.text('REV:',mx+2,18);doc.text('00',mx+30,18);doc.text('PAGE:',mx+2,21);doc.text('1 of 1',mx+30,21);
+        doc.setDrawColor(15,58,95);doc.setLineWidth(0.6);doc.line(ML,29,PW-MR,29);
+        doc.setFontSize(14);doc.setFont('helvetica','bold');doc.setTextColor(15,58,95);
+        doc.text('PROJECT KICK-OFF RECORD',PW/2,38,{align:'center'});
+        const fmt=d=>d?d.split('-').reverse().join('.'):' ';
+        const docsStr=_KO_DOCUMENTS.map(d=>d.label).join(' / ');
+        const locsStr=_KO_LOCATIONS.map(l=>l.label).join(' / ');
+        const manualsStr=_KO_MANUALS.map(m=>{const v=ko.manualsRefDocs[m.key];return v===true?m.label+' \u2014 YES':v===false?m.label+' \u2014 NO':null}).filter(Boolean).join('\n')||'(not marked)';
+        const ppeStr=_KO_PPE.filter(p=>ko.ppe[p.key]).map(p=>'\u2022  '+p.label).join('\n')||'(none selected)';
+        const donStr=ko.ppeDonningVerified===true?'YES':ko.ppeDonningVerified===false?'NO':'(not marked)';
+        doc.autoTable({startY:45,margin:{left:ML,right:MR},theme:'grid',styles:{fontSize:9,cellPadding:3,valign:'top',textColor:[0,0,0]},columnStyles:{0:{cellWidth:60,fontStyle:'bold',fillColor:[241,245,249]},1:{cellWidth:CW-60}},body:[
+            ['PROJECT NUMBER AND DETAIL',ko.projectDetail||''],['EXPECTED DATE STARTING',fmt(ko.expectedStartDate)],['TEAM DETAILS',ko.teamDetails||''],
+            ['DOCUMENTS CARRIED / VERIFIED',docsStr],['LOCATION OF WORK',locsStr],['EXPECTED DATE OF COMPLETION',fmt(ko.expectedCompletionDate)],
+            ['SPECIFIC DETAILS IF ANY',ko.specificDetails||''],['MANUALS / REFERENCE\nDOCUMENTS',manualsStr],['PERSONAL PROTECTIVE\nEQUIPMENT FOR ALL\nTECHNICIANS',ppeStr],
+            ['PPE \u2014 CORRECT DONNING\n/ USAGE DEMONSTRATED',donStr]
+        ]});
+        let y=doc.lastAutoTable.finalY+10;
+        doc.autoTable({startY:y,margin:{left:ML,right:MR},theme:'grid',styles:{fontSize:9,cellPadding:4,minCellHeight:24,valign:'top',textColor:[0,0,0]},body:[[{content:'ENGINEER / TECHNICIAN\n\n'+(ko.engineerName||''),styles:{cellWidth:CW/2}},{content:'GENERAL MANAGER\n\n'+(ko.generalManagerName||''),styles:{cellWidth:CW/2}}]]});
+        y=doc.lastAutoTable.finalY+4;doc.setFontSize(8);doc.setFont('helvetica','italic');doc.setTextColor(80,80,80);
+        doc.text(ko.projectDetail||'',ML,y+3);
+        doc.save('KickOffRecord_'+(wl?.project||'KO').replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_-]/g,'')+'_'+(ko.expectedStartDate||new Date().toISOString().substring(0,10))+'.pdf');
+        showToast('✅ Kick-Off PDF downloaded','#16a34a');
+    }
+
+    // ── GROWTH OF WORK / RE-WORK REPORT (ITSPL/QR/GW-RW-R) ──────────
+    let _gwWorkItems = [], _gwSignedAttachment = null;
+    function _gwAddRow() {
+        _gwWorkItems.push({agreedWorkScope:'',growthOfWork:'',reWork:''});
+        _gwRenderRows();
+    }
+    function _gwRenderRows() {
+        const c = document.getElementById('gwWorkItemsContainer');
+        c.innerHTML = _gwWorkItems.map((r,i) => `
+            <div style="display:grid;grid-template-columns:30px 1fr 1fr 1fr 30px;gap:4px;margin-bottom:4px;align-items:start">
+                <span style="font-size:11px;font-weight:700;color:#9f1239;padding-top:6px;text-align:center">${i+1}</span>
+                <textarea rows="2" class="field-input" style="font-size:11px" placeholder="Agreed Work Scope" oninput="_gwWorkItems[${i}].agreedWorkScope=this.value">${r.agreedWorkScope||''}</textarea>
+                <textarea rows="2" class="field-input" style="font-size:11px" placeholder="Growth of Work" oninput="_gwWorkItems[${i}].growthOfWork=this.value">${r.growthOfWork||''}</textarea>
+                <textarea rows="2" class="field-input" style="font-size:11px" placeholder="Re Work" oninput="_gwWorkItems[${i}].reWork=this.value">${r.reWork||''}</textarea>
+                <button type="button" onclick="_gwWorkItems.splice(${i},1);_gwRenderRows()" style="padding:2px 6px;border:none;background:none;color:#dc2626;cursor:pointer;font-size:14px">✕</button>
+            </div>`).join('') || '<p style="font-size:11px;color:#9ca3af;text-align:center;padding:10px">No work items — tap "+ Add Row"</p>';
+    }
+
+    function openGrowthRWModal(wlID) {
+        const wl = workLogs.find(x => x.wlID === wlID);
+        if (!wl) return;
+        document.getElementById('gwWlID').value = wlID;
+        const gw = wl.growthOfWorkReport || {};
+        document.getElementById('gwProjectNo').value = gw.projectNo || ((wl.ref ? wl.ref + ' - ' : '') + (wl.project || ''));
+        document.getElementById('gwCustomer').value = gw.customer || wl.client || wl.vessel || '';
+        document.getElementById('gwDateFrom').value = gw.dateFrom || wl.workStartDate || '';
+        document.getElementById('gwDateTo').value = gw.dateTo || wl.workEndDate || '';
+        document.getElementById('gwRemarks').value = gw.remarks || '';
+        document.getElementById('gwPreparedBy').value = gw.preparedBy || currentUser?.name || '';
+        document.getElementById('gwPreparedDate').value = gw.preparedDate || new Date().toISOString().split('T')[0];
+        _gwWorkItems = (gw.workItems || []).map(r => ({...r}));
+        if (!_gwWorkItems.length) _gwWorkItems.push({agreedWorkScope:'',growthOfWork:'',reWork:''});
+        _gwSignedAttachment = gw.signedAttachment || null;
+        const fp = document.getElementById('gwSignedFilePreview');
+        fp.innerHTML = _gwSignedAttachment ? `Attached: <a href="https://drive.google.com/file/d/${_gwSignedAttachment.driveFileId}/view" target="_blank" style="color:#1d4ed8;text-decoration:underline">${_gwSignedAttachment.name||'signed'}</a> <button type="button" onclick="_gwSignedAttachment=null;document.getElementById('gwSignedFilePreview').innerHTML=''" style="color:#dc2626;background:none;border:none;cursor:pointer;font-size:11px">[remove]</button>` : '';
+        document.getElementById('gwSignedFile').value = '';
+        _gwRenderRows();
+        document.getElementById('growthRWModal').classList.add('show');
+    }
+    function closeGrowthRWModal() { document.getElementById('growthRWModal').classList.remove('show'); }
+
+    function _collectGrowthRWFromForm() {
+        return {
+            projectNo: document.getElementById('gwProjectNo').value.trim(),
+            customer: document.getElementById('gwCustomer').value.trim(),
+            dateFrom: document.getElementById('gwDateFrom').value,
+            dateTo: document.getElementById('gwDateTo').value,
+            workItems: _gwWorkItems.filter(r => r.agreedWorkScope || r.growthOfWork || r.reWork),
+            remarks: document.getElementById('gwRemarks').value.trim(),
+            preparedBy: document.getElementById('gwPreparedBy').value.trim(),
+            preparedDate: document.getElementById('gwPreparedDate').value,
+            signedAttachment: _gwSignedAttachment
+        };
+    }
+
+    async function saveGrowthRW(ev) {
+        ev.preventDefault();
+        const wlID = document.getElementById('gwWlID').value;
+        const wi = workLogs.findIndex(x => x.wlID === wlID);
+        if (wi < 0) return;
+        const gwData = _collectGrowthRWFromForm();
+        const fileInput = document.getElementById('gwSignedFile');
+        if (fileInput.files.length) {
+            showToast('📤 Uploading signed form…', '#9f1239', 5000);
+            try {
+                
+                const uploaded = await uploadFieldAttach(fileInput.files[0], 'KickOffRecords');
+                gwData.signedAttachment = uploaded;
+            } catch (e) { console.error('GW upload failed:', e); showToast('Upload failed: ' + e.message, '#dc2626'); }
+        }
+        const existing = workLogs[wi].growthOfWorkReport;
+        gwData.createdAt = existing?.createdAt || new Date().toISOString();
+        gwData.createdBy = existing?.createdBy || currentUser?.name || currentUser?.email || 'Field App';
+        gwData.updatedAt = new Date().toISOString();
+        gwData.updatedBy = currentUser?.name || currentUser?.email || 'Field App';
+        workLogs[wi].growthOfWorkReport = gwData;
+        await saveData('workLogs', workLogs);
+        closeGrowthRWModal();
+        renderView();
+        showToast('✅ Growth of Work Report saved', '#16a34a');
+    }
+
+    async function printGrowthRWFromForm() {
+        const wlID = document.getElementById('gwWlID').value;
+        const wl = workLogs.find(x => x.wlID === wlID);
+        const gw = _collectGrowthRWFromForm();
+        await _ensureJsPDF();
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+        const PW = doc.internal.pageSize.width, ML = 15, MR = 15, CW = PW - ML - MR;
+        doc.setFontSize(13);doc.setFont('helvetica','bold');doc.setTextColor(15,58,95);
+        doc.text('IMSE TECH - SERVICES PVT LTD', ML, 14);
+        doc.setFontSize(8);doc.setFont('helvetica','normal');doc.setTextColor(80,80,80);
+        doc.text('ITSPL/QR/GW-RW-R', ML, 19);
+        const mx = PW-MR-60;doc.setDrawColor(120,120,120);doc.setLineWidth(0.2);doc.rect(mx,8,60,18);
+        doc.setFontSize(7);doc.text('ISSUE NO:',mx+2,12);doc.text('01',mx+30,12);doc.text('DATE:',mx+2,15);doc.text('16.11.2019',mx+30,15);doc.text('REV:',mx+2,18);doc.text('00',mx+30,18);doc.text('PAGE:',mx+2,21);doc.text('1 of 1',mx+30,21);
+        doc.setDrawColor(15,58,95);doc.setLineWidth(0.6);doc.line(ML,29,PW-MR,29);
+        doc.setFontSize(14);doc.setFont('helvetica','bold');doc.setTextColor(15,58,95);
+        doc.text('GROWTH OF WORK / RE WORK - REPORT',PW/2,38,{align:'center'});
+        const fmt=d=>d?d.split('-').reverse().join('.'):' ';
+        const dateRange=(gw.dateFrom?fmt(gw.dateFrom):'')+(gw.dateTo?' TO '+fmt(gw.dateTo):'');
+        doc.autoTable({startY:45,margin:{left:ML,right:MR},theme:'grid',styles:{fontSize:9,cellPadding:3,valign:'top',textColor:[0,0,0]},columnStyles:{0:{cellWidth:32,fontStyle:'bold',fillColor:[241,245,249]},1:{cellWidth:CW-32}},body:[['PROJECT NO',gw.projectNo||''],['CUSTOMER',gw.customer||''],['DATE',dateRange]]});
+        let y=doc.lastAutoTable.finalY+5;
+        const rows=gw.workItems||[];
+        doc.autoTable({startY:y,margin:{left:ML,right:MR},theme:'grid',styles:{fontSize:9,cellPadding:3,valign:'top',textColor:[0,0,0]},headStyles:{fillColor:[30,58,138],textColor:[255,255,255],fontStyle:'bold',fontSize:9,halign:'center'},head:[[{content:'S.NO',styles:{cellWidth:14,halign:'center'}},{content:'AGREED WORK SCOPE',styles:{cellWidth:(CW-14)*0.42}},{content:'GROWTH OF WORK',styles:{cellWidth:(CW-14)*0.29}},{content:'RE WORK',styles:{cellWidth:(CW-14)*0.29}}]],body:rows.length?rows.map((r,i)=>[{content:String(i+1),styles:{halign:'center'}},r.agreedWorkScope||'',r.growthOfWork||'',r.reWork||'']):[[{content:'(No work items)',colSpan:4,styles:{halign:'center',fontStyle:'italic',textColor:[120,120,120]}}]]});
+        y=doc.lastAutoTable.finalY+8;
+        doc.autoTable({startY:y,margin:{left:ML,right:MR},theme:'grid',styles:{fontSize:9,cellPadding:3,minCellHeight:18,valign:'top',textColor:[0,0,0]},columnStyles:{0:{cellWidth:32,fontStyle:'bold',fillColor:[241,245,249]},1:{cellWidth:CW-32}},body:[['REMARKS',gw.remarks||'']]});
+        y=doc.lastAutoTable.finalY+6;
+        doc.autoTable({startY:y,margin:{left:ML,right:MR},theme:'grid',styles:{fontSize:9,cellPadding:4,minCellHeight:22,valign:'top',textColor:[0,0,0]},body:[[{content:'PREPARED BY\n\n'+(gw.preparedBy||''),styles:{cellWidth:CW/2}},{content:'DATE\n\n'+fmt(gw.preparedDate),styles:{cellWidth:CW/2}}]]});
+        y=doc.lastAutoTable.finalY+4;doc.setFontSize(8);doc.setFont('helvetica','italic');doc.setTextColor(80,80,80);
+        doc.text('Issued By: MR',ML,y);doc.text('Approved By: DIRECTOR',ML,y+4);
+        doc.save('GrowthOfWork_'+(wl?.project||'GW').replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_-]/g,'')+'_'+(gw.preparedDate||new Date().toISOString().substring(0,10))+'.pdf');
+        showToast('✅ Growth of Work PDF downloaded','#16a34a');
     }
 
     // ── Feedback PDF — mirrors the ITSPL/QR/CF paper form ──────────────
@@ -7243,6 +7283,782 @@
     async function dayEntryPDF(wlID, entryID) {
         return wlPDF(wlID, entryID);
     }
+    // ════════════════════════════════════════════════════════════════
+    //  TECHNICIAN SELF-SERVICE — PIN-based login, readiness, attendance
+    //  Backend: /api/tech/staff-list, /api/tech/login, /api/tech/readiness
+    //  No Google auth required — technicians use staffID + 4-digit PIN
+    // ════════════════════════════════════════════════════════════════
+
+    let _techSS = null;   // { staffID, pin, name, staffRec } — logged-in technician
+    let _techSSMonthOffset = 0; // 0 = current month, -1 = last month, etc.
+    const TECH_API = '/api/tech/';
+
+    function _techSSPrevMonth() { _techSSMonthOffset--; _techSSRenderDashboard(); }
+    function _techSSNextMonth() { if (_techSSMonthOffset < 0) { _techSSMonthOffset++; _techSSRenderDashboard(); } }
+
+    function _techSSShowLogin() {
+        document.getElementById('app').innerHTML = `
+        <div class="min-h-screen flex flex-col items-center justify-center p-6" style="background:linear-gradient(160deg,#0f2b4c 0%,#164e63 60%,#0d7c66 100%)">
+            <div class="card p-8 w-full max-w-sm shadow-2xl" style="border-radius:16px">
+                <div style="font-size:48px;text-align:center;margin-bottom:4px">👷</div>
+                <h2 style="text-align:center;font-size:20px;font-weight:800;color:#1e1b4b;margin:0 0 4px">Technician Self-Service</h2>
+                <p style="text-align:center;font-size:11px;color:#6b7280;margin:0 0 20px">Mark daily readiness, view attendance & documents</p>
+
+                <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Select Your Name</label>
+                <select id="techSSName" style="width:100%;padding:10px 12px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;margin-bottom:14px;box-sizing:border-box">
+                    <option value="">Loading technicians…</option>
+                </select>
+
+                <label style="font-size:12px;font-weight:600;color:#374151;display:block;margin-bottom:4px">4-Digit PIN</label>
+                <input type="password" id="techSSPin" maxlength="4" inputmode="numeric" pattern="[0-9]*" placeholder="••••"
+                    style="width:100%;padding:10px 12px;border:2px solid #e5e7eb;border-radius:10px;font-size:18px;text-align:center;letter-spacing:8px;margin-bottom:6px;box-sizing:border-box"
+                    onkeydown="if(event.key==='Enter')_techSSHandleLogin()">
+
+                <p id="techSSError" class="hidden" style="font-size:11px;color:#dc2626;text-align:center;margin:4px 0 10px;font-weight:600"></p>
+
+                <button onclick="_techSSHandleLogin()" id="techSSLoginBtn"
+                    style="width:100%;padding:12px;background:#f59e0b;color:#fff;border:none;border-radius:10px;font-weight:700;font-size:14px;cursor:pointer;margin-bottom:12px">
+                    🔑 Sign In
+                </button>
+
+                <button onclick="renderLogin()" style="width:100%;padding:10px;background:none;border:1px solid #d1d5db;border-radius:10px;font-size:12px;color:#6b7280;cursor:pointer">
+                    ← Back to Google Sign-In
+                </button>
+            </div>
+        </div>`;
+        _techSSLoadStaffList();
+    }
+
+    async function _techSSLoadStaffList() {
+        try {
+            const res = await fetch(TECH_API + 'staff-list');
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const list = await res.json();
+            const sel = document.getElementById('techSSName');
+            if (!sel) return;
+            const techs = list.filter(s => (s.staffType||'').toLowerCase().includes('tech'));
+            const office = list.filter(s => !(s.staffType||'').toLowerCase().includes('tech'));
+            sel.innerHTML = '<option value="">— Select your name —</option>' +
+                (techs.length ? '<optgroup label="Technicians">' + techs.map(s => `<option value="${s.staffID}">${s.name} (${s.designation||s.staffType})</option>`).join('') + '</optgroup>' : '') +
+                (office.length ? '<optgroup label="Office Staff">' + office.map(s => `<option value="${s.staffID}">${s.name} (${s.designation||s.staffType})</option>`).join('') + '</optgroup>' : '');
+        } catch (e) {
+            console.warn('Staff list load failed:', e);
+            const sel = document.getElementById('techSSName');
+            if (sel) sel.innerHTML = '<option value="">Failed to load — check connection</option>';
+        }
+    }
+
+    async function _techSSHandleLogin() {
+        const staffID = document.getElementById('techSSName')?.value;
+        const pin = document.getElementById('techSSPin')?.value;
+        const err = document.getElementById('techSSError');
+        const btn = document.getElementById('techSSLoginBtn');
+
+        if (!staffID) { err.textContent = 'Please select your name'; err.classList.remove('hidden'); return; }
+        if (!pin || pin.length !== 4) { err.textContent = 'Enter your 4-digit PIN'; err.classList.remove('hidden'); return; }
+
+        btn.disabled = true; btn.textContent = '⏳ Verifying…';
+        try {
+            const res = await fetch(TECH_API + 'login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ staffID, pin })
+            });
+            if (!res.ok) {
+                const text = await res.text();
+                throw new Error(text || 'Login failed');
+            }
+            const data = await res.json();
+            const staff = data.staff || data; // backend returns { ok, staff }
+            _techSS = { staffID: staff.staffID, pin, name: staff.name, staffRec: staff };
+            _techSSRenderDashboard();
+        } catch (e) {
+            err.textContent = e.message.includes('locked') ? '🔒 Too many attempts — try again in 30 minutes' :
+                              e.message.includes('Invalid') ? '❌ Wrong PIN. Contact office if you forgot your PIN.' :
+                              '❌ ' + e.message;
+            err.classList.remove('hidden');
+            const pinInput = document.getElementById('techSSPin');
+            if (pinInput) { pinInput.value = ''; pinInput.focus(); }
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = '🔑 Sign In'; }
+        }
+    }
+
+    function _techSSSignOut() {
+        _techSS = null;
+        renderLogin();
+    }
+
+    function _techSSRenderDashboard() {
+        if (!_techSS) return;
+        const s = _techSS.staffRec;
+        const isTech = (s.staffType||'').toLowerCase().includes('tech');
+        const today = new Date().toISOString().split('T')[0];
+        const readiness = isTech ? (s.techReadiness || []).find(r => r.date === today) : null;
+        const attendance = (s.attendance || []).find(a => a.date === today);
+
+        const statusColor = readiness ? (readiness.status === 'READY' ? '#059669' : readiness.status === 'NOT_WELL' ? '#d97706' : '#6366f1') : '#9ca3af';
+        const statusLabel = readiness ? (readiness.status === 'READY' ? '✅ Ready for Duty' : readiness.status === 'NOT_WELL' ? '🤒 Not Well' : '📋 Leave Requested') : '⏳ Not Marked Yet';
+        const attLabel = attendance ? (attendance.status || attendance.type || 'Marked') : 'Pending';
+        const alreadyMarked = isTech ? !!readiness : true; // Office staff don't mark readiness
+
+        document.getElementById('app').innerHTML = `
+        <header style="background:var(--navy);padding:14px 16px 10px;position:sticky;top:0;z-index:30">
+            <div class="flex items-center justify-between max-w-2xl mx-auto">
+                <div class="flex items-center gap-2">
+                    <span style="font-size:22px">${isTech ? '👷' : '🏢'}</span>
+                    <div>
+                        <p class="font-bold text-white text-base leading-tight">${_techSS.name}</p>
+                        <p style="font-size:10px;color:#34d399;margin:0">${isTech ? 'Technician' : 'Office Staff'} Self-Service</p>
+                    </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:6px">
+                    <button onclick="_techSSRefresh()" style="padding:6px 12px;background:rgba(255,255,255,.12);border:none;border-radius:8px;color:#34d399;font-size:11px;font-weight:600;cursor:pointer">🔄 Refresh</button>
+                    <button onclick="_techSSSignOut()" style="padding:6px 12px;background:rgba(255,255,255,.12);border:none;border-radius:8px;color:#e2e8f0;font-size:11px;font-weight:600;cursor:pointer">Sign Out</button>
+                </div>
+            </div>
+        </header>
+        <main id="techSSContent" class="max-w-2xl mx-auto px-4 pt-4" style="padding-bottom:40px">
+            <!-- Today's Status -->
+            <div style="background:#fff;border-radius:14px;padding:18px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.06);border-left:4px solid ${statusColor}">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                    <span style="font-size:12px;font-weight:700;color:#374151">📅 Today — ${new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'short',year:'numeric'})}</span>
+                </div>
+                <div style="font-size:18px;font-weight:800;color:${statusColor};margin-bottom:4px">${statusLabel}</div>
+                <p style="font-size:11px;color:#6b7280;margin:0">Attendance: <strong style="color:${attendance?.type === 'UnApprovedLeave' ? '#dc2626' : attendance?.type === 'ApprovedLeave' ? '#059669' : '#374151'}">${attLabel}${attendance?.type === 'UnApprovedLeave' ? ' ❌' : attendance?.type === 'ApprovedLeave' ? ' ✅' : ''}</strong>${readiness?.markedAt ? ' · Marked at ' + new Date(readiness.markedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) : ''}</p>
+                ${readiness && (readiness.status === 'LEAVE_REQUEST' || readiness.status === 'NOT_WELL') ? `<p style="font-size:10px;margin:6px 0 0;padding:6px 10px;border-radius:6px;background:${attendance?.type === 'UnApprovedLeave' ? '#fef2f2' : attendance?.type === 'ApprovedLeave' ? '#ecfdf5' : '#fefce8'};color:${attendance?.type === 'UnApprovedLeave' ? '#dc2626' : attendance?.type === 'ApprovedLeave' ? '#059669' : '#92400e'};font-weight:600">${attendance?.type === 'UnApprovedLeave' ? '❌ Leave NOT approved by office' : attendance?.type === 'ApprovedLeave' ? '✅ Leave approved by office' : '⏳ Pending office review — tap 🔄 Refresh to check'}</p>` : ''}
+            </div>
+
+            ${isTech ? (!alreadyMarked ? `
+            <!-- Action Buttons (Technicians only) -->
+            <div style="display:grid;grid-template-columns:1fr;gap:10px;margin-bottom:18px">
+                <button onclick="_techSSMarkReady()" style="padding:16px;background:#059669;color:#fff;border:none;border-radius:12px;font-weight:700;font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px">
+                    ✅ I am Ready for Duty
+                </button>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                    <button onclick="_techSSShowLeaveForm()" style="padding:14px;background:#6366f1;color:#fff;border:none;border-radius:12px;font-weight:700;font-size:13px;cursor:pointer">
+                        📋 Request Leave
+                    </button>
+                    <button onclick="_techSSShowNotWellForm()" style="padding:14px;background:#d97706;color:#fff;border:none;border-radius:12px;font-weight:700;font-size:13px;cursor:pointer">
+                        🤒 Not Well
+                    </button>
+                </div>
+            </div>` : `
+            <div style="text-align:center;padding:8px;margin-bottom:14px">
+                <p style="font-size:11px;color:#6b7280">Today's readiness already marked. Come back tomorrow.</p>
+                <button onclick="_techSSRefresh()" style="margin-top:8px;padding:6px 16px;border:1px solid #d1d5db;border-radius:8px;font-size:11px;background:#fff;cursor:pointer">🔄 Refresh</button>
+            </div>`) : ''}
+
+            <!-- Month Attendance Calendar -->
+            ${_techSSRenderCalendar(s)}
+
+            <!-- Wage Summary -->
+            ${_techSSRenderWageSummary(s)}
+
+            <!-- My Documents -->
+            ${_techSSRenderDocuments(s)}
+
+            <!-- Recent Readiness Log -->
+            ${isTech ? _techSSRenderRecentLog(s) : ''}
+        </main>`;
+    }
+
+    async function _techSSRefresh() {
+        showToast('🔄 Refreshing…');
+        try {
+            if (!_techSS || !_techSS.staffID || !_techSS.pin) {
+                showToast('❌ Session lost — please sign in again');
+                _techSSSignOut();
+                return;
+            }
+            const res = await fetch(TECH_API + 'login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ staffID: _techSS.staffID, pin: _techSS.pin })
+            });
+            if (!res.ok) throw new Error('Session expired (HTTP ' + res.status + ')');
+            const data = await res.json();
+            const staff = data.staff || data;
+            _techSS.staffRec = staff;
+            _techSSMonthOffset = 0; // Reset to current month on refresh
+            _techSSRenderDashboard();
+            showToast('✅ Data refreshed');
+        } catch (e) {
+            console.error('[TechSS Refresh]', e);
+            showToast('❌ ' + e.message);
+        }
+    }
+
+    async function _techSSSave(readiness, attendance, successMsg) {
+        try {
+            const res = await fetch(TECH_API + 'readiness', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    staffID: _techSS.staffID,
+                    pin: _techSS.pin,
+                    readiness,
+                    attendance
+                })
+            });
+            if (!res.ok) { const t = await res.text(); throw new Error(t || 'Save failed'); }
+            const data = await res.json();
+            const updated = data.staff || data;
+            _techSS.staffRec = updated;
+            showToast(successMsg || '✅ Saved');
+            _techSSRenderDashboard();
+        } catch (e) {
+            showToast('❌ ' + e.message);
+        }
+    }
+
+    async function _techSSMarkReady() {
+        const today = new Date().toISOString().split('T')[0];
+        const readiness = {
+            date: today,
+            status: 'READY',
+            markedAt: new Date().toISOString(),
+            officeStatus: '',
+            reason: ''
+        };
+        await _techSSSave(readiness, null, '✅ Readiness marked — Ready for duty');
+    }
+
+    function _techSSShowLeaveForm() {
+        const today = new Date().toISOString().split('T')[0];
+        const content = document.getElementById('techSSContent');
+        if (!content) return;
+        content.innerHTML = `
+        <div style="background:#fff;border-radius:14px;padding:20px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+            <h3 style="font-size:16px;font-weight:800;color:#1e1b4b;margin:0 0 16px">📋 Request Leave</h3>
+
+            <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Reason</label>
+            <select id="tssLeaveReason" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;margin-bottom:12px;box-sizing:border-box">
+                <option value="Personal">Personal</option>
+                <option value="Family Emergency">Family Emergency</option>
+                <option value="Medical">Medical</option>
+                <option value="Festival/Holiday">Festival / Holiday</option>
+                <option value="Travel">Travel to Hometown</option>
+                <option value="Other">Other</option>
+            </select>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+                <div>
+                    <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">From</label>
+                    <input type="date" id="tssLeaveFrom" value="${today}" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;box-sizing:border-box">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">To</label>
+                    <input type="date" id="tssLeaveTo" value="${today}" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;box-sizing:border-box">
+                </div>
+            </div>
+
+            <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Current Location</label>
+            <input type="text" id="tssLeaveLocation" placeholder="City / town" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;margin-bottom:12px;box-sizing:border-box">
+
+            <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Alternate Contact Number</label>
+            <input type="tel" id="tssLeaveContact" placeholder="Mobile number" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;margin-bottom:12px;box-sizing:border-box">
+
+            <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Next Reporting Date</label>
+            <input type="date" id="tssLeaveNextReport" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;margin-bottom:16px;box-sizing:border-box">
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                <button onclick="_techSSRenderDashboard()" style="padding:12px;background:#f3f4f6;color:#374151;border:none;border-radius:10px;font-weight:600;font-size:13px;cursor:pointer">Cancel</button>
+                <button onclick="_techSSSubmitLeave()" style="padding:12px;background:#6366f1;color:#fff;border:none;border-radius:10px;font-weight:700;font-size:13px;cursor:pointer">📋 Submit Leave</button>
+            </div>
+        </div>`;
+    }
+
+    async function _techSSSubmitLeave() {
+        const today = new Date().toISOString().split('T')[0];
+        const reason = document.getElementById('tssLeaveReason')?.value || 'Personal';
+        const from = document.getElementById('tssLeaveFrom')?.value || today;
+        const to = document.getElementById('tssLeaveTo')?.value || today;
+        const location = document.getElementById('tssLeaveLocation')?.value || '';
+        const contact = document.getElementById('tssLeaveContact')?.value || '';
+        const nextReport = document.getElementById('tssLeaveNextReport')?.value || '';
+
+        const readiness = {
+            date: today, status: 'LEAVE_REQUEST', markedAt: new Date().toISOString(),
+            reason, leaveFrom: from, leaveTo: to, location, contact, nextReportDate: nextReport
+        };
+        const attendance = { date: today, type: 'ApprovedLeave', _autoByTechSS: true };
+        await _techSSSave(readiness, attendance, '📋 Leave request submitted');
+    }
+
+    function _techSSShowNotWellForm() {
+        const content = document.getElementById('techSSContent');
+        if (!content) return;
+        content.innerHTML = `
+        <div style="background:#fff;border-radius:14px;padding:20px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+            <h3 style="font-size:16px;font-weight:800;color:#1e1b4b;margin:0 0 16px">🤒 Not Well Report</h3>
+
+            <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Type of Illness</label>
+            <select id="tssIllnessType" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;margin-bottom:12px;box-sizing:border-box">
+                <option value="Fever">Fever</option>
+                <option value="Cold/Flu">Cold / Flu</option>
+                <option value="Body Pain">Body Pain</option>
+                <option value="Stomach">Stomach Issue</option>
+                <option value="Injury">Injury</option>
+                <option value="Other">Other</option>
+            </select>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+                <div>
+                    <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Temperature (°F)</label>
+                    <input type="number" id="tssTemp" placeholder="e.g. 100" step="0.1" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;box-sizing:border-box">
+                </div>
+                <div>
+                    <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Blood Pressure</label>
+                    <input type="text" id="tssBP" placeholder="e.g. 120/80" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;box-sizing:border-box">
+                </div>
+            </div>
+
+            <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Medication Taken</label>
+            <input type="text" id="tssMedication" placeholder="Medicine name, if any" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;margin-bottom:12px;box-sizing:border-box">
+
+            <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Hospital / Clinic Visited</label>
+            <input type="text" id="tssHospital" placeholder="Hospital name, if visited" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;margin-bottom:12px;box-sizing:border-box">
+
+            <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Doctor's Advice</label>
+            <textarea id="tssDoctorAdvice" rows="2" placeholder="Rest / medication / follow-up" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;margin-bottom:12px;resize:vertical;box-sizing:border-box"></textarea>
+
+            <label style="font-size:11px;font-weight:600;color:#374151;display:block;margin-bottom:4px">Expected Reporting Date</label>
+            <input type="date" id="tssNwNextReport" style="width:100%;padding:10px;border:2px solid #e5e7eb;border-radius:10px;font-size:13px;margin-bottom:16px;box-sizing:border-box">
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                <button onclick="_techSSRenderDashboard()" style="padding:12px;background:#f3f4f6;color:#374151;border:none;border-radius:10px;font-weight:600;font-size:13px;cursor:pointer">Cancel</button>
+                <button onclick="_techSSSubmitNotWell()" style="padding:12px;background:#d97706;color:#fff;border:none;border-radius:10px;font-weight:700;font-size:13px;cursor:pointer">🤒 Submit</button>
+            </div>
+        </div>`;
+    }
+
+    async function _techSSSubmitNotWell() {
+        const today = new Date().toISOString().split('T')[0];
+        const readiness = {
+            date: today, status: 'NOT_WELL', markedAt: new Date().toISOString(),
+            illness: document.getElementById('tssIllnessType')?.value || '',
+            temperature: document.getElementById('tssTemp')?.value || '',
+            bp: document.getElementById('tssBP')?.value || '',
+            medication: document.getElementById('tssMedication')?.value || '',
+            hospital: document.getElementById('tssHospital')?.value || '',
+            doctorAdvice: document.getElementById('tssDoctorAdvice')?.value || '',
+            nextReportDate: document.getElementById('tssNwNextReport')?.value || ''
+        };
+        const attendance = { date: today, type: 'NotWell', _autoByTechSS: true };
+        await _techSSSave(readiness, attendance, '🤒 Not-well report submitted. Take care!');
+    }
+
+    function _techSSRenderCalendar(s) {
+        const att = s.attendance || [];
+        const now = new Date();
+        const targetDate = new Date(now.getFullYear(), now.getMonth() + _techSSMonthOffset, 1);
+        const year = targetDate.getFullYear(), month = targetDate.getMonth();
+        const firstDay = new Date(year, month, 1).getDay(); // 0=Sun
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        const monthName = targetDate.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+        const isCurrentMonth = _techSSMonthOffset === 0;
+
+        const ATT_COLORS = {
+            Working:'#059669', StandBy:'#2563eb', Outstation:'#7c3aed', Sailing:'#0891b2', Anchorage:'#0d9488',
+            ApprovedLeave:'#6366f1', UnApprovedLeave:'#dc2626', NotWell:'#d97706', WeeklyOff:'#9ca3af',
+            NationalHoliday:'#ec4899', CompanyHoliday:'#f472b6', Absent:'#ef4444'
+        };
+        const ATT_SHORT = {
+            Working:'W', StandBy:'SB', Outstation:'OS', Sailing:'SL', Anchorage:'AN',
+            ApprovedLeave:'AL', UnApprovedLeave:'UA', NotWell:'N/W', WeeklyOff:'WO',
+            NationalHoliday:'NH', CompanyHoliday:'CH', Absent:'A'
+        };
+
+        let cells = '';
+        for (let i = 0; i < firstDay; i++) cells += '<div></div>';
+        for (let d = 1; d <= daysInMonth; d++) {
+            const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+            const entry = att.find(a => a.date === dateStr);
+            const type = entry?.status || entry?.type || '';
+            const bg = ATT_COLORS[type] || '#f3f4f6';
+            const fg = type ? '#fff' : '#9ca3af';
+            const label = ATT_SHORT[type] || '';
+            const isToday = isCurrentMonth && dateStr === new Date().toISOString().split('T')[0];
+            cells += `<div style="text-align:center;padding:4px 2px;border-radius:6px;background:${type ? bg : 'transparent'};${isToday ? 'border:2px solid #1e1b4b;' : ''}" title="${type || 'No entry'}">
+                <div style="font-size:10px;font-weight:${isToday?'800':'600'};color:${fg}">${d}</div>
+                <div style="font-size:7px;font-weight:700;color:${fg};opacity:.9">${label}</div>
+            </div>`;
+        }
+
+        return `
+        <div style="background:#fff;border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                <button onclick="_techSSPrevMonth()" style="padding:4px 10px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:6px;font-size:14px;cursor:pointer">◀</button>
+                <h3 style="font-size:14px;font-weight:800;color:#1e1b4b;margin:0">📅 ${monthName}</h3>
+                <button onclick="_techSSNextMonth()" style="padding:4px 10px;background:${isCurrentMonth?'#f9fafb':'#f3f4f6'};border:1px solid #d1d5db;border-radius:6px;font-size:14px;cursor:pointer;${isCurrentMonth?'opacity:0.3;cursor:default':''}" ${isCurrentMonth?'disabled':''}>▶</button>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;text-align:center;margin-bottom:6px">
+                ${['S','M','T','W','T','F','S'].map(d => `<div style="font-size:9px;font-weight:700;color:#9ca3af">${d}</div>`).join('')}
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">
+                ${cells}
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">
+                ${Object.entries(ATT_COLORS).slice(0,8).map(([k,c]) => `<span style="font-size:8px;display:inline-flex;align-items:center;gap:3px"><span style="width:8px;height:8px;border-radius:2px;background:${c};display:inline-block"></span>${ATT_SHORT[k]||k}</span>`).join('')}
+            </div>
+        </div>`;
+    }
+
+    function _techSSRenderWageSummary(s) {
+        const isTech = (s.staffType||'').toLowerCase().includes('tech');
+        const basic = Number(s.basicSalary) || Number(s.techBasic) || 0;
+        if (!basic) return '';
+
+        // Actual component values from staff record
+        const hraPct = Number(s.hraPct) || 0;
+        const daPct  = Number(s.daPct) || 0;
+        const gpVal  = Number(s.gradePay) || 0;  // Fixed ₹ amount, NOT percentage
+        const hra = hraPct > 0 ? Math.round(basic * hraPct / 100) : 0;
+        const da  = daPct > 0 ? Math.round(basic * daPct / 100) : 0;
+        const conveyance = Number(s.conveyance) || 0;
+        const medical = Number(s.medical) || 0;
+        const variable = Number(s.variable) || 0;
+        const annualBonus = basic > 0 ? Math.round(basic / 10) : 0; // Basic ÷ 10
+        const travelAllow = Number(s.travelAllow) || 0;
+        const gender = (s.gender || '').toLowerCase();
+
+        // PF basis = Basic + DA + GP (statutory components)
+        const pfBasisComponents = basic + da + gpVal;
+        // Total fixed = Basic + HRA + DA + GP
+        const fixedAllow = hra + da + gpVal;
+        const monthlyCTC = basic + fixedAllow;
+
+        // Technician daily wages
+        const dailyWage = Number(s.dailyWage) || Math.round((monthlyCTC + variable) / 30 * 100) / 100;
+        const standbyWage = Number(s.standbyWage) || Math.round(monthlyCTC / 30 * 100) / 100;
+
+        // Duty-type rates for technicians
+        const outstationMul = 1 + (Number(s.outstationPct) || 20) / 100;
+        const sailingMul    = 1 + (Number(s.sailingPct) || 30) / 100;
+        const anchorageMul  = 1 + (Number(s.anchoragePct) || 30) / 100;
+
+        // Pay period: 26th prev month – 25th this month
+        const now = new Date();
+        const refDate = new Date(now.getFullYear(), now.getMonth() + _techSSMonthOffset, 15);
+        const pYear = refDate.getFullYear(), pMonth = refDate.getMonth();
+        const sDate = new Date(pYear, pMonth - 1, 26);
+        const startDate = `${sDate.getFullYear()}-${String(sDate.getMonth()+1).padStart(2,'0')}-26`;
+        const endDate = `${pYear}-${String(pMonth+1).padStart(2,'0')}-25`;
+
+        const att = (s.attendance || []).filter(a => a.date >= startDate && a.date <= endDate);
+        const periodLabel = new Date(startDate+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'}) + ' – ' + new Date(endDate+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
+
+        // Tally days by type
+        const counts = {};
+        att.forEach(a => {
+            const t = a.status || a.type || '';
+            if (t && t !== 'WeeklyOff' && t !== 'NationalHoliday' && t !== 'CompanyHoliday') {
+                counts[t] = (counts[t] || 0) + 1;
+            }
+        });
+
+        const earnings = [];
+        let totalEarnings = 0;
+
+        if (isTech) {
+            // ── TECHNICIAN: daily wage × days per duty type ──
+            const DUTY_META = {
+                Working:      { label: 'Working Days',    rate: dailyWage },
+                StandBy:      { label: 'Stand By (Standby wage)', rate: standbyWage },
+                Outstation:   { label: 'Outstation',      rate: Math.round(standbyWage * outstationMul * 100) / 100 },
+                Sailing:      { label: 'Sailing',         rate: Math.round(standbyWage * sailingMul * 100) / 100 },
+                Anchorage:    { label: 'Anchorage',       rate: Math.round(standbyWage * anchorageMul * 100) / 100 },
+                ApprovedLeave:{ label: 'Approved Leave',  rate: 0 },
+                UnApprovedLeave:{ label: 'Unapproved Leave', rate: 0 },
+                NotWell:      { label: 'Not Well',        rate: standbyWage },
+                Absent:       { label: 'Absent',          rate: 0 }
+            };
+            Object.entries(counts).forEach(([type, days]) => {
+                const meta = DUTY_META[type] || { label: type, rate: standbyWage };
+                const amt = Math.round(meta.rate * days * 100) / 100;
+                if (days > 0) {
+                    earnings.push({ label: meta.label, days, rate: meta.rate, amt });
+                    totalEarnings += amt;
+                }
+            });
+            if (travelAllow > 0) {
+                earnings.push({ label: 'Travel Allowance (in Gross, subject to TDS)', days: null, rate: travelAllow, amt: travelAllow });
+                totalEarnings += travelAllow;
+            }
+        } else {
+            // ── OFFICE STAFF: fixed monthly salary components ──
+            earnings.push({ label: 'Basic Salary', days: null, rate: null, amt: basic });
+            totalEarnings += basic;
+            if (hra > 0) { earnings.push({ label: `HRA (${hraPct}%)`, days: null, rate: null, amt: hra }); totalEarnings += hra; }
+            if (da > 0) { earnings.push({ label: `DA (${daPct}%)`, days: null, rate: null, amt: da }); totalEarnings += da; }
+            if (gpVal > 0) { earnings.push({ label: 'Grade Pay', days: null, rate: null, amt: gpVal }); totalEarnings += gpVal; }
+            if (conveyance > 0) { earnings.push({ label: 'Conveyance', days: null, rate: null, amt: conveyance }); totalEarnings += conveyance; }
+            if (medical > 0) { earnings.push({ label: 'Medical', days: null, rate: null, amt: medical }); totalEarnings += medical; }
+            if (annualBonus > 0) { earnings.push({ label: 'Annual Bonus (Basic÷10)', days: null, rate: null, amt: annualBonus }); totalEarnings += annualBonus; }
+            if (variable > 0) { earnings.push({ label: 'Variable (excl. PF)', days: null, rate: null, amt: variable }); totalEarnings += variable; }
+            // Deduct absent/unapproved days
+            const absentDays = (counts['Absent'] || 0) + (counts['UnApprovedLeave'] || 0);
+            if (absentDays > 0) {
+                const perDay = Math.round(totalEarnings / 30 * 100) / 100;
+                const deduct = Math.round(perDay * absentDays * 100) / 100;
+                earnings.push({ label: `Less: Absent/Unapproved (${absentDays} days)`, days: absentDays, rate: perDay, amt: -deduct });
+                totalEarnings -= deduct;
+            }
+        }
+        const grossPay = Math.round(totalEarnings * 100) / 100;
+
+        // ── DEDUCTIONS ──
+        const pfPct = Number(s.pfPct) || 12;
+        const esicPct = Number(s.esicPct) || 0.75;
+
+        let pfGross, esicWages;
+        if (isTech) {
+            // Tech: PF basis = standbyWage × 30 (Basic + Fixed, excl Variable)
+            // ESIC basis = dailyWage × 30 (includes Variable)
+            pfGross = Math.round(standbyWage * 30);
+            esicWages = Math.round(dailyWage * 30);
+        } else {
+            // Office: PF basis = Gross − Variable (Variable is "excl. PF")
+            // ESIC wages = Gross − Annual Bonus
+            pfGross = grossPay - variable;
+            esicWages = grossPay - annualBonus;
+        }
+        const pfAmt = Math.round(pfGross * pfPct / 100);
+        const esicExempt = esicWages > 21000;
+        const esicAmt = esicExempt ? 0 : Math.round(esicWages * esicPct / 100);
+
+        // PT: gender-aware thresholds
+        let ptAmt = 0;
+        const ptBasis = isTech ? pfGross : grossPay;
+        if (gender === 'female') {
+            if (ptBasis > 25000) ptAmt = 200;
+        } else {
+            if (ptBasis > 15000) ptAmt = 200;
+            else if (ptBasis > 10000) ptAmt = 150;
+        }
+
+        // TDS: only for technicians (1% of gross) or if explicitly set
+        const tdsAmt = isTech
+            ? (Number(s.tdsMonthly) || Math.round(grossPay * 0.01 * 100) / 100)
+            : (Number(s.tdsMonthly) || 0);  // Office: no auto TDS
+
+        const deductions = [];
+        if (isTech) {
+            deductions.push({ label: `PF ${pfPct}% (Basic ₹${basic.toLocaleString('en-IN')} + Fixed ₹${(pfGross-basic).toLocaleString('en-IN')})`, amt: pfAmt });
+        } else {
+            deductions.push({ label: `PF ${pfPct}% (PF Gross ₹${pfGross.toLocaleString('en-IN')})`, amt: pfAmt });
+        }
+        deductions.push({ label: esicExempt ? `ESIC – NIL (Wages ₹${esicWages.toLocaleString('en-IN')} > ₹21,000)` : `ESIC – ${esicPct}% of Wages ₹${esicWages.toLocaleString('en-IN')} (≤ ₹21,000)`, amt: esicAmt });
+        if (gender === 'female' && ptBasis <= 25000) {
+            deductions.push({ label: `PT – NIL (Female: gross ₹${ptBasis.toLocaleString('en-IN')} ≤ ₹25,000)`, amt: 0 });
+        } else if (ptAmt > 0) {
+            deductions.push({ label: `PT – ${isTech ? 'Basic+Fixed' : 'Gross'} ₹${ptBasis.toLocaleString('en-IN')} > ₹${ptAmt===200?'15,000':'10,000'}`, amt: ptAmt });
+        }
+        if (tdsAmt > 0) {
+            deductions.push({ label: `TDS – ${Number(s.tdsMonthly) ? 'Monthly' : '1% of Gross ₹'+grossPay.toLocaleString('en-IN')+' (Auto)'}`, amt: tdsAmt });
+        }
+
+        // Active loan EMI deductions
+        (s.loans || []).forEach(l => {
+            if (l.status === 'Active' && l.emi > 0) {
+                deductions.push({ label: `Loan EMI — ${l.remarks || l.loanID}`, amt: Number(l.emi) });
+            }
+        });
+
+        const totalDed = deductions.reduce((s, d) => s + (Number(d.amt) || 0), 0);
+        const netPay = Math.round((grossPay - totalDed) * 100) / 100;
+
+        const fmt = v => v ? '₹' + Number(v).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2}) : '';
+
+        return `
+        <div style="background:#fff;border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+            <h3 style="font-size:14px;font-weight:800;color:#1e1b4b;margin:0 0 4px">💰 ${isTech ? 'Wage Summary' : 'Salary Summary'}</h3>
+            <p style="font-size:10px;color:#6b7280;margin:0 0 12px">Period: ${periodLabel} (30 days)</p>
+
+            <!-- Earnings -->
+            <div style="margin-bottom:12px">
+                <div style="background:#1e40af;color:#fff;padding:6px 10px;border-radius:8px 8px 0 0;font-size:11px;font-weight:700">EARNINGS</div>
+                <div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;overflow:hidden">
+                    <div style="display:grid;grid-template-columns:1fr 40px 60px 70px;padding:4px 10px;background:#f3f4f6;font-size:9px;font-weight:700;color:#6b7280">
+                        <span>COMPONENT</span><span style="text-align:right">DAYS</span><span style="text-align:right">RATE(₹)</span><span style="text-align:right">AMT(₹)</span>
+                    </div>
+                    ${earnings.map(e => `
+                    <div style="display:grid;grid-template-columns:1fr 40px 60px 70px;padding:6px 10px;border-top:1px solid #f3f4f6;font-size:11px;align-items:center">
+                        <span style="color:#1f2937;font-weight:500">${e.label}</span>
+                        <span style="text-align:right;color:#6b7280">${e.days || '—'}</span>
+                        <span style="text-align:right;color:#6b7280">${e.rate ? Number(e.rate).toLocaleString('en-IN') : '—'}</span>
+                        <span style="text-align:right;font-weight:700;color:#059669">${fmt(e.amt)}</span>
+                    </div>`).join('')}
+                    <div style="display:grid;grid-template-columns:1fr 70px;padding:8px 10px;border-top:2px solid #1e40af;font-weight:800">
+                        <span style="color:#1e40af;font-size:12px">GROSS PAY</span>
+                        <span style="text-align:right;color:#1e40af;font-size:12px">${fmt(grossPay)}</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Deductions -->
+            <div style="margin-bottom:12px">
+                <div style="background:#dc2626;color:#fff;padding:6px 10px;border-radius:8px 8px 0 0;font-size:11px;font-weight:700">DEDUCTIONS</div>
+                <div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;overflow:hidden">
+                    ${deductions.map(d => `
+                    <div style="display:flex;justify-content:space-between;padding:6px 10px;border-top:1px solid #f3f4f6;font-size:11px">
+                        <span style="color:#1f2937">${d.label}</span>
+                        <span style="font-weight:700;color:#dc2626">${Number(d.amt) ? fmt(d.amt) : 'NIL'}</span>
+                    </div>`).join('')}
+                    <div style="display:flex;justify-content:space-between;padding:8px 10px;border-top:2px solid #dc2626;font-weight:800">
+                        <span style="color:#dc2626;font-size:12px">TOTAL DEDUCTIONS</span>
+                        <span style="color:#dc2626;font-size:12px">${fmt(totalDed)}</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Net Pay -->
+            <div style="background:linear-gradient(135deg,#0d9488,#059669);border-radius:12px;padding:14px 16px;display:flex;justify-content:space-between;align-items:center">
+                <div>
+                    <div style="font-size:10px;color:rgba(255,255,255,.7)">Gross ${fmt(grossPay)} − Ded. ${fmt(totalDed)}</div>
+                    <div style="font-size:9px;color:rgba(255,255,255,.5);margin-top:2px">PF Basis: ${isTech ? 'Basic+Fixed = ' : ''}₹${pfGross.toLocaleString('en-IN')} | ESIC/PT Basis: ₹${esicWages.toLocaleString('en-IN')}</div>
+                </div>
+                <div style="text-align:right">
+                    <div style="font-size:10px;color:rgba(255,255,255,.7);font-weight:600">NET PAY</div>
+                    <div style="font-size:22px;font-weight:900;color:#fff">${fmt(netPay)}</div>
+                </div>
+            </div>
+
+            <div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:10px;padding:3px 10px;border:1px solid #e5e7eb;border-radius:6px;color:#6b7280;font-weight:600">${isTech ? 'Stand By: '+(counts['StandBy']||0) : 'Working: '+(counts['Working']||0)+' days'}</span>
+                <span style="font-size:8px;color:#9ca3af">View only — contact office for corrections</span>
+            </div>
+        </div>`;
+    }
+
+    function _techSSRenderDocuments(s) {
+        const docs = s.documents || [];
+        const idFields = [
+            { key: 'pan', label: 'PAN Card', icon: '🪪' },
+            { key: 'aadhar', label: 'Aadhar', icon: '🆔' },
+            { key: 'pfNumber', label: 'PF Number', icon: '🏦' },
+            { key: 'esicNumber', label: 'ESIC No', icon: '🏥' },
+            { key: 'passport', label: 'Passport', icon: '📘', expKey: 'passportExpiry' },
+            { key: 'drivingLicence', label: 'Driving Licence', icon: '🚗', expKey: 'dlExpiry' },
+            { key: 'cdc', label: 'CDC', icon: '📓', expKey: 'cdcExpiry' }
+        ];
+        const today = new Date().toISOString().split('T')[0];
+        const warn30 = new Date(Date.now() + 30*86400000).toISOString().split('T')[0];
+
+        // ID cards grid (like Image 3)
+        let idHtml = idFields.filter(f => s[f.key]).map(f => {
+            const exp = f.expKey ? s[f.expKey] : null;
+            const expired = exp && exp < today;
+            const expiring = exp && exp <= warn30 && !expired;
+            return `<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:10px 12px">
+                <div style="font-size:9px;color:#6b7280;font-weight:600;margin-bottom:2px">${f.label}</div>
+                <div style="font-size:13px;font-weight:800;color:#1f2937">${s[f.key]}</div>
+                ${exp ? `<div style="font-size:9px;margin-top:3px;color:${expired ? '#dc2626' : expiring ? '#d97706' : '#059669'};font-weight:600">Exp: ${exp}${expired ? ' ⚠️ EXPIRED' : expiring ? ' ⚠️ Expiring' : ''}</div>` : ''}
+            </div>`;
+        }).join('');
+
+        // Attached documents card grid (like Image 2) — VIEW ONLY, no download/copy/print/share
+        let attachHtml = '';
+        if (docs.length) {
+            attachHtml = `
+            <div style="margin-top:14px">
+                <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:8px">📎 Attached Documents (${docs.length})</div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px">
+                    ${docs.map(d => {
+                        const hasDrive = !!d.driveFileId;
+                        const isImage = (d.mime||'').startsWith('image/');
+                        const isPdf = (d.mime||'') === 'application/pdf';
+                        const exp = d.expiry;
+                        const expired = exp && exp < today;
+                        const expiring = exp && exp <= warn30 && !expired;
+                        const sizeStr = d.size ? (d.size > 1048576 ? (d.size/1048576).toFixed(1)+' MB' : (d.size/1024).toFixed(1)+' KB') : '';
+                        return `<div style="background:#fff;border:1px solid ${expired ? '#fecaca' : '#e5e7eb'};border-radius:12px;overflow:hidden;${expired ? 'background:#fef2f2' : ''}">
+                            <div style="height:80px;background:${expired ? '#fee2e2' : '#f0fdf4'};display:flex;align-items:center;justify-content:center">
+                                <span style="font-size:36px">${isImage ? '🖼️' : isPdf ? '📕' : '📄'}</span>
+                            </div>
+                            <div style="padding:8px 10px">
+                                ${d.type ? `<span style="font-size:8px;font-weight:700;color:#4338ca;background:#e0e7ff;padding:1px 6px;border-radius:4px;display:inline-block;margin-bottom:3px">${d.type}</span>` : ''}
+                                ${exp ? `<span style="font-size:8px;font-weight:700;color:${expired ? '#dc2626' : expiring ? '#d97706' : '#059669'};${expired ? 'background:#fef2f2' : 'background:#f0fdf4'};padding:1px 6px;border-radius:4px;display:inline-block;margin-bottom:3px;margin-left:2px">${expired ? 'EXPIRED' : 'Valid till'} ${exp}</span>` : ''}
+                                <p style="font-size:11px;font-weight:600;color:#1f2937;margin:2px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${d.label || d.fileName}">${d.label || d.fileName}</p>
+                                <p style="font-size:9px;color:#9ca3af;margin:1px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${d.fileName || ''}${sizeStr ? ' · ' + sizeStr : ''}</p>
+                                ${hasDrive ? `<button onclick="event.stopPropagation();_techSSPreviewDoc('${d.driveFileId}')" style="width:100%;margin-top:6px;padding:7px;background:#f59e0b;color:#fff;border:none;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:4px">🔒 View</button>` : `<p style="font-size:9px;color:#9ca3af;margin:6px 0 0;text-align:center;padding:4px;background:#f9fafb;border-radius:6px">📄 On file with office</p>`}
+                            </div>
+                        </div>`;
+                    }).join('')}
+                </div>
+            </div>`;
+        }
+
+        if (!idHtml && !docs.length) return '';
+
+        return `
+        <div style="background:#fff;border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+            <h3 style="font-size:14px;font-weight:800;color:#1e1b4b;margin:0 0 10px">📄 My Documents</h3>
+            ${idHtml ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">${idHtml}</div>` : ''}
+            ${attachHtml}
+            <p style="font-size:8px;color:#9ca3af;margin:10px 0 0;text-align:center">🔒 View only — download, copy, print and share disabled</p>
+        </div>`;
+    }
+
+    // Document preview — opens in a modal overlay with Drive preview iframe
+    // No download, no copy, no print, no share — just view in embedded iframe
+    function _techSSPreviewDoc(driveFileId) {
+        const overlay = document.createElement('div');
+        overlay.id = 'tssDocPreview';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;flex-direction:column;padding:0';
+        overlay.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 16px;background:#1e1b4b">
+                <span style="font-size:13px;font-weight:700;color:#fff">🔒 Document Preview (View Only)</span>
+                <button onclick="document.getElementById('tssDocPreview').remove()" style="background:none;border:none;font-size:22px;color:#fff;cursor:pointer;padding:4px">✕</button>
+            </div>
+            <iframe src="https://drive.google.com/file/d/${driveFileId}/preview"
+                style="flex:1;border:none;width:100%;background:#fff"
+                sandbox="allow-scripts allow-same-origin"
+                allow="autoplay"
+                loading="lazy"></iframe>`;
+        document.body.appendChild(overlay);
+    }
+
+    function _techSSRenderRecentLog(s) {
+        const log = (s.techReadiness || []).slice().sort((a,b) => b.date?.localeCompare(a.date)).slice(0, 10);
+        if (!log.length) return '';
+
+        const STATUS_META = {
+            READY: { icon: '✅', label: 'Ready', color: '#059669' },
+            NOT_WELL: { icon: '🤒', label: 'Not Well', color: '#d97706' },
+            LEAVE_REQUEST: { icon: '📋', label: 'Leave', color: '#6366f1' }
+        };
+
+        return `
+        <div style="background:#fff;border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.06)">
+            <h3 style="font-size:14px;font-weight:800;color:#1e1b4b;margin:0 0 10px">📜 Recent Readiness (last 10)</h3>
+            ${log.map(r => {
+                const m = STATUS_META[r.status] || { icon: '❓', label: r.status, color: '#6b7280' };
+                const d = r.date ? new Date(r.date+'T00:00:00').toLocaleDateString('en-IN',{day:'2-digit',month:'short'}) : '';
+                const t = r.markedAt ? new Date(r.markedAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) : '';
+                return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f9fafb">
+                    <span style="font-size:14px">${m.icon}</span>
+                    <div style="flex:1">
+                        <span style="font-size:11px;font-weight:700;color:${m.color}">${m.label}</span>
+                        ${r.reason ? `<span style="font-size:10px;color:#9ca3af;margin-left:4px">— ${r.reason}</span>` : ''}
+                    </div>
+                    <div style="text-align:right">
+                        <div style="font-size:10px;font-weight:600;color:#374151">${d}</div>
+                        <div style="font-size:9px;color:#9ca3af">${t}</div>
+                    </div>
+                </div>`;
+            }).join('')}
+        </div>`;
+    }
+
+    // Auto-open PIN login if URL has ?mode=tech
+    if (new URLSearchParams(window.location.search).get('mode') === 'tech') {
+        window.addEventListener('DOMContentLoaded', () => setTimeout(_techSSShowLogin, 100));
+    }
+
+    // ════════════════════════════════════════════════════════════════
+
     window.gapiLoaded = gapiLoaded;
     window.gisLoaded  = gisLoaded;
     renderLogin();
