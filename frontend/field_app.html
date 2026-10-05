@@ -6165,6 +6165,7 @@
 
         try {
             await saveData('workLogs', workLogs);
+            _syncWorkLogToCloudSQL(wlID);
             closeFeedbackModal();
             renderView();
             showToast('✅ Customer feedback saved');
@@ -6306,6 +6307,22 @@
         };
     }
 
+
+    // ── Sync single worklog to Cloud SQL (so main app sees attachments) ──
+    async function _syncWorkLogToCloudSQL(wlID) {
+        try {
+            const wl = workLogs.find(x => x.wlID === wlID);
+            if (!wl) return;
+            const res = await fetch('/api/data/workLogs', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(workLogs)
+            });
+            if (res.ok) console.log('[CloudSQL] workLogs synced (attachment update)');
+            else console.warn('[CloudSQL] workLogs sync failed:', res.status);
+        } catch (e) { console.warn('[CloudSQL] workLogs sync error:', e.message); }
+    }
+
     async function saveKickOff(ev) {
         ev.preventDefault();
         const wlID = document.getElementById('koWlID').value;
@@ -6329,6 +6346,7 @@
         koData.updatedBy = currentUser?.name || currentUser?.email || 'Field App';
         workLogs[wi].kickOffRecord = koData;
         await saveData('workLogs', workLogs);
+        _syncWorkLogToCloudSQL(wlID);
         closeKickOffModal();
         renderView();
         showToast('✅ Kick-Off Record saved');
@@ -6448,6 +6466,7 @@
         gwData.updatedBy = currentUser?.name || currentUser?.email || 'Field App';
         workLogs[wi].growthOfWorkReport = gwData;
         await saveData('workLogs', workLogs);
+        _syncWorkLogToCloudSQL(wlID);
         closeGrowthRWModal();
         renderView();
         showToast('✅ Growth of Work Report saved');
