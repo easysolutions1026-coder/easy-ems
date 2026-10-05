@@ -6315,12 +6315,12 @@
         // Handle file upload
         const fileInput = document.getElementById('koSignedFile');
         if (fileInput.files.length) {
-            showToast('📤 Uploading signed form…', '#4338ca', 5000);
+            showToast('📤 Uploading signed form…', 5000);
             try {
                 
                 const uploaded = await uploadFieldAttach(fileInput.files[0], 'KickOffRecords');
                 koData.signedAttachment = uploaded;
-            } catch (e) { console.error('KO upload failed:', e); showToast('Upload failed: ' + e.message, '#dc2626'); }
+            } catch (e) { console.error('KO upload failed:', e); showToast('Upload failed: ' + e.message); }
         }
         const existing = workLogs[wi].kickOffRecord;
         koData.createdAt = existing?.createdAt || new Date().toISOString();
@@ -6331,7 +6331,7 @@
         await saveData('workLogs', workLogs);
         closeKickOffModal();
         renderView();
-        showToast('✅ Kick-Off Record saved', '#16a34a');
+        showToast('✅ Kick-Off Record saved');
     }
 
     async function printKickOffFromForm() {
@@ -6368,7 +6368,7 @@
         y=doc.lastAutoTable.finalY+4;doc.setFontSize(8);doc.setFont('helvetica','italic');doc.setTextColor(80,80,80);
         doc.text(ko.projectDetail||'',ML,y+3);
         doc.save('KickOffRecord_'+(wl?.project||'KO').replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_-]/g,'')+'_'+(ko.expectedStartDate||new Date().toISOString().substring(0,10))+'.pdf');
-        showToast('✅ Kick-Off PDF downloaded','#16a34a');
+        showToast('✅ Kick-Off PDF downloaded');
     }
 
     // ── GROWTH OF WORK / RE-WORK REPORT (ITSPL/QR/GW-RW-R) ──────────
@@ -6434,12 +6434,12 @@
         const gwData = _collectGrowthRWFromForm();
         const fileInput = document.getElementById('gwSignedFile');
         if (fileInput.files.length) {
-            showToast('📤 Uploading signed form…', '#9f1239', 5000);
+            showToast('📤 Uploading signed form…', 5000);
             try {
                 
-                const uploaded = await uploadFieldAttach(fileInput.files[0], 'KickOffRecords');
+                const uploaded = await uploadFieldAttach(fileInput.files[0], 'GrowthOfWork');
                 gwData.signedAttachment = uploaded;
-            } catch (e) { console.error('GW upload failed:', e); showToast('Upload failed: ' + e.message, '#dc2626'); }
+            } catch (e) { console.error('GW upload failed:', e); showToast('Upload failed: ' + e.message); }
         }
         const existing = workLogs[wi].growthOfWorkReport;
         gwData.createdAt = existing?.createdAt || new Date().toISOString();
@@ -6450,7 +6450,7 @@
         await saveData('workLogs', workLogs);
         closeGrowthRWModal();
         renderView();
-        showToast('✅ Growth of Work Report saved', '#16a34a');
+        showToast('✅ Growth of Work Report saved');
     }
 
     async function printGrowthRWFromForm() {
@@ -6483,7 +6483,7 @@
         y=doc.lastAutoTable.finalY+4;doc.setFontSize(8);doc.setFont('helvetica','italic');doc.setTextColor(80,80,80);
         doc.text('Issued By: MR',ML,y);doc.text('Approved By: DIRECTOR',ML,y+4);
         doc.save('GrowthOfWork_'+(wl?.project||'GW').replace(/\s+/g,'_').replace(/[^a-zA-Z0-9_-]/g,'')+'_'+(gw.preparedDate||new Date().toISOString().substring(0,10))+'.pdf');
-        showToast('✅ Growth of Work PDF downloaded','#16a34a');
+        showToast('✅ Growth of Work PDF downloaded');
     }
 
     // ── Feedback PDF — mirrors the ITSPL/QR/CF paper form ──────────────
