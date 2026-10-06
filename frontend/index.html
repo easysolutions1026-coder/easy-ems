@@ -32743,49 +32743,49 @@ Automated WFH alert — ${company} Attendance System.`;
             doc.setFont('helvetica','bold'); doc.setFontSize(13);
             doc.text('SALARY STRUCTURE', W/2, y, {align:'center'}); y += 8;
 
-            // Table
-            const tblX = M, pw = W - 2*M, rowH = 7;
-            const drawRow = (label, value, bold = false, bg = null) => {
+            // Table — consistent row height and alignment throughout
+            const tblX = M, pw = W - 2*M, rowH = 8;
+            const drawRow = (label, value, bold, bg, indent) => {
                 checkPage(rowH + 2);
-                if (bg) { doc.setFillColor(bg[0],bg[1],bg[2]); doc.rect(tblX, y-1, pw, rowH, 'F'); }
+                if (bg) { doc.setFillColor(bg[0],bg[1],bg[2]); doc.rect(tblX, y, pw, rowH, 'F'); }
                 doc.setFont('helvetica', bold?'bold':'normal'); doc.setFontSize(9);
-                doc.text(label, tblX+3, y+4);
-                if (value !== null) doc.text(value, tblX+pw-3, y+4, {align:'right'});
-                doc.setDrawColor(200); doc.line(tblX, y+rowH-1, tblX+pw, y+rowH-1);
+                doc.text(label, tblX + (indent||3), y + 5.5);
+                if (value !== null && value !== undefined) doc.text(value, tblX + pw - 5, y + 5.5, {align:'right'});
+                doc.setDrawColor(190); doc.line(tblX, y + rowH, tblX + pw, y + rowH);
                 y += rowH;
             };
 
-            // Header
-            doc.setFillColor(37,99,235); doc.rect(tblX, y-1, pw, rowH+1, 'F');
-            doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(255);
-            doc.text('Description', tblX+3, y+4);
-            doc.text('Amount (₹)', tblX+pw-3, y+4, {align:'right'});
-            y += rowH+1; doc.setTextColor(0);
+            // Table border
+            doc.setDrawColor(100); doc.setLineWidth(0.3);
 
+            // Header row
+            doc.setFillColor(37,99,235); doc.rect(tblX, y, pw, rowH + 1, 'F');
+            doc.setFont('helvetica','bold'); doc.setFontSize(9.5); doc.setTextColor(255);
+            doc.text('Description', tblX + 3, y + 6);
+            doc.text('A m o u n t', tblX + pw - 5, y + 6, {align:'right'});
+            y += rowH + 1; doc.setTextColor(0); doc.setLineWidth(0.1);
+
+            // Earnings
             drawRow('Basic', fmtC(data.basicPay));
-            // Fixed Allowance breakdown
-            doc.setFont('helvetica','bold'); doc.setFontSize(8);
-            checkPage(8);
-            doc.text('FIXED ALLOWANCE', tblX+3, y+3);
-            doc.setDrawColor(200); doc.line(tblX, y+rowH-2, tblX+pw, y+rowH-2); y += rowH-1;
-            doc.setFont('helvetica','normal'); doc.setFontSize(9);
-            if (+data.hraAmount) drawRow('   HRA', fmtC(data.hraAmount));
-            if (+data.daAmount) drawRow('   DA', fmtC(data.daAmount));
-            if (+data.gradePay) drawRow('   Grade Pay', fmtC(data.gradePay));
-            if (+data.conveyance) drawRow('   Conveyance', fmtC(data.conveyance));
-            if (+data.medical) drawRow('   Medical', fmtC(data.medical));
-            if (+data.bonusMonthly) drawRow('   Annual Bonus (monthly)', fmtC(data.bonusMonthly));
+            drawRow('FIXED ALLOWANCE', null, true);
+            if (+data.hraAmount) drawRow('HRA', fmtC(data.hraAmount), false, null, 10);
+            if (+data.daAmount) drawRow('DA', fmtC(data.daAmount), false, null, 10);
+            if (+data.gradePay) drawRow('Grade Pay', fmtC(data.gradePay), false, null, 10);
+            if (+data.conveyance) drawRow('Conveyance', fmtC(data.conveyance), false, null, 10);
+            if (+data.medical) drawRow('Medical', fmtC(data.medical), false, null, 10);
+            if (+data.bonusMonthly) drawRow('Annual Bonus (monthly)', fmtC(data.bonusMonthly), false, null, 10);
             drawRow('Total Fixed Allowance', fmtC(data.fixedAllowance), true);
-            y += 2;
+            y += 1;
             drawRow('VARIABLE ALLOWANCE', fmtC(data.variableAllowance));
             drawRow('GROSS SALARY', fmtC(data.grossSalary), true, [219,234,254]);
-            y += 3;
+            y += 2;
+            // Deductions
             drawRow('DEDUCTIONS', null, true, [254,242,242]);
-            drawRow('Professional Tax', fmtC(data.pt));
-            drawRow('PF — Employee Contribution (Basic + Fixed) × 12%', fmtC(data.pfEmployee));
-            drawRow('ESIC = 0.75% of Gross Salary', fmtC(data.esic));
+            drawRow('Professional Tax', fmtC(data.pt), false, null, 10);
+            drawRow('PF — Employee Contribution (Basic + Fixed) × 12%', fmtC(data.pfEmployee), false, null, 10);
+            drawRow('ESIC = 0.75% of Gross Salary', fmtC(data.esic), false, null, 10);
             drawRow('TOTAL DEDUCTION', fmtC(data.totalDeduction), true, [254,226,226]);
-            y += 3;
+            y += 2;
             drawRow('NET PAY', fmtC(data.netPay), true, [220,252,231]);
 
             // Employee acceptance
