@@ -31301,24 +31301,186 @@ Automated WFH alert — ${company} Attendance System.`;
         // ── APPOINTMENT LETTERS LIST (within HR tab) ──
         function _hrRenderApptList(st) {
             const letters = st.appointmentLetters || [];
-            const addBtn = `<button onclick="openApptLetterModal('${st.staffID}')" class="px-3 py-1.5 bg-teal-600 text-white text-xs font-bold rounded-lg hover:bg-teal-700">+ New Letter</button>`;
-            if (!letters.length) return `<div class="text-center py-10 text-gray-400"><p class="text-3xl mb-2">📋</p><p>No appointment letters yet.</p><div class="mt-3">${addBtn}</div></div>`;
-            const rows = letters.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).map(l => `
-                <div class="border rounded-xl p-3 mb-2 bg-white">
+            const btns = `<div class="flex gap-2 flex-wrap">
+                <button onclick="openApptLetterModal('${st.staffID}')" class="px-3 py-1.5 bg-teal-600 text-white text-xs font-bold rounded-lg hover:bg-teal-700">+ New Letter</button>
+                <button onclick="_openHistoricalApptModal('${st.staffID}')" class="px-3 py-1.5 bg-amber-600 text-white text-xs font-bold rounded-lg hover:bg-amber-700" title="Generate a backdated letter for a past period (manual entry, no CTC auto-fill)">📅 Historical Letter</button>
+                <button onclick="_openUploadApptModal('${st.staffID}')" class="px-3 py-1.5 bg-purple-600 text-white text-xs font-bold rounded-lg hover:bg-purple-700" title="Upload a scanned copy of an existing paper letter">📤 Upload Scan</button>
+            </div>`;
+            if (!letters.length) return `<div class="text-center py-10 text-gray-400"><p class="text-3xl mb-2">📋</p><p>No appointment letters yet.</p><div class="mt-3">${btns}</div></div>`;
+            const rows = letters.sort((a,b)=>(b.contractBegin||b.createdAt||'').localeCompare(a.contractBegin||a.createdAt||'')).map(l => {
+                const isHist = l.historical;
+                const isUpload = l.uploadedScan;
+                const typeBadge = l.letterType==='office'?'🏢':'🔧';
+                const histBadge = isHist ? '<span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:600;margin-left:4px">📅 Historical</span>' : '';
+                const uploadBadge = isUpload ? '<span style="background:#f3e8ff;color:#7c3aed;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:600;margin-left:4px">📤 Scan</span>' : '';
+                return `<div class="border rounded-xl p-3 mb-2 bg-white">
                     <div class="flex justify-between items-start">
                         <div>
                             <span class="font-semibold text-sm">${l.designation||l.employeeName||''}</span>
-                            <span class="text-xs text-gray-400 ml-2">${l.contractBegin||''} → ${l.contractEnd||''}</span>
+                            <span class="text-xs text-gray-400 ml-2">${typeBadge} ${l.contractBegin||l.letterDate||''} ${l.contractEnd?'→ '+l.contractEnd:''}</span>
+                            ${histBadge}${uploadBadge}
                             <span class="text-xs text-gray-400 ml-2">Created ${l.createdAt?new Date(l.createdAt).toLocaleDateString('en-IN'):'—'}</span>
                         </div>
                         <div class="flex gap-1">
-                            <button onclick="openApptLetterModal('${st.staffID}','${l.letterID}')" class="text-[10px] px-2 py-1 bg-blue-50 text-blue-700 border border-blue-200 rounded-md">Edit</button>
-                            <button onclick="_apptLetterRedownload('${st.staffID}','${l.letterID}')" class="text-[10px] px-2 py-1 bg-green-50 text-green-700 border border-green-200 rounded-md">PDF</button>
+                            ${isUpload && l.scanData ? `<button onclick="_viewUploadedScan('${st.staffID}','${l.letterID}')" class="text-[10px] px-2 py-1 bg-purple-50 text-purple-700 border border-purple-200 rounded-md">View</button>` : ''}
+                            ${!isUpload ? `<button onclick="openApptLetterModal('${st.staffID}','${l.letterID}')" class="text-[10px] px-2 py-1 bg-blue-50 text-blue-700 border border-blue-200 rounded-md">Edit</button>` : ''}
+                            ${!isUpload ? `<button onclick="_apptLetterRedownload('${st.staffID}','${l.letterID}')" class="text-[10px] px-2 py-1 bg-green-50 text-green-700 border border-green-200 rounded-md">PDF</button>` : ''}
                             <button onclick="_apptLetterDelete('${st.staffID}','${l.letterID}')" class="text-[10px] px-2 py-1 bg-red-50 text-red-700 border border-red-200 rounded-md">Del</button>
                         </div>
                     </div>
-                </div>`).join('');
-            return `<div class="flex justify-between items-center mb-3"><h4 class="font-bold text-sm text-gray-700">Appointment Letters</h4>${addBtn}</div>${rows}`;
+                </div>`;
+            }).join('');
+            return `<div class="flex justify-between items-center mb-3"><h4 class="font-bold text-sm text-gray-700">Appointment Letters</h4>${btns}</div>${rows}`;
+        }
+
+        // ── HISTORICAL (BACKDATED) APPOINTMENT LETTER ──
+        // Opens the same generator but with blank fields (no CTC auto-fill),
+        // a "Historical" flag, and past-date defaults.
+        function _openHistoricalApptModal(staffID) {
+            const st = staff.find(s => s.staffID === staffID);
+            if (!st) return;
+            const isTech = st.staffType === 'Technician';
+
+            // Pre-populate a minimal historical record so openApptLetterModal
+            // doesn't auto-fill from current CTC
+            const histID = 'AL_HIST_' + Date.now();
+            if (!st.appointmentLetters) st.appointmentLetters = [];
+            st.appointmentLetters.push({
+                letterID: histID,
+                letterType: isTech ? 'technician' : 'office',
+                historical: true,
+                employeeName: st.name || '',
+                fatherName: st.fatherName || '',
+                address: st.address || '',
+                mobile: st.mobile || '',
+                designation: '',
+                division: '',
+                letterDate: '',
+                letterCity: 'Chennai',
+                contractBegin: '', contractEnd: '',
+                basicPay: 0, daPct: 0, daAmount: 0, gradePay: 0,
+                // Tech fields
+                contractMonths: 12, retainerDays: 15, noticePeriodMonths: 3,
+                monthlyWage: 0, perDayWage: 0,
+                sailingPerDay: 0, localWorkingPerDay: 0, outstationPerDay: 0,
+                anchoragePerDay: 0, thresh15PerDay: 0, thresh20PerDay: 0,
+                retainerAmount: 0, annualGratuity: 0, totalStatutory: 0,
+                // Office fields
+                trainingMonthsMin: 3, trainingMonthsMax: 6, stipend: 0,
+                postConfirmDesignation: '', fixedAllowance: 0, variableAllowance: 0,
+                grossSalary: 0, hraAmount: 0, conveyance: 0, medical: 0, bonusMonthly: 0,
+                pfEmployee: 0, esic: 0, pt: 0, totalDeduction: 0, netPay: 0,
+                signatoryName: '', signatoryDesignation: 'Director',
+                createdAt: new Date().toISOString(),
+            });
+            openApptLetterModal(staffID, histID);
+        }
+
+        // ── UPLOAD SCANNED APPOINTMENT LETTER ──
+        function _openUploadApptModal(staffID) {
+            const st = staff.find(s => s.staffID === staffID);
+            if (!st) return;
+            const modal = document.createElement('div');
+            modal.id = 'uploadApptModal';
+            modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99999;display:flex;align-items:center;justify-content:center;overflow-y:auto';
+            modal.onclick = e => { if (e.target === modal) modal.remove(); };
+            modal.innerHTML = `<div style="background:#fff;border-radius:16px;width:min(500px,94vw);box-shadow:0 20px 60px rgba(0,0,0,.3)">
+                <div style="background:linear-gradient(135deg,#7c3aed,#6d28d9);padding:14px 18px;border-radius:16px 16px 0 0;display:flex;justify-content:space-between;align-items:center">
+                    <div style="color:#fff;font-weight:700;font-size:15px">📤 Upload Scanned Letter — ${st.name}</div>
+                    <button onclick="document.getElementById('uploadApptModal').remove()" style="color:#fff;font-size:20px;background:none;border:none;cursor:pointer">✕</button>
+                </div>
+                <div style="padding:18px" class="space-y-3">
+                    <p class="text-xs text-gray-500">Upload a photo or scan of an existing paper appointment letter for record-keeping.</p>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div><label class="block text-xs font-semibold text-gray-600 mb-1">Designation (at that time)</label>
+                            <input type="text" id="upl_designation" value="${st.designation||''}" class="w-full px-3 py-2 border rounded-lg text-sm"/></div>
+                        <div><label class="block text-xs font-semibold text-gray-600 mb-1">Letter Type</label>
+                            <select id="upl_letterType" class="w-full px-3 py-2 border rounded-lg text-sm">
+                                <option value="technician" ${st.staffType==='Technician'?'selected':''}>🔧 Technician</option>
+                                <option value="office" ${st.staffType!=='Technician'?'selected':''}>🏢 Office Staff</option>
+                            </select></div>
+                        <div><label class="block text-xs font-semibold text-gray-600 mb-1">Letter Date</label>
+                            <input type="date" id="upl_letterDate" class="w-full px-3 py-2 border rounded-lg text-sm"/></div>
+                        <div><label class="block text-xs font-semibold text-gray-600 mb-1">Contract / Period Start</label>
+                            <input type="date" id="upl_contractBegin" class="w-full px-3 py-2 border rounded-lg text-sm"/></div>
+                        <div><label class="block text-xs font-semibold text-gray-600 mb-1">Contract / Period End</label>
+                            <input type="date" id="upl_contractEnd" class="w-full px-3 py-2 border rounded-lg text-sm"/></div>
+                        <div><label class="block text-xs font-semibold text-gray-600 mb-1">Remarks</label>
+                            <input type="text" id="upl_remarks" placeholder="e.g. Original on file" class="w-full px-3 py-2 border rounded-lg text-sm"/></div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">Scan / Photo (PDF, JPG, PNG)</label>
+                        <input type="file" id="upl_scanFile" accept=".pdf,.jpg,.jpeg,.png,.webp" class="w-full px-3 py-2 border rounded-lg text-sm"/>
+                        <p class="text-[10px] text-gray-400 mt-1">Max 2 MB. The file is stored as a base64 attachment in the staff record.</p>
+                    </div>
+                    <div class="flex justify-end gap-2 pt-2">
+                        <button onclick="document.getElementById('uploadApptModal').remove()" class="px-4 py-2 text-sm border rounded-lg text-gray-600">Cancel</button>
+                        <button onclick="_saveUploadedApptLetter('${staffID}')" class="px-4 py-2 text-sm bg-purple-600 text-white rounded-lg font-bold hover:bg-purple-700">💾 Save</button>
+                    </div>
+                </div>
+            </div>`;
+            document.body.appendChild(modal);
+        }
+
+        async function _saveUploadedApptLetter(staffID) {
+            const idx = staff.findIndex(s => s.staffID === staffID);
+            if (idx < 0) return;
+            if (await _concurBlockIfStale('staff', [{ id: staffID, idKey: 'staffID' }])) return;
+
+            const fileInput = document.getElementById('upl_scanFile');
+            let scanData = '', scanName = '', scanType = '';
+            if (fileInput?.files?.length) {
+                const file = fileInput.files[0];
+                if (file.size > 2 * 1024 * 1024) { alert('File too large (max 2 MB). Compress or resize and try again.'); return; }
+                scanData = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(file);
+                });
+                scanName = file.name;
+                scanType = file.type;
+            }
+
+            const rec = {
+                letterID: 'AL_UPL_' + Date.now(),
+                letterType: document.getElementById('upl_letterType')?.value || 'technician',
+                historical: true,
+                uploadedScan: true,
+                employeeName: staff[idx].name || '',
+                designation: document.getElementById('upl_designation')?.value?.trim() || '',
+                letterDate: document.getElementById('upl_letterDate')?.value || '',
+                contractBegin: document.getElementById('upl_contractBegin')?.value || '',
+                contractEnd: document.getElementById('upl_contractEnd')?.value || '',
+                remarks: document.getElementById('upl_remarks')?.value?.trim() || '',
+                scanData, scanName, scanType,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+            };
+
+            if (!staff[idx].appointmentLetters) staff[idx].appointmentLetters = [];
+            staff[idx].appointmentLetters.push(rec);
+            _stampRecord(staff[idx]);
+            await saveData('staff', staff);
+            document.getElementById('uploadApptModal')?.remove();
+            showToast('Scanned letter uploaded & saved', 'success');
+            renderStaffTab();
+        }
+
+        function _viewUploadedScan(staffID, letterID) {
+            const st = staff.find(s => s.staffID === staffID);
+            if (!st) return;
+            const l = (st.appointmentLetters || []).find(x => x.letterID === letterID);
+            if (!l || !l.scanData) { alert('No scan file attached.'); return; }
+            // Open the data URL in a new tab
+            const win = window.open('', '_blank');
+            if (!win) { alert('Pop-up blocked — allow pop-ups and try again.'); return; }
+            if (l.scanType?.startsWith('image/')) {
+                win.document.write(`<html><head><title>${l.scanName||'Scan'}</title></head><body style="margin:0;display:flex;justify-content:center;align-items:flex-start;background:#222"><img src="${l.scanData}" style="max-width:100%;height:auto"/></body></html>`);
+            } else {
+                // PDF or other — embed
+                win.document.write(`<html><head><title>${l.scanName||'Scan'}</title></head><body style="margin:0"><embed src="${l.scanData}" type="${l.scanType||'application/pdf'}" width="100%" height="100%" style="position:absolute;inset:0"/></body></html>`);
+            }
         }
 
         // ── GENERIC DELETE HELPER ──
@@ -32046,7 +32208,6 @@ Automated WFH alert — ${company} Attendance System.`;
             const st = staff.find(s => s.staffID === staffID);
             if (!st) { alert('Staff record not found.'); return; }
 
-            // Load existing letter or build defaults from staff record
             const existing = existingLetterID
                 ? (st.appointmentLetters||[]).find(l => l.letterID === existingLetterID)
                 : null;
@@ -32054,89 +32215,117 @@ Automated WFH alert — ${company} Attendance System.`;
             const isTech = st.staffType === 'Technician';
             const ctc = _computeCTC(st);
 
-            // Defaults derived from staff record
+            // ── Shared defaults ──
             const d = existing || {
+                letterType: isTech ? 'technician' : 'office',
                 employeeName: st.name || '',
                 fatherName: st.fatherName || '',
                 address: st.address || '',
                 mobile: st.mobile || '',
                 designation: st.designation || (isTech ? 'Engine Engineer' : st.designation || ''),
                 division: isTech ? 'Engine Projects Division' : 'Office Administration',
-                contractMonths: 12,
-                contractBegin: st.contractBegin || new Date().toISOString().split('T')[0],
-                contractEnd: st.contractEnd || '',
                 letterDate: new Date().toISOString().split('T')[0],
-                retainerDays: 15,
-                noticePeriodMonths: 3,
-                monthlyWage: isTech ? Math.round(ctc.monthlyGross) : Math.round(ctc.monthlyGross),
+                letterCity: 'Chennai',
+                signatoryName: '',
+                signatoryDesignation: 'Director',
                 basicPay: Math.round(ctc.basic),
                 daPct: isTech ? (st.techDAPct ?? 65) : (st.daPct ?? 65),
                 daAmount: Math.round(ctc.da),
                 gradePay: Math.round(ctc.gp),
-                gpPct: isTech ? (st.techGPPct ?? 30) : 0,
-                perDayWage: isTech ? ctc.dailyWage : 0,
-                sailingPerDay: ctc.sailingPerDay || 0,
-                localWorkingPerDay: isTech ? ctc.dailyWage : 0,
-                outstationPerDay: ctc.outstationPerDay || 0,
-                anchoragePerDay: ctc.anchoragePerDay || 0,
-                thresh15PerDay: 0,
-                thresh20PerDay: 0,
-                signatoryName: '',
-                signatoryDesignation: 'Director',
             };
 
-            // Compute derived fields
-            const totalStatutory = d.basicPay + d.daAmount + d.gradePay;
-            d.totalStatutory = totalStatutory;
-            d.retainerAmount = Math.round(d.monthlyWage / 30 * d.retainerDays);
-            d.annualGratuity = Math.round(totalStatutory * 15 / 26);
-
-            // Auto-fill contract end from begin + months
-            if (d.contractBegin && !d.contractEnd && d.contractMonths) {
-                const dt = new Date(d.contractBegin + 'T00:00:00');
-                dt.setMonth(dt.getMonth() + d.contractMonths);
-                dt.setDate(dt.getDate() - 1);
-                d.contractEnd = dt.toISOString().split('T')[0];
+            // ── Technician-specific defaults ──
+            if (isTech && !existing) {
+                Object.assign(d, {
+                    contractMonths: 12,
+                    contractBegin: st.contractBegin || new Date().toISOString().split('T')[0],
+                    contractEnd: st.contractEnd || '',
+                    retainerDays: 15,
+                    noticePeriodMonths: 3,
+                    monthlyWage: Math.round(ctc.monthlyGross),
+                    gpPct: st.techGPPct ?? 30,
+                    perDayWage: ctc.dailyWage || 0,
+                    sailingPerDay: ctc.sailingPerDay || 0,
+                    localWorkingPerDay: ctc.dailyWage || 0,
+                    outstationPerDay: ctc.outstationPerDay || 0,
+                    anchoragePerDay: ctc.anchoragePerDay || 0,
+                    thresh15PerDay: +(((ctc.dailyWage||0) * (st.thresh15pct ?? 50) / 100).toFixed(2)),
+                    thresh20PerDay: +(((ctc.dailyWage||0) * (st.thresh20pct ?? 30) / 100).toFixed(2)),
+                });
+                const totalStat = d.basicPay + d.daAmount + d.gradePay;
+                d.totalStatutory = totalStat;
+                d.retainerAmount = Math.round(d.monthlyWage / 30 * d.retainerDays);
+                d.annualGratuity = Math.round(totalStat * 15 / 26);
+                if (d.contractBegin && !d.contractEnd && d.contractMonths) {
+                    const dt = new Date(d.contractBegin + 'T00:00:00');
+                    dt.setMonth(dt.getMonth() + d.contractMonths);
+                    dt.setDate(dt.getDate() - 1);
+                    d.contractEnd = dt.toISOString().split('T')[0];
+                }
             }
 
-            // Thresh bonus allowances
-            if (isTech) {
-                const t15 = st.thresh15pct ?? 50;
-                const t20 = st.thresh20pct ?? 30;
-                d.thresh15PerDay = +(d.perDayWage * t15 / 100).toFixed(2);
-                d.thresh20PerDay = +(d.perDayWage * t20 / 100).toFixed(2);
+            // ── Office-staff-specific defaults ──
+            // Pull directly from _computeCTC which already knows the staff
+            // record's salary structure (Basic, HRA%, DA%, GP, Conveyance,
+            // Medical, Variable, PF, ESIC, etc.)
+            if (!isTech && !existing) {
+                const fixedAllow = Math.round(ctc.hra + ctc.da + ctc.gp + ctc.conveyance + ctc.medical + ctc.bonusMonthly);
+                const variableAllow = Math.round(ctc.variable);
+                const grossSalary = Math.round(ctc.monthlyGross);
+                const pfEmp = Math.round(ctc.pfEmployee);
+                const esicEmp = Math.round(ctc.esicEmployee);
+                const pt = grossSalary > 21000 ? 200 : (grossSalary > 15000 ? 150 : 0);
+                Object.assign(d, {
+                    trainingMonthsMin: 3, trainingMonthsMax: 6,
+                    stipend: Math.round(grossSalary * 0.7),
+                    postConfirmDesignation: st.designation || '',
+                    contractBegin: st.contractBegin || st.doj || new Date().toISOString().split('T')[0],
+                    hraPct: ctc.hraPct,
+                    hraAmount: Math.round(ctc.hra),
+                    daAmount: Math.round(ctc.da),
+                    gradePay: Math.round(ctc.gp),
+                    conveyance: Math.round(ctc.conveyance),
+                    medical: Math.round(ctc.medical),
+                    bonusMonthly: Math.round(ctc.bonusMonthly),
+                    fixedAllowance: fixedAllow,
+                    variableAllowance: variableAllow,
+                    grossSalary, pfEmployee: pfEmp, esic: esicEmp, pt,
+                    pfPct: ctc.pfPct,
+                    esicPct: ctc.esicPct,
+                    totalDeduction: pfEmp + esicEmp + pt,
+                    netPay: grossSalary - (pfEmp + esicEmp + pt),
+                });
             }
+            // For existing letters, carry letterType
+            if (!d.letterType) d.letterType = isTech ? 'technician' : 'office';
 
             const modal = document.createElement('div');
             modal.id = 'apptLetterModal';
             modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99999;display:flex;align-items:flex-start;justify-content:center;padding-top:16px;overflow-y:auto';
             modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
 
-            const fmtDate = (ds) => {
-                if (!ds) return '___________';
-                const dt = new Date(ds + 'T00:00:00');
-                return dt.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
-            };
-            const fmtCur = (n) => '₹' + (+n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
             const inp = (id, label, val, type='text', extra='') =>
                 `<div><label class="block text-xs font-semibold text-gray-600 mb-1">${label}</label>
                  <input type="${type}" id="al_${id}" value="${(val+'').replace(/"/g,'&quot;')}" class="w-full px-3 py-2 border rounded-lg text-sm" ${extra}/></div>`;
 
+            const headerColor = isTech ? 'linear-gradient(135deg,#b45309,#d97706)' : 'linear-gradient(135deg,#1d4ed8,#3b82f6)';
+            const typeLabel = isTech ? '🔧 Technician Template' : '🏢 Office Staff Template';
+
             modal.innerHTML = `
             <div style="background:#fff;border-radius:16px;width:min(900px,96vw);margin-bottom:40px;box-shadow:0 20px 60px rgba(0,0,0,.3)">
-                <div style="background:linear-gradient(135deg,#b45309,#d97706);padding:16px 20px;border-radius:16px 16px 0 0;display:flex;justify-content:space-between;align-items:center">
+                <div style="background:${headerColor};padding:16px 20px;border-radius:16px 16px 0 0;display:flex;justify-content:space-between;align-items:center">
                     <div>
                         <div style="color:#fff;font-weight:700;font-size:16px">📋 Appointment Letter — ${st.name}</div>
-                        <div style="color:#fef3c7;font-size:12px;margin-top:2px">${st.designation||''} · ${st.staffType} · ${existing ? 'Edit Existing' : 'New Letter'}</div>
+                        <div style="color:#e0e7ff;font-size:12px;margin-top:2px">${st.designation||''} · ${typeLabel} · ${existing ? 'Edit Existing' : 'New Letter'}</div>
                     </div>
                     <div style="display:flex;gap:8px">
-                        <button onclick="_apptLetterPreviewPDF('${staffID}')" style="padding:6px 12px;background:#fff;color:#b45309;border:none;border-radius:8px;font-weight:700;font-size:12px;cursor:pointer">👁 Preview PDF</button>
-                        <button onclick="_apptLetterSaveAndPDF('${staffID}','${existingLetterID||''}')" style="padding:6px 12px;background:#fff;color:#047857;border:none;border-radius:8px;font-weight:700;font-size:12px;cursor:pointer">💾 Save & Download</button>
+                        <button onclick="_apptLetterPreviewPDF('${staffID}')" style="padding:6px 12px;background:#fff;color:#1e40af;border:none;border-radius:8px;font-weight:700;font-size:12px;cursor:pointer">👁 Preview</button>
+                        <button onclick="_apptLetterSaveAndPDF('${staffID}','${existingLetterID||''}')" style="padding:6px 12px;background:#fff;color:#047857;border:none;border-radius:8px;font-weight:700;font-size:12px;cursor:pointer">💾 Save & PDF</button>
                         <button onclick="document.getElementById('apptLetterModal').remove()" style="color:#fff;font-size:22px;background:none;border:none;cursor:pointer">✕</button>
                     </div>
                 </div>
                 <div style="padding:20px">
+                    <input type="hidden" id="al_letterType" value="${d.letterType}"/>
                     <!-- Employee Details -->
                     <div style="border:1px solid #e5e7eb;border-radius:12px;padding:14px;margin-bottom:16px">
                         <h4 style="font-weight:700;font-size:13px;color:#78350f;margin-bottom:10px">👤 Employee Details</h4>
@@ -32144,27 +32333,30 @@ Automated WFH alert — ${company} Attendance System.`;
                             ${inp('name','Full Name', d.employeeName)}
                             ${inp('fatherName',"Father's / Guardian's Name", d.fatherName)}
                             ${inp('mobile','Mobile', d.mobile)}
+                            ${inp('letterDate','Letter Date', d.letterDate, 'date')}
+                            ${inp('letterCity','City', d.letterCity)}
+                            ${inp('designation','Designation', d.designation)}
                             <div class="col-span-2 md:col-span-3">
                                 <label class="block text-xs font-semibold text-gray-600 mb-1">Address</label>
                                 <textarea id="al_address" rows="2" class="w-full px-3 py-2 border rounded-lg text-sm">${(d.address||'').replace(/</g,'&lt;')}</textarea>
                             </div>
                         </div>
                     </div>
-                    <!-- Contract Details -->
+
+                    ${isTech ? `
+                    <!-- ═══ TECHNICIAN: Contract Details ═══ -->
                     <div style="border:1px solid #e5e7eb;border-radius:12px;padding:14px;margin-bottom:16px">
-                        <h4 style="font-weight:700;font-size:13px;color:#78350f;margin-bottom:10px">📅 Contract Details</h4>
+                        <h4 style="font-weight:700;font-size:13px;color:#78350f;margin-bottom:10px">📅 Fixed-Term Contract</h4>
                         <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-                            ${inp('designation','Designation', d.designation)}
                             ${inp('division','Division', d.division)}
-                            ${inp('contractMonths','Contract Duration (months)', d.contractMonths, 'number', 'min="1" max="60" onchange="_apptRecalcEnd()"')}
-                            ${inp('letterDate','Letter Date', d.letterDate, 'date')}
-                            ${inp('contractBegin','Contract Begin', d.contractBegin, 'date', 'onchange="_apptRecalcEnd()"')}
-                            ${inp('contractEnd','Contract End', d.contractEnd, 'date')}
+                            ${inp('contractMonths','Duration (months)', d.contractMonths, 'number', 'min="1" max="60" onchange="_apptRecalcEnd()"')}
+                            ${inp('contractBegin','Begin', d.contractBegin, 'date', 'onchange="_apptRecalcEnd()"')}
+                            ${inp('contractEnd','End', d.contractEnd, 'date')}
                             ${inp('retainerDays','Retainer Days', d.retainerDays, 'number', 'min="0" max="30"')}
                             ${inp('noticePeriodMonths','Notice Period (months)', d.noticePeriodMonths, 'number', 'min="0" max="6"')}
                         </div>
                     </div>
-                    <!-- Annexure A: Wage Structure -->
+                    <!-- ═══ TECHNICIAN: Annexure A ═══ -->
                     <div style="border:1px solid #e5e7eb;border-radius:12px;padding:14px;margin-bottom:16px">
                         <h4 style="font-weight:700;font-size:13px;color:#78350f;margin-bottom:10px">💰 Annexure A — Wage Structure</h4>
                         <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -32174,8 +32366,8 @@ Automated WFH alert — ${company} Attendance System.`;
                             ${inp('daAmount','DA Amount ₹', d.daAmount, 'number', 'min="0" step="1"')}
                             ${inp('gradePay','Grade Pay ₹', d.gradePay, 'number', 'min="0" step="1"')}
                             ${inp('perDayWage','Per Day Wage ₹', d.perDayWage, 'number', 'min="0" step="0.01"')}
-                            ${inp('retainerAmount','Retainer Amount ₹', d.retainerAmount, 'number', 'min="0" step="1"')}
-                            ${inp('annualGratuity','Annual Gratuity Accrual ₹', d.annualGratuity, 'number', 'min="0" step="1"')}
+                            ${inp('retainerAmount','Retainer Amount ₹', d.retainerAmount||0, 'number', 'min="0" step="1"')}
+                            ${inp('annualGratuity','Annual Gratuity Accrual ₹', d.annualGratuity||0, 'number', 'min="0" step="1"')}
                         </div>
                         <h5 style="font-weight:600;font-size:12px;color:#92400e;margin:12px 0 8px">Allowances (per day)</h5>
                         <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -32186,7 +32378,45 @@ Automated WFH alert — ${company} Attendance System.`;
                             ${inp('thresh15PerDay','> 15 Days Bonus ₹/day', d.thresh15PerDay, 'number', 'min="0" step="0.01"')}
                             ${inp('thresh20PerDay','> 20 Days Bonus ₹/day', d.thresh20PerDay, 'number', 'min="0" step="0.01"')}
                         </div>
+                    </div>` : `
+                    <!-- ═══ OFFICE STAFF: Training & Confirmation ═══ -->
+                    <div style="border:1px solid #e5e7eb;border-radius:12px;padding:14px;margin-bottom:16px">
+                        <h4 style="font-weight:700;font-size:13px;color:#1e40af;margin-bottom:10px">🎓 Training & Confirmation</h4>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            ${inp('contractBegin','Joining Date', d.contractBegin, 'date')}
+                            ${inp('trainingMonthsMin','Training Min (months)', d.trainingMonthsMin, 'number', 'min="1" max="12"')}
+                            ${inp('trainingMonthsMax','Training Max (months)', d.trainingMonthsMax, 'number', 'min="1" max="24"')}
+                            ${inp('stipend','Training Stipend ₹/month', d.stipend, 'number', 'min="0" step="1"')}
+                            ${inp('postConfirmDesignation','Post-Confirmation Designation', d.postConfirmDesignation)}
+                            ${inp('division','Division / Department', d.division)}
+                        </div>
                     </div>
+                    <!-- ═══ OFFICE STAFF: Salary Structure ═══ -->
+                    <div style="border:1px solid #e5e7eb;border-radius:12px;padding:14px;margin-bottom:16px">
+                        <h4 style="font-weight:700;font-size:13px;color:#1e40af;margin-bottom:10px">💰 Salary Structure (Post-Confirmation) — from Staff CTC</h4>
+                        <p class="text-[10px] text-gray-400 mb-2">Auto-filled from staff record. Edit here for this letter only — staff record is not changed.</p>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            ${inp('basicPay','Basic ₹', d.basicPay, 'number', 'min="0" step="1"')}
+                            ${inp('hraAmount','HRA ₹ ('+d.hraPct+'%)', d.hraAmount||d.daAmount, 'number', 'min="0" step="1"')}
+                            ${inp('daAmount','DA ₹ ('+d.daPct+'%)', d.daAmount, 'number', 'min="0" step="1"')}
+                            ${inp('gradePay','Grade Pay ₹', d.gradePay, 'number', 'min="0" step="1"')}
+                            ${inp('conveyance','Conveyance ₹', d.conveyance||0, 'number', 'min="0" step="1"')}
+                            ${inp('medical','Medical ₹', d.medical||0, 'number', 'min="0" step="1"')}
+                            ${inp('bonusMonthly','Bonus (monthly) ₹', d.bonusMonthly||0, 'number', 'min="0" step="1"')}
+                            ${inp('fixedAllowance','Total Fixed Allowance ₹', d.fixedAllowance, 'number', 'min="0" step="1"')}
+                            ${inp('variableAllowance','Variable Allowance ₹', d.variableAllowance, 'number', 'min="0" step="1"')}
+                            ${inp('grossSalary','Gross Salary ₹', d.grossSalary, 'number', 'min="0" step="1"')}
+                        </div>
+                        <h5 style="font-weight:600;font-size:12px;color:#1e40af;margin:12px 0 8px">Deductions</h5>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            ${inp('pt','Professional Tax ₹', d.pt, 'number', 'min="0" step="1"')}
+                            ${inp('pfEmployee','PF Employee ('+d.pfPct+'%) ₹', d.pfEmployee, 'number', 'min="0" step="1"')}
+                            ${inp('esic','ESIC ('+d.esicPct+'%) ₹', d.esic, 'number', 'min="0" step="1"')}
+                            ${inp('totalDeduction','Total Deduction ₹', d.totalDeduction, 'number', 'min="0" step="1"')}
+                            ${inp('netPay','Net Pay ₹', d.netPay, 'number', 'min="0" step="1"')}
+                        </div>
+                    </div>`}
+
                     <!-- Signatory -->
                     <div style="border:1px solid #e5e7eb;border-radius:12px;padding:14px;margin-bottom:16px">
                         <h4 style="font-weight:700;font-size:13px;color:#78350f;margin-bottom:10px">✍️ Authorized Signatory</h4>
@@ -32196,7 +32426,7 @@ Automated WFH alert — ${company} Attendance System.`;
                         </div>
                     </div>
 
-                    <!-- Existing Letters List -->
+                    <!-- Existing Letters -->
                     ${(st.appointmentLetters||[]).length ? `
                     <div style="border:1px solid #e5e7eb;border-radius:12px;padding:14px">
                         <h4 style="font-weight:700;font-size:13px;color:#78350f;margin-bottom:10px">📂 Previous Letters (${(st.appointmentLetters||[]).length})</h4>
@@ -32205,8 +32435,9 @@ Automated WFH alert — ${company} Attendance System.`;
                             <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;margin-bottom:6px">
                                 <div>
                                     <span style="font-weight:600;font-size:12px;color:#78350f">${l.designation||l.employeeName}</span>
-                                    <span style="font-size:10px;color:#9ca3af;margin-left:8px">${l.contractBegin||''} → ${l.contractEnd||''}</span>
-                                    <span style="font-size:10px;color:#6b7280;margin-left:8px">Created ${l.createdAt ? new Date(l.createdAt).toLocaleDateString('en-IN') : '—'}</span>
+                                    <span style="font-size:10px;color:#9ca3af;margin-left:8px">${l.letterType==='office'?'🏢 Office':'🔧 Tech'}</span>
+                                    <span style="font-size:10px;color:#9ca3af;margin-left:8px">${l.contractBegin||''}</span>
+                                    <span style="font-size:10px;color:#6b7280;margin-left:8px">${l.createdAt ? new Date(l.createdAt).toLocaleDateString('en-IN') : ''}</span>
                                 </div>
                                 <div style="display:flex;gap:4px">
                                     <button onclick="document.getElementById('apptLetterModal').remove();openApptLetterModal('${staffID}','${l.letterID}')" style="font-size:10px;padding:2px 8px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:6px;cursor:pointer">Edit</button>
@@ -32236,26 +32467,47 @@ Automated WFH alert — ${company} Attendance System.`;
         function _apptCollectFormData() {
             const v = (id) => document.getElementById('al_' + id)?.value?.trim() || '';
             const n = (id) => parseFloat(document.getElementById('al_' + id)?.value) || 0;
-            return {
+            const base = {
+                letterType: v('letterType') || 'technician',
                 employeeName: v('name'), fatherName: v('fatherName'), address: v('address'),
                 mobile: v('mobile'), designation: v('designation'), division: v('division'),
-                contractMonths: parseInt(v('contractMonths')) || 12,
-                letterDate: v('letterDate'), contractBegin: v('contractBegin'), contractEnd: v('contractEnd'),
-                retainerDays: parseInt(v('retainerDays')) || 15,
-                noticePeriodMonths: parseInt(v('noticePeriodMonths')) || 3,
-                monthlyWage: n('monthlyWage'), basicPay: n('basicPay'),
-                daPct: n('daPct'), daAmount: n('daAmount'), gradePay: n('gradePay'),
-                perDayWage: n('perDayWage'), retainerAmount: n('retainerAmount'),
-                annualGratuity: n('annualGratuity'),
-                sailingPerDay: n('sailingPerDay'), localWorkingPerDay: n('localWorkingPerDay'),
-                outstationPerDay: n('outstationPerDay'), anchoragePerDay: n('anchoragePerDay'),
-                thresh15PerDay: n('thresh15PerDay'), thresh20PerDay: n('thresh20PerDay'),
+                letterDate: v('letterDate'), letterCity: v('letterCity'),
+                basicPay: n('basicPay'),
                 signatoryName: v('signatoryName'), signatoryDesignation: v('signatoryDesignation'),
-                totalStatutory: n('basicPay') + n('daAmount') + n('gradePay'),
             };
+            if (base.letterType === 'technician') {
+                Object.assign(base, {
+                    contractMonths: parseInt(v('contractMonths')) || 12,
+                    contractBegin: v('contractBegin'), contractEnd: v('contractEnd'),
+                    retainerDays: parseInt(v('retainerDays')) || 15,
+                    noticePeriodMonths: parseInt(v('noticePeriodMonths')) || 3,
+                    monthlyWage: n('monthlyWage'), daPct: n('daPct'), daAmount: n('daAmount'), gradePay: n('gradePay'),
+                    perDayWage: n('perDayWage'), retainerAmount: n('retainerAmount'), annualGratuity: n('annualGratuity'),
+                    sailingPerDay: n('sailingPerDay'), localWorkingPerDay: n('localWorkingPerDay'),
+                    outstationPerDay: n('outstationPerDay'), anchoragePerDay: n('anchoragePerDay'),
+                    thresh15PerDay: n('thresh15PerDay'), thresh20PerDay: n('thresh20PerDay'),
+                    totalStatutory: n('basicPay') + n('daAmount') + n('gradePay'),
+                });
+            } else {
+                Object.assign(base, {
+                    contractBegin: v('contractBegin'),
+                    trainingMonthsMin: parseInt(v('trainingMonthsMin')) || 3,
+                    trainingMonthsMax: parseInt(v('trainingMonthsMax')) || 6,
+                    stipend: n('stipend'),
+                    postConfirmDesignation: v('postConfirmDesignation'),
+                    hraAmount: n('hraAmount'), daAmount: n('daAmount'), gradePay: n('gradePay'),
+                    conveyance: n('conveyance'), medical: n('medical'), bonusMonthly: n('bonusMonthly'),
+                    fixedAllowance: n('fixedAllowance'), variableAllowance: n('variableAllowance'),
+                    grossSalary: n('grossSalary'),
+                    pt: n('pt'), pfEmployee: n('pfEmployee'), esic: n('esic'),
+                    totalDeduction: n('totalDeduction'), netPay: n('netPay'),
+                });
+            }
+            return base;
         }
 
         function _apptGeneratePDF(data) {
+            if (data.letterType === 'office') return _apptGenerateOfficePDF(data);
             if (!window.jspdf?.jsPDF) { alert('PDF library not loaded — please refresh.'); return null; }
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF({ unit: 'mm', format: 'a4' });
@@ -32417,6 +32669,139 @@ Automated WFH alert — ${company} Attendance System.`;
             return doc;
         }
 
+        // ── OFFICE STAFF APPOINTMENT LETTER PDF ──
+        function _apptGenerateOfficePDF(data) {
+            if (!window.jspdf?.jsPDF) { alert('PDF library not loaded — please refresh.'); return null; }
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+            const W = 210, M = 18;
+            let y = 20;
+            const fmtD = (ds) => { if (!ds) return '___________'; const dt = new Date(ds+'T00:00:00'); return dt.toLocaleDateString('en-IN',{day:'2-digit',month:'2-digit',year:'numeric'}); };
+            const fmtC = (n) => '₹' + (+n||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
+            const checkPage = (need) => { if (y + need > 277) { doc.addPage(); y = 20; } };
+
+            // Header
+            doc.setFont('helvetica','bold'); doc.setFontSize(14);
+            doc.text('IMSE Tech-Services Private Limited', W/2, y, {align:'center'}); y += 6;
+            doc.setFont('helvetica','normal'); doc.setFontSize(9);
+            doc.text('('+( data.division || 'Office Administration')+')', W/2, y, {align:'center'}); y += 10;
+
+            // Date & City
+            doc.setFontSize(10);
+            doc.text(fmtD(data.letterDate), W - M, y, {align:'right'}); y += 5;
+            doc.text(data.letterCity || 'Chennai', W - M, y, {align:'right'}); y += 8;
+
+            // Addressee
+            doc.text('To:', M, y); y += 5;
+            const title = (data.employeeName||'').match(/^(Ms|Mrs|Mr)/) ? '' : 'Mr./Ms. ';
+            doc.setFont('helvetica','bold');
+            doc.text(title + (data.employeeName||'___') + ' / ' + (data.designation||'Trainee'), M + 5, y);
+            doc.setFont('helvetica','normal'); y += 8;
+
+            // Salutation
+            const firstName = (data.employeeName||'').split(/[\s.]+/).filter(Boolean).find((_,i)=>i>0) || data.employeeName?.split(' ')[0] || '___';
+            doc.text('Dear ' + firstName + ',', M, y); y += 8;
+
+            // Body paragraphs
+            const para = (text) => { checkPage(20); const lines = doc.splitTextToSize(text, W-2*M); lines.forEach(l => { doc.text(l, M, y); y += 4.5; }); y += 3; };
+
+            para('The Management takes great pleasure in your appointment as ' + (data.designation||'___') + ', from ' + fmtD(data.contractBegin) + ' with a stipend of Rs.' + (+data.stipend||0).toLocaleString('en-IN',{minimumFractionDigits:2}) + ' per month.');
+
+            para('Training period of minimum ' + (data.trainingMonthsMin||3) + ' (' + _apptMonthsToWords(data.trainingMonthsMin||3) + ') months, maximum ' + (data.trainingMonthsMax||6) + ' (' + _apptMonthsToWords(data.trainingMonthsMax||6) + ') months.');
+
+            para('Upon successful completion of training period, and being confirmed, you can then be appointed as ' + (data.postConfirmDesignation||data.designation||'___') + ' with Gross Monthly Salary Rs.' + (+data.grossSalary||0).toLocaleString('en-IN',{minimumFractionDigits:2}) + ' and will be eligible for leave with pay as per company policy and governing Shop & Establishment Act rules.');
+
+            para('After your successful completion of training, and confirmation, you will be enrolled with statutory authority PF & ESI and deduction will be effected as per the company salary structure annexed to this letter.');
+
+            para('Your annual increment if any will be subject to Management\'s discretion.');
+
+            para('We hereby expect you to enthusiastically take your training seriously and any responsibility given and participate wholeheartedly in the development of our company.');
+
+            para('We hope to have a long successful professional relationship with you and wish you all the very best.');
+
+            // Signatory
+            y += 4;
+            doc.text('Warm Regards,', M, y); y += 8;
+            doc.setFont('helvetica','bold');
+            doc.text(data.signatoryDesignation || 'Director', M, y); y += 5;
+            if (data.signatoryName) { doc.setFont('helvetica','normal'); doc.text(data.signatoryName, M, y); y += 5; }
+            y += 8;
+
+            // Employee acceptance
+            doc.setFont('helvetica','normal');
+            doc.text('Accepted by ' + (data.employeeName||'___') + ' :    Signature: _____________________________', M, y);
+
+            // ═══════ PAGE 2: SALARY STRUCTURE ═══════
+            doc.addPage(); y = 20;
+            doc.setFont('helvetica','bold'); doc.setFontSize(12);
+            doc.text('Salary Structure (After confirmation on completion of Training)', W/2, y, {align:'center'}); y += 8;
+
+            doc.setFontSize(10);
+            doc.text('Designation: ' + (data.postConfirmDesignation||data.designation||''), M, y); y += 5;
+            doc.text('Name: ' + (data.employeeName||''), M, y); y += 8;
+
+            doc.setFont('helvetica','bold'); doc.setFontSize(13);
+            doc.text('SALARY STRUCTURE', W/2, y, {align:'center'}); y += 8;
+
+            // Table
+            const tblX = M, pw = W - 2*M, rowH = 7;
+            const drawRow = (label, value, bold = false, bg = null) => {
+                checkPage(rowH + 2);
+                if (bg) { doc.setFillColor(bg[0],bg[1],bg[2]); doc.rect(tblX, y-1, pw, rowH, 'F'); }
+                doc.setFont('helvetica', bold?'bold':'normal'); doc.setFontSize(9);
+                doc.text(label, tblX+3, y+4);
+                if (value !== null) doc.text(value, tblX+pw-3, y+4, {align:'right'});
+                doc.setDrawColor(200); doc.line(tblX, y+rowH-1, tblX+pw, y+rowH-1);
+                y += rowH;
+            };
+
+            // Header
+            doc.setFillColor(37,99,235); doc.rect(tblX, y-1, pw, rowH+1, 'F');
+            doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(255);
+            doc.text('Description', tblX+3, y+4);
+            doc.text('Amount (₹)', tblX+pw-3, y+4, {align:'right'});
+            y += rowH+1; doc.setTextColor(0);
+
+            drawRow('Basic', fmtC(data.basicPay));
+            // Fixed Allowance breakdown
+            doc.setFont('helvetica','bold'); doc.setFontSize(8);
+            checkPage(8);
+            doc.text('FIXED ALLOWANCE', tblX+3, y+3);
+            doc.setDrawColor(200); doc.line(tblX, y+rowH-2, tblX+pw, y+rowH-2); y += rowH-1;
+            doc.setFont('helvetica','normal'); doc.setFontSize(9);
+            if (+data.hraAmount) drawRow('   HRA', fmtC(data.hraAmount));
+            if (+data.daAmount) drawRow('   DA', fmtC(data.daAmount));
+            if (+data.gradePay) drawRow('   Grade Pay', fmtC(data.gradePay));
+            if (+data.conveyance) drawRow('   Conveyance', fmtC(data.conveyance));
+            if (+data.medical) drawRow('   Medical', fmtC(data.medical));
+            if (+data.bonusMonthly) drawRow('   Annual Bonus (monthly)', fmtC(data.bonusMonthly));
+            drawRow('Total Fixed Allowance', fmtC(data.fixedAllowance), true);
+            y += 2;
+            drawRow('VARIABLE ALLOWANCE', fmtC(data.variableAllowance));
+            drawRow('GROSS SALARY', fmtC(data.grossSalary), true, [219,234,254]);
+            y += 3;
+            drawRow('DEDUCTIONS', null, true, [254,242,242]);
+            drawRow('Professional Tax', fmtC(data.pt));
+            drawRow('PF — Employee Contribution (Basic + Fixed) × 12%', fmtC(data.pfEmployee));
+            drawRow('ESIC = 0.75% of Gross Salary', fmtC(data.esic));
+            drawRow('TOTAL DEDUCTION', fmtC(data.totalDeduction), true, [254,226,226]);
+            y += 3;
+            drawRow('NET PAY', fmtC(data.netPay), true, [220,252,231]);
+
+            // Employee acceptance
+            y += 10;
+            doc.setFont('helvetica','normal'); doc.setFontSize(9);
+            doc.text('Accepted by ' + (data.employeeName||'___') + ' :    Signature: _____________________________', M, y);
+
+            // Footer
+            y += 10;
+            doc.setFont('helvetica','italic'); doc.setFontSize(7); doc.setTextColor(120);
+            doc.text('This document is confidential and intended for the named employee only.', W/2, y, {align:'center'});
+            doc.setTextColor(0);
+
+            return doc;
+        }
+
         function _apptMonthsToWords(m) {
             const words = ['','one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve',
                 'thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen','twenty','twenty-one',
@@ -32446,6 +32831,11 @@ Automated WFH alert — ${company} Attendance System.`;
             data.updatedAt = new Date().toISOString();
             data.letterID = existingLetterID || 'AL' + Date.now();
             data.generatedBy = currentUser?.name || currentUser?.email || 'Admin';
+            // Preserve historical flag from existing record
+            if (existingLetterID) {
+                const existingRec = (staff[idx].appointmentLetters||[]).find(l=>l.letterID===existingLetterID);
+                if (existingRec?.historical) data.historical = true;
+            }
 
             if (!staff[idx].appointmentLetters) staff[idx].appointmentLetters = [];
             if (existingLetterID) {
