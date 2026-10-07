@@ -7317,13 +7317,17 @@
     const _TECH_WAGE_FIELDS = ['techHRAPct','techDAPct','techGPPct','techVariable','techPFPct','techESICPct','techTDS','techTravelAllow','outstationPct','sailingPct','anchoragePct','travelAllow','uanNumber','esicNumber','pfNumber'];
     let _techSSFullStaffCache = null;
     async function _techSSEnrichWageFields(staffRec) {
-        // Try in-memory sources first
+        // Try in-memory sources first (may have partial data)
         const sources = [staffList, _techSSStaffListCache];
         for (const src of sources) {
             const full = (src || []).find(s => s.staffID === staffRec.staffID);
-            if (full) { _mergeStaffFields(staffRec, full); return; }
+            if (full) _mergeStaffFields(staffRec, full);
         }
-        // Fall back: read full staff.json from Drive (has all wage + loan fields)
+        // Check if loan dates are still missing — if so, must read from Drive
+        const loanDatesMissing = (staffRec.loans || []).some(l => l.firstDeductMonth === undefined && l.disbursedDate === undefined);
+        const wageFieldsMissing = staffRec.techVariable === undefined && staffRec.dailyWage === undefined;
+        if (!loanDatesMissing && !wageFieldsMissing) return; // already fully enriched
+        // Read full staff.json from Drive (has all wage + loan fields)
         if (accessToken && SHARED_FILE_IDS.staff) {
             try {
                 if (!_techSSFullStaffCache) {
