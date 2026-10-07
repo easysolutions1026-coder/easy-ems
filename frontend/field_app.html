@@ -7922,7 +7922,7 @@
             deductions.push({ label: 'PT \u2013 Basic+Fixed \u20b9' + ptBasis.toLocaleString('en-IN') + ' > \u20b915,000', amt: ptAmt });
         }
         if (tdsAmt > 0) deductions.push({ label: 'TDS ' + (isTech && !Number(s.techTDS) ? '1% (Gross \u20b9' + grossPay.toLocaleString('en-IN') + ' incl. Travel)' : 'Monthly'), amt: tdsAmt });
-        (s.loans || []).forEach(l => { if (l.status === 'Active' && l.emi > 0) deductions.push({ label: 'Loan EMI \u2014 ' + (l.remarks || l.loanID), amt: Number(l.emi) }); });
+        (s.loans || []).forEach(l => { if (l.status === 'Active' && l.emi > 0 && (!l.startDate || l.startDate <= endDate)) deductions.push({ label: 'Loan EMI \u2014 ' + (l.remarks || l.loanID), amt: Number(l.emi) }); });
 
         const totalDed = deductions.reduce((sum, d) => sum + (Number(d.amt) || 0), 0);
         const netPay = +(grossPay - totalDed).toFixed(2);
