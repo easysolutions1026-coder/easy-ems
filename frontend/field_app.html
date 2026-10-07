@@ -1757,6 +1757,8 @@
             projectExpenses = Array.isArray(pe) ? pe : [];
             workLogs        = Array.isArray(wl) ? wl : [];
             staffList       = Array.isArray(sf) ? sf.filter(s=>s.status==='Active') : [];
+            // Cache full staff data for tech self-service wage enrichment
+            try { localStorage.setItem('_staffFullCache', JSON.stringify(staffList)); } catch(e) {}
             // Load settings.json from Drive by filename for company info in PDFs
             try {
                 const settingsData = await readSettingsByName();
@@ -7323,22 +7325,32 @@
             const full = (src || []).find(s => s.staffID === staffRec.staffID);
             if (full) _mergeStaffFields(staffRec, full);
         }
-        // Check if loan dates are still missing — if so, must read from Drive
+        // Check if loan dates are still missing — if so, need full staff data
         const loanDatesMissing = (staffRec.loans || []).some(l => l.firstDeductMonth === undefined && l.disbursedDate === undefined);
         const wageFieldsMissing = staffRec.techVariable === undefined && staffRec.dailyWage === undefined;
         if (!loanDatesMissing && !wageFieldsMissing) return; // already fully enriched
-        // Read full staff.json from Drive (has all wage + loan fields)
+        // Try Drive first (if Google-authed)
         if (accessToken && SHARED_FILE_IDS.staff) {
             try {
                 if (!_techSSFullStaffCache) {
                     _techSSFullStaffCache = await readFile(SHARED_FILE_IDS.staff);
                     console.log('[TechSS] Staff data loaded from Drive (' + (_techSSFullStaffCache||[]).length + ' records)');
+                    try { localStorage.setItem('_staffFullCache', JSON.stringify(_techSSFullStaffCache)); } catch(e) {}
                 }
                 const full = (_techSSFullStaffCache || []).find(s => s.staffID === staffRec.staffID);
                 if (full) { _mergeStaffFields(staffRec, full); return; }
             } catch (e) { console.warn('[TechSS] Drive staff read failed:', e.message); }
         }
-        console.warn('[TechSS] No enrichment source available');
+        // Fallback: read from localStorage (cached from a previous Google sign-in)
+        try {
+            var cached = localStorage.getItem('_staffFullCache');
+            if (cached) {
+                var parsed = JSON.parse(cached);
+                var full = (Array.isArray(parsed) ? parsed : []).find(function(s) { return s.staffID === staffRec.staffID; });
+                if (full) { _mergeStaffFields(staffRec, full); console.log('[TechSS] Enriched from localStorage cache'); return; }
+            }
+        } catch (e) { console.warn('[TechSS] localStorage read failed:', e.message); }
+        console.warn('[TechSS] No enrichment source available — sign in with Google once to cache staff data');
     }
     function _mergeStaffFields(staffRec, full) {
         let enriched = 0;
