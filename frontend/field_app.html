@@ -7869,9 +7869,15 @@
             if (medical > 0) { earnings.push({ label: 'Medical', days: null, rate: null, amt: medical }); totalEarnings += medical; }
             if (annualBonus > 0) { earnings.push({ label: 'Annual Bonus (Basic\u00f710)', days: null, rate: null, amt: annualBonus }); totalEarnings += annualBonus; }
             if (variable > 0) { earnings.push({ label: 'Variable (excl. PF)', days: null, rate: null, amt: variable }); totalEarnings += variable; }
+            const perDay = +(totalEarnings / 30).toFixed(2);
+            const alDays = counts['ApprovedLeave'] || 0;
+            if (alDays > 0) {
+                const alDeductAmt = +(perDay * 0.5 * alDays).toFixed(2);
+                earnings.push({ label: 'Approved Leave Deduct (50% \u00d7 ' + alDays + 'd)', days: alDays, rate: +(perDay * 0.5).toFixed(2), amt: -alDeductAmt });
+                totalEarnings -= alDeductAmt;
+            }
             const absentDays = (counts['Absent'] || 0) + (counts['UnApprovedLeave'] || 0);
             if (absentDays > 0) {
-                const perDay = +(totalEarnings / 30).toFixed(2);
                 const deduct = +(perDay * absentDays).toFixed(2);
                 earnings.push({ label: 'Less: Absent/Unapproved (' + absentDays + ' days)', days: absentDays, rate: perDay, amt: -deduct });
                 totalEarnings -= deduct;
@@ -7883,12 +7889,13 @@
         const pfPct = isTech ? +(s.techPFPct ?? 12) : (Number(s.pfPct) || 12);
         const esicPct = isTech ? +(s.techESICPct ?? 0.75) : (Number(s.esicPct) || 0.75);
         let pfGross, pfAmt, esicBasis;
-        const hasUAN = !!(s.uanNumber && s.uanNumber.trim());
+        // PF applies unless explicitly marked as no-PF (uanNumber blank AND pfNumber blank/falsy)
+        // When backend doesn't return uanNumber at all (undefined), assume PF applies
+        const hasUAN = s.uanNumber === undefined ? true : !!(s.uanNumber && s.uanNumber.trim());
+        const hasPF = hasUAN || !!(s.pfNumber && String(s.pfNumber).trim() && String(s.pfNumber).trim() !== 'NO');
         if (isTech) {
-            // PF basis = Basic+Fixed; ESIC basis = Basic+Fixed+Variable
-            // When components available, compute; otherwise back-derive from standby/daily × 30
             pfGross = (s.techVariable !== undefined && s.techVariable !== null) ? +(basic + fixedAllow).toFixed(2) : +(standbyWage * daysInMonth).toFixed(2);
-            pfAmt = hasUAN ? +(pfGross * pfPct / 100).toFixed(2) : 0;
+            pfAmt = hasPF ? +(pfGross * pfPct / 100).toFixed(2) : 0;
             esicBasis = (s.techVariable !== undefined && s.techVariable !== null) ? +(basic + fixedAllow + variable).toFixed(2) : +(dailyWage * daysInMonth).toFixed(2);
         } else {
             pfGross = grossPay - variable;
@@ -7906,7 +7913,7 @@
 
         const deductions = [];
         if (isTech) {
-            deductions.push({ label: hasUAN ? 'PF ' + pfPct + '% of (Basic+Fixed) \u20b9' + pfGross.toLocaleString('en-IN') + (s.uanNumber ? ' \u00b7 UAN: ' + s.uanNumber : '') : 'PF \u2014 NIL (no UAN)', amt: pfAmt });
+            deductions.push({ label: hasPF ? 'PF ' + pfPct + '% of (Basic+Fixed) \u20b9' + pfGross.toLocaleString('en-IN') + (s.uanNumber ? ' \u00b7 UAN: ' + s.uanNumber : '') : 'PF \u2014 NIL (no UAN)', amt: pfAmt });
         } else {
             deductions.push({ label: 'PF ' + pfPct + '% (PF Gross \u20b9' + pfGross.toLocaleString('en-IN') + ')', amt: pfAmt });
         }
