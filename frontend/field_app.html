@@ -7317,8 +7317,10 @@
     const _TECH_WAGE_FIELDS = ['techHRAPct','techDAPct','techGPPct','techVariable','techPFPct','techESICPct','techTDS','techTravelAllow','outstationPct','sailingPct','anchoragePct','travelAllow','uanNumber','esicNumber','pfNumber'];
     async function _techSSEnrichWageFields(staffRec) {
         try {
-            const res = await fetch('/api/data/staff');
-            if (!res.ok) return;
+            const headers = {};
+            if (accessToken) headers['Authorization'] = 'Bearer ' + accessToken;
+            const res = await fetch('/api/data/staff', { headers });
+            if (!res.ok) { console.warn('[TechSS] Staff fetch:', res.status); return; }
             const allStaff = await res.json();
             const full = (Array.isArray(allStaff) ? allStaff : []).find(s => s.staffID === staffRec.staffID);
             if (!full) return;
