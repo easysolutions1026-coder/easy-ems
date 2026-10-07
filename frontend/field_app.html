@@ -7316,11 +7316,16 @@
     const TECH_API = '/api/tech/';
     const _TECH_WAGE_FIELDS = ['techHRAPct','techDAPct','techGPPct','techVariable','techPFPct','techESICPct','techTDS','techTravelAllow','outstationPct','sailingPct','anchoragePct','travelAllow','uanNumber','esicNumber','pfNumber'];
     function _techSSEnrichWageFields(staffRec) {
-        // staffList is already loaded from Drive with full records
-        const full = (staffList || []).find(s => s.staffID === staffRec.staffID);
-        if (!full) { console.warn('[TechSS] Staff not found in staffList for enrichment'); return; }
-        _TECH_WAGE_FIELDS.forEach(f => { if (full[f] !== undefined && staffRec[f] === undefined) staffRec[f] = full[f]; });
-        console.log('[TechSS] Wage fields enriched — techVariable:', staffRec.techVariable, 'techHRAPct:', staffRec.techHRAPct);
+        // Try staffList (Google-auth loaded) first, then _techSSStaffListCache (from /api/tech/staff-list)
+        const sources = [staffList, _techSSStaffListCache];
+        for (const src of sources) {
+            const full = (src || []).find(s => s.staffID === staffRec.staffID);
+            if (!full) continue;
+            let enriched = 0;
+            _TECH_WAGE_FIELDS.forEach(f => { if (full[f] !== undefined && (staffRec[f] === undefined || staffRec[f] === null)) { staffRec[f] = full[f]; enriched++; } });
+            if (enriched > 0) { console.log('[TechSS] Wage fields enriched (' + enriched + ' fields) — techVariable:', staffRec.techVariable, 'techHRAPct:', staffRec.techHRAPct); return; }
+        }
+        console.warn('[TechSS] No wage field source found — staffList:', (staffList||[]).length, 'cache:', _techSSStaffListCache.length);
     }
 
     function _techSSPrevMonth() { _techSSMonthOffset--; _techSSRenderDashboard(); }
@@ -7359,11 +7364,13 @@
         _techSSLoadStaffList();
     }
 
+    let _techSSStaffListCache = [];
     async function _techSSLoadStaffList() {
         try {
             const res = await fetch(TECH_API + 'staff-list');
             if (!res.ok) throw new Error('HTTP ' + res.status);
             const list = await res.json();
+            _techSSStaffListCache = Array.isArray(list) ? list : [];
             const sel = document.getElementById('techSSName');
             if (!sel) return;
             const techs = list.filter(s => (s.staffType||'').toLowerCase().includes('tech'));
