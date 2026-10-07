@@ -7315,17 +7315,42 @@
     let _techSSMonthOffset = 0; // 0 = current month, -1 = last month, etc.
     const TECH_API = '/api/tech/';
     const _TECH_WAGE_FIELDS = ['techHRAPct','techDAPct','techGPPct','techVariable','techPFPct','techESICPct','techTDS','techTravelAllow','outstationPct','sailingPct','anchoragePct','travelAllow','uanNumber','esicNumber','pfNumber'];
-    function _techSSEnrichWageFields(staffRec) {
-        // Try staffList (Google-auth loaded) first, then _techSSStaffListCache (from /api/tech/staff-list)
+    let _techSSFullStaffCache = null;
+    async function _techSSEnrichWageFields(staffRec) {
+        // Try in-memory sources first
         const sources = [staffList, _techSSStaffListCache];
         for (const src of sources) {
             const full = (src || []).find(s => s.staffID === staffRec.staffID);
-            if (!full) continue;
-            let enriched = 0;
-            _TECH_WAGE_FIELDS.forEach(f => { if (full[f] !== undefined && (staffRec[f] === undefined || staffRec[f] === null)) { staffRec[f] = full[f]; enriched++; } });
-            if (enriched > 0) { console.log('[TechSS] Wage fields enriched (' + enriched + ' fields) — techVariable:', staffRec.techVariable, 'techHRAPct:', staffRec.techHRAPct); return; }
+            if (full) { _mergeStaffFields(staffRec, full); return; }
         }
-        console.warn('[TechSS] No wage field source found — staffList:', (staffList||[]).length, 'cache:', _techSSStaffListCache.length);
+        // Fall back: read full staff.json from Drive (has all wage + loan fields)
+        if (accessToken && SHARED_FILE_IDS.staff) {
+            try {
+                if (!_techSSFullStaffCache) {
+                    _techSSFullStaffCache = await readFile(SHARED_FILE_IDS.staff);
+                    console.log('[TechSS] Staff data loaded from Drive (' + (_techSSFullStaffCache||[]).length + ' records)');
+                }
+                const full = (_techSSFullStaffCache || []).find(s => s.staffID === staffRec.staffID);
+                if (full) { _mergeStaffFields(staffRec, full); return; }
+            } catch (e) { console.warn('[TechSS] Drive staff read failed:', e.message); }
+        }
+        console.warn('[TechSS] No enrichment source available');
+    }
+    function _mergeStaffFields(staffRec, full) {
+        let enriched = 0;
+        // Merge wage fields
+        _TECH_WAGE_FIELDS.forEach(f => { if (full[f] !== undefined && (staffRec[f] === undefined || staffRec[f] === null)) { staffRec[f] = full[f]; enriched++; } });
+        // Merge loan date fields (firstDeductMonth, firstDeductYear, disbursedDate)
+        if (full.loans && staffRec.loans) {
+            staffRec.loans.forEach(l => {
+                const fullLoan = full.loans.find(fl => fl.loanID === l.loanID);
+                if (!fullLoan) return;
+                ['firstDeductMonth','firstDeductYear','disbursedDate','startDate','closedDate'].forEach(f => {
+                    if (fullLoan[f] !== undefined && l[f] === undefined) { l[f] = fullLoan[f]; enriched++; }
+                });
+            });
+        }
+        console.log('[TechSS] Enriched ' + enriched + ' fields — techVariable:', staffRec.techVariable, 'loans:', (staffRec.loans||[]).map(l => l.loanID + ':' + (l.firstDeductMonth||'?') + '/' + (l.firstDeductYear||'?')).join(', '));
     }
 
     function _techSSPrevMonth() { _techSSMonthOffset--; _techSSRenderDashboard(); }
@@ -7408,7 +7433,7 @@
             const data = await res.json();
             const staff = data.staff || data; // backend returns { ok, staff }
             _techSS = { staffID: staff.staffID, pin, name: staff.name, staffRec: staff };
-            _techSSEnrichWageFields(staff);
+            await _techSSEnrichWageFields(staff);
             _techSSRenderDashboard();
         } catch (e) {
             err.textContent = e.message.includes('locked') ? '🔒 Too many attempts — try again in 30 minutes' :
@@ -7518,7 +7543,7 @@
             const data = await res.json();
             const staff = data.staff || data;
             _techSS.staffRec = staff;
-            _techSSEnrichWageFields(staff);
+            await _techSSEnrichWageFields(staff);
             _techSSMonthOffset = 0; // Reset to current month on refresh
             _techSSRenderDashboard();
             showToast('✅ Data refreshed');
@@ -7922,7 +7947,23 @@
             deductions.push({ label: 'PT \u2013 Basic+Fixed \u20b9' + ptBasis.toLocaleString('en-IN') + ' > \u20b915,000', amt: ptAmt });
         }
         if (tdsAmt > 0) deductions.push({ label: 'TDS ' + (isTech && !Number(s.techTDS) ? '1% (Gross \u20b9' + grossPay.toLocaleString('en-IN') + ' incl. Travel)' : 'Monthly'), amt: tdsAmt });
-        (s.loans || []).forEach(l => { if (l.status === 'Active' && l.emi > 0 && (!l.startDate || l.startDate <= endDate)) deductions.push({ label: 'Loan EMI \u2014 ' + (l.remarks || l.loanID), amt: Number(l.emi) }); });
+        (s.loans || []).forEach(l => {
+            if (l.status !== 'Active' || !l.emi || l.emi <= 0) return;
+            // Determine earliest deduction month from available fields
+            var loanStart = '';
+            if (l.firstDeductYear && l.firstDeductMonth) {
+                // Exact: first deduction month from main app
+                loanStart = l.firstDeductYear + '-' + String(l.firstDeductMonth).padStart(2,'0') + '-01';
+            } else if (l.disbursedDate || l.startDate) {
+                loanStart = l.disbursedDate || l.startDate;
+            } else if (l.loanID) {
+                // Last resort: parse FY from loanID (LN-2627-003 → April 2026)
+                var fyMatch = l.loanID.match(/LN-(\d{2})(\d{2})-/);
+                if (fyMatch) loanStart = '20' + fyMatch[1] + '-04-01';
+            }
+            if (loanStart && loanStart > endDate) return;
+            deductions.push({ label: 'Loan EMI \u2014 ' + (l.remarks || l.loanID), amt: Number(l.emi) });
+        });
 
         const totalDed = deductions.reduce((sum, d) => sum + (Number(d.amt) || 0), 0);
         const netPay = +(grossPay - totalDed).toFixed(2);
