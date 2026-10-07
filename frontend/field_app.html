@@ -1758,7 +1758,16 @@
             workLogs        = Array.isArray(wl) ? wl : [];
             staffList       = Array.isArray(sf) ? sf.filter(s=>s.status==='Active') : [];
             // Cache full staff data for tech self-service wage enrichment
-            try { localStorage.setItem('_staffFullCache', JSON.stringify(staffList)); } catch(e) {}
+            try {
+                var _leanCache = staffList.map(function(s) {
+                    var o = { staffID: s.staffID, name: s.name };
+                    ['techHRAPct','techDAPct','techGPPct','techVariable','techPFPct','techESICPct','techTDS','techTravelAllow','outstationPct','sailingPct','anchoragePct','travelAllow','uanNumber','esicNumber','pfNumber','dailyWage','standbyWage'].forEach(function(f) { if (s[f] !== undefined) o[f] = s[f]; });
+                    if (s.loans) o.loans = s.loans.map(function(l) { return { loanID:l.loanID, remarks:l.remarks, emi:l.emi, principal:l.principal, status:l.status, firstDeductMonth:l.firstDeductMonth, firstDeductYear:l.firstDeductYear, disbursedDate:l.disbursedDate, startDate:l.startDate, closedDate:l.closedDate }; });
+                    return o;
+                });
+                localStorage.setItem('_staffWageCache', JSON.stringify(_leanCache));
+                console.log('[Cache] Saved lean staff wage cache (' + _leanCache.length + ' records, ' + Math.round(JSON.stringify(_leanCache).length/1024) + ' KB)');
+            } catch(e) { console.warn('[Cache] localStorage save failed:', e.message); }
             // Load settings.json from Drive by filename for company info in PDFs
             try {
                 const settingsData = await readSettingsByName();
@@ -7335,7 +7344,15 @@
                 if (!_techSSFullStaffCache) {
                     _techSSFullStaffCache = await readFile(SHARED_FILE_IDS.staff);
                     console.log('[TechSS] Staff data loaded from Drive (' + (_techSSFullStaffCache||[]).length + ' records)');
-                    try { localStorage.setItem('_staffFullCache', JSON.stringify(_techSSFullStaffCache)); } catch(e) {}
+                    try {
+                        var _lc2 = (_techSSFullStaffCache||[]).map(function(s) {
+                            var o = { staffID: s.staffID, name: s.name };
+                            ['techHRAPct','techDAPct','techGPPct','techVariable','techPFPct','techESICPct','techTDS','techTravelAllow','outstationPct','sailingPct','anchoragePct','travelAllow','uanNumber','esicNumber','pfNumber','dailyWage','standbyWage'].forEach(function(f) { if (s[f] !== undefined) o[f] = s[f]; });
+                            if (s.loans) o.loans = s.loans.map(function(l) { return { loanID:l.loanID, remarks:l.remarks, emi:l.emi, principal:l.principal, status:l.status, firstDeductMonth:l.firstDeductMonth, firstDeductYear:l.firstDeductYear, disbursedDate:l.disbursedDate, startDate:l.startDate, closedDate:l.closedDate }; });
+                            return o;
+                        });
+                        localStorage.setItem('_staffWageCache', JSON.stringify(_lc2));
+                    } catch(e) {}
                 }
                 const full = (_techSSFullStaffCache || []).find(s => s.staffID === staffRec.staffID);
                 if (full) { _mergeStaffFields(staffRec, full); return; }
@@ -7343,7 +7360,7 @@
         }
         // Fallback: read from localStorage (cached from a previous Google sign-in)
         try {
-            var cached = localStorage.getItem('_staffFullCache');
+            var cached = localStorage.getItem('_staffWageCache');
             if (cached) {
                 var parsed = JSON.parse(cached);
                 var full = (Array.isArray(parsed) ? parsed : []).find(function(s) { return s.staffID === staffRec.staffID; });
