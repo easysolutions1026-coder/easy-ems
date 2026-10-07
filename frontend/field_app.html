@@ -7766,9 +7766,12 @@
         const fixedAllow = +(hra + da + gp).toFixed(2);
         const daysInMonth = 30;
 
-        // Daily/standby wage (matches calcTechWage exactly)
-        const dailyWage = +((basic + fixedAllow + variable) / daysInMonth).toFixed(4);
-        const standbyWage = +((basic + fixedAllow) / daysInMonth).toFixed(4);
+        // Daily/standby wage — use staff record values if available (backend pre-computes these),
+        // fall back to component-based calc when wage revision fields are present
+        const _computedDW = +((basic + fixedAllow + variable) / daysInMonth).toFixed(4);
+        const _computedSW = +((basic + fixedAllow) / daysInMonth).toFixed(4);
+        const dailyWage = (s.techVariable !== undefined && s.techVariable !== null) ? _computedDW : (Number(s.dailyWage) || _computedDW);
+        const standbyWage = (s.techVariable !== undefined && s.techVariable !== null) ? _computedSW : (Number(s.standbyWage) || _computedSW);
 
         // Allowance percentages
         const outstPct = (Number(s.outstationPct) || 20) / 100;
@@ -7882,9 +7885,11 @@
         let pfGross, pfAmt, esicBasis;
         const hasUAN = !!(s.uanNumber && s.uanNumber.trim());
         if (isTech) {
-            pfGross = +(basic + fixedAllow).toFixed(2);
+            // PF basis = Basic+Fixed; ESIC basis = Basic+Fixed+Variable
+            // When components available, compute; otherwise back-derive from standby/daily × 30
+            pfGross = (s.techVariable !== undefined && s.techVariable !== null) ? +(basic + fixedAllow).toFixed(2) : +(standbyWage * daysInMonth).toFixed(2);
             pfAmt = hasUAN ? +(pfGross * pfPct / 100).toFixed(2) : 0;
-            esicBasis = +(basic + fixedAllow + variable).toFixed(2);
+            esicBasis = (s.techVariable !== undefined && s.techVariable !== null) ? +(basic + fixedAllow + variable).toFixed(2) : +(dailyWage * daysInMonth).toFixed(2);
         } else {
             pfGross = grossPay - variable;
             pfAmt = pfGross > 15000 ? +(15000 * pfPct / 100).toFixed(2) : +(pfGross * pfPct / 100).toFixed(2);
