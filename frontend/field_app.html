@@ -7761,7 +7761,7 @@
         const medical = Number(s.medical) || 0;
         const variable = isTech ? (Number(s.techVariable) || 0) : (Number(s.variable) || 0);
         const annualBonus = basic > 0 ? Math.round(basic / 10) : 0;
-        const travelAllow = Number(s.travelAllow) || Number(s.techTravelAllow) || 0;
+        const travelAllow = Number(s.travelAllow) || Number(s.techTravelAllow) || (isTech ? 4000 : 0);
         const gender = (s.gender || '').toLowerCase();
         const fixedAllow = +(hra + da + gp).toFixed(2);
         const daysInMonth = 30;
