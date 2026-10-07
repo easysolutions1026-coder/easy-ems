@@ -7314,6 +7314,18 @@
     let _techSS = null;   // { staffID, pin, name, staffRec } — logged-in technician
     let _techSSMonthOffset = 0; // 0 = current month, -1 = last month, etc.
     const TECH_API = '/api/tech/';
+    const _TECH_WAGE_FIELDS = ['techHRAPct','techDAPct','techGPPct','techVariable','techPFPct','techESICPct','techTDS','techTravelAllow','outstationPct','sailingPct','anchoragePct','travelAllow','uanNumber','esicNumber','pfNumber'];
+    async function _techSSEnrichWageFields(staffRec) {
+        try {
+            const res = await fetch('/api/data/staff');
+            if (!res.ok) return;
+            const allStaff = await res.json();
+            const full = (Array.isArray(allStaff) ? allStaff : []).find(s => s.staffID === staffRec.staffID);
+            if (!full) return;
+            _TECH_WAGE_FIELDS.forEach(f => { if (full[f] !== undefined && staffRec[f] === undefined) staffRec[f] = full[f]; });
+            console.log('[TechSS] Wage fields enriched from Cloud SQL');
+        } catch (e) { console.warn('[TechSS] Wage field enrichment failed:', e.message); }
+    }
 
     function _techSSPrevMonth() { _techSSMonthOffset--; _techSSRenderDashboard(); }
     function _techSSNextMonth() { if (_techSSMonthOffset < 0) { _techSSMonthOffset++; _techSSRenderDashboard(); } }
@@ -7393,6 +7405,7 @@
             const data = await res.json();
             const staff = data.staff || data; // backend returns { ok, staff }
             _techSS = { staffID: staff.staffID, pin, name: staff.name, staffRec: staff };
+            await _techSSEnrichWageFields(staff);
             _techSSRenderDashboard();
         } catch (e) {
             err.textContent = e.message.includes('locked') ? '🔒 Too many attempts — try again in 30 minutes' :
@@ -7502,6 +7515,7 @@
             const data = await res.json();
             const staff = data.staff || data;
             _techSS.staffRec = staff;
+            await _techSSEnrichWageFields(staff);
             _techSSMonthOffset = 0; // Reset to current month on refresh
             _techSSRenderDashboard();
             showToast('✅ Data refreshed');
