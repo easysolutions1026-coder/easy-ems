@@ -8455,7 +8455,7 @@
                         <div id="desktopNavTabs" class="flex flex-wrap gap-1 overflow-x-auto -mx-1 px-1">
                             <button onclick="switchView('dashboard')" class="px-3 py-2 rounded-lg whitespace-nowrap ${currentView === 'dashboard' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}">Dashboard</button>
                             ${_canAccess('transactions')?`<button onclick="switchView('transactions')" class="px-3 py-2 rounded-lg whitespace-nowrap ${currentView === 'transactions' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'}">Transactions</button>`:''}
-                            ${_canAccess('expenses')||_canAccess('direxp')||_canAccess('projexp')||_canAccess('pettycash')?`<button onclick="switchView(window._lastExpenseSubview||'expenses')" class="px-3 py-2 rounded-lg whitespace-nowrap ${['expenses','direxp','projexp','pettycash'].includes(currentView) ? 'bg-orange-100 text-orange-700' : 'text-gray-600 hover:bg-gray-100'}" title="Business, Director, Project & Petty Cash expenses">💸 Expenses${(()=>{const u=(pettyCashTransactions||[]).filter(t=>t.txnType==='EXPENSE'&&!t.verified).length;return u>0?` <span class="ml-1 px-1.5 py-0.5 bg-amber-500 text-white rounded-full text-xs font-bold">${u}</span>`:'';})()}</button>`:''}
+                            ${_canAccess('expenses')||_canAccess('direxp')||_canAccess('projexp')||_canAccess('pettycash')?`<button onclick="switchView(window._lastExpenseSubview||_firstAccessibleExpenseView())" class="px-3 py-2 rounded-lg whitespace-nowrap ${['expenses','direxp','projexp','pettycash'].includes(currentView) ? 'bg-orange-100 text-orange-700' : 'text-gray-600 hover:bg-gray-100'}" title="Business, Director, Project & Petty Cash expenses">💸 Expenses${(()=>{const u=(pettyCashTransactions||[]).filter(t=>t.txnType==='EXPENSE'&&!t.verified).length;return u>0?` <span class="ml-1 px-1.5 py-0.5 bg-amber-500 text-white rounded-full text-xs font-bold">${u}</span>`:'';})()}</button>`:''}
                             ${_canAccess('staff')?`<button onclick="switchView('staff')" class="px-3 py-2 rounded-lg whitespace-nowrap ${currentView === 'staff' ? 'bg-teal-100 text-teal-700' : 'text-gray-600 hover:bg-gray-100'}">👥 Staff</button>`:''}
                             ${_canAccess('funds')?`<button onclick="switchView('funds')" class="px-3 py-2 rounded-lg whitespace-nowrap ${currentView === 'funds' ? 'bg-emerald-100 text-emerald-700' : 'text-gray-600 hover:bg-gray-100'}">💰 Funds${(()=>{const p=fundRequests.filter(r=>r.status==='Pending').length;return p>0?` <span class="ml-1 px-1.5 py-0.5 bg-rose-500 text-white rounded-full text-xs font-bold">${p}</span>`:'';})()}</button>`:''}
                             ${_canAccess('payreq')?`<button onclick="switchView('payreq')" class="px-3 py-2 rounded-lg whitespace-nowrap ${currentView === 'payreq' ? 'bg-cyan-100 text-cyan-700' : 'text-gray-600 hover:bg-gray-100'}">💼 Pay Requests${(()=>{const p=(paymentRequests||[]).filter(r=>r.status==='Draft').length;return p>0?` <span class="ml-1 px-1.5 py-0.5 bg-amber-500 text-white rounded-full text-xs font-bold">${p}</span>`:'';})()}</button>`:''}
@@ -8535,7 +8535,7 @@
                 <div id="mobileBottomNav" style="display:none">
                     <button onclick="switchView('dashboard')" class="${currentView==='dashboard'?'mb-active':''}"><span class="mb-icon">📊</span>Home</button>
                     <button onclick="switchView('transactions')" class="${currentView==='transactions'?'mb-active':''}"><span class="mb-icon">💰</span>Txns</button>
-                    <button onclick="switchView(window._lastExpenseSubview||'expenses')" class="${['expenses','direxp','projexp','pettycash'].includes(currentView)?'mb-active':''}"><span class="mb-icon">💸</span>Expenses</button>
+                    ${_canAccess('expenses')||_canAccess('direxp')||_canAccess('projexp')||_canAccess('pettycash')?`<button onclick="switchView(window._lastExpenseSubview||_firstAccessibleExpenseView())" class="${['expenses','direxp','projexp','pettycash'].includes(currentView)?'mb-active':''}"><span class="mb-icon">💸</span>Expenses</button>`:''}
                     <button onclick="switchView('staff')" class="${currentView==='staff'?'mb-active':''}"><span class="mb-icon">👥</span>Staff</button>
                     <button onclick="switchView('mis')" class="${currentView==='mis'?'mb-active':''}"><span class="mb-icon">📈</span>MIS</button>
                     <button onclick="_mobileToggleMore()"><span class="mb-icon">☰</span>More</button>
@@ -8880,6 +8880,14 @@
         // module, so all underlying render/permission/data logic is
         // unchanged. Pills are hidden per-role via _canAccess, same as the
         // old top-level tabs were.
+        // Returns the first expense sub-view the current user can access
+        function _firstAccessibleExpenseView() {
+            for (const v of ['expenses','direxp','projexp','pettycash']) {
+                if (typeof _canAccess === 'function' && _canAccess(v)) return v;
+            }
+            return 'expenses'; // fallback
+        }
+
         function _expenseSubTabBar() {
             const tab = (view, label, icon, badge) => {
                 if (typeof _canAccess === 'function' && !_canAccess(view)) return '';
