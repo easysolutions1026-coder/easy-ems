@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <!--
 ═══════════════════════════════════════════════════════════════════════════════
   IMSE EMS — Engineering Management System
@@ -8752,10 +8752,24 @@
             return result;
         }
 
+        // ── Employee-level permission overrides ──
+        // Returns the effective permission set for the current user:
+        //   1. If the user's appUsers record has customPermissions[] → use that
+        //   2. Else fall back to their role's permissions
+        function _getEffectivePermissions() {
+            if (!_bmsSession) return new Set();
+            const user = (appUsers||[]).find(u => u.userID === _bmsSession.userID);
+            if (user && Array.isArray(user.customPermissions) && user.customPermissions.length > 0) {
+                return new Set(user.customPermissions);
+            }
+            // Fall back to role defaults
+            const access = _buildRoleAccess();
+            return access[_bmsSession.role] || new Set();
+        }
+
         function _canAccess(view) {
             if (!ENABLE_LOGIN || !_bmsSession || appUsers.length === 0) return true;
-            const access = _buildRoleAccess();
-            const a = access[_bmsSession.role] || new Set();
+            const a = _getEffectivePermissions();
             return a.has('*') || a.has(view);
         }
         // Sub-tab level access (e.g. _canAccessSub('staff','attendance')).
@@ -8764,8 +8778,7 @@
         // nothing changes until Admin re-saves the matrix.
         function _canAccessSub(view, sub) {
             if (!ENABLE_LOGIN || !_bmsSession || appUsers.length === 0) return true;
-            const access = _buildRoleAccess();
-            const a = access[_bmsSession.role] || new Set();
+            const a = _getEffectivePermissions();
             if (a.has('*')) return true;
             if (!a.has(view)) return false;
             const hasSubKeys = [...a].some(k => k.startsWith(view + '.'));
@@ -19690,6 +19703,25 @@
                             </table>
                         </div>
                     </div>
+                    <!-- Employee-Level Access Control & PIN Management -->
+                    <div class="bg-white rounded-xl border border-purple-200 p-4 mb-4">
+                        <div class="flex justify-between items-center mb-3">
+                            <div>
+                                <p class="text-sm font-bold text-purple-800">👤 Employee-Level Access Control & PIN Management</p>
+                                <p class="text-xs text-gray-500 mt-0.5">Override role defaults for individual employees. Custom permissions take priority over the role matrix above.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3 mb-3 flex-wrap">
+                            <label class="text-xs font-semibold text-gray-600">Select Employee:</label>
+                            <select id="empAccessSelect" onchange="_renderEmpAccessPanel()" class="px-3 py-1.5 border border-purple-200 rounded-lg text-sm bg-white min-w-[200px]">
+                                <option value="">— Choose employee —</option>
+                                ${(appUsers||[]).filter(u=>u.active).map(u => `<option value="${u.userID}">${u.name} (${u.role})${u.customPermissions?' ✦':''}</option>`).join('')}
+                            </select>
+                            <span id="empAccessBadge" class="text-[10px] text-gray-400 hidden"></span>
+                        </div>
+                        <div id="empAccessPanel"></div>
+                    </div>
+
                         <div class="flex items-center gap-4 flex-wrap">
                             <div>
                                 <label class="block text-xs font-semibold text-gray-700 mb-1">Default PIN Expiry Period (days)</label>
@@ -19730,7 +19762,7 @@
                                     const expiresIn = u.pinExpiry ? Math.ceil((new Date(u.pinExpiry)-new Date())/86400000) : null;
                                     return `
                                 <tr class="border-t border-indigo-100 hover:bg-indigo-50 ${!u.active?'opacity-50':''}">
-                                    <td class="px-4 py-2.5 font-semibold">${u.name} ${u.userID===(_bmsSession?.userID||'')?'<span class="text-xs bg-indigo-100 text-indigo-600 px-1.5 rounded ml-1">You</span>':''}</td>
+                                    <td class="px-4 py-2.5 font-semibold">${u.name} ${u.userID===(_bmsSession?.userID||'')?'<span class="text-xs bg-indigo-100 text-indigo-600 px-1.5 rounded ml-1">You</span>':''}${u.customPermissions?'<span class="text-[10px] bg-purple-100 text-purple-600 px-1.5 rounded ml-1" title="Has custom permission overrides">✦ Custom</span>':''}</td>
                                     <td class="px-4 py-2.5">
                                         ${_bmsSession?.role === 'Admin' ? `
                                         <select onchange="_changeUserRole('${u.userID}',this.value)" class="text-xs px-2 py-0.5 border border-gray-200 rounded-lg bg-white cursor-pointer ${u.role==='Admin'?'text-purple-700 font-bold':u.role==='View Only'?'text-gray-500':u.role==='CA'?'text-green-700':'text-blue-700'}">
@@ -28583,6 +28615,185 @@ Automated WFH alert — ${company} Attendance System.`;
             } catch(err) { alert('Save failed: ' + err.message); }
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        // EMPLOYEE-LEVEL ACCESS CONTROL & PIN MANAGEMENT
+        // ═══════════════════════════════════════════════════════════════
+        function _renderEmpAccessPanel() {
+            const panel = document.getElementById('empAccessPanel');
+            const badge = document.getElementById('empAccessBadge');
+            const userID = document.getElementById('empAccessSelect')?.value;
+            if (!panel) return;
+            if (!userID) { panel.innerHTML = ''; badge?.classList.add('hidden'); return; }
+
+            const user = (appUsers||[]).find(u => u.userID === userID);
+            if (!user) { panel.innerHTML = ''; return; }
+
+            const rolePerms = (settings?.rolePermissions || DEFAULT_ROLE_PERMS)[user.role] || [];
+            const roleSet = new Set(rolePerms);
+            const hasCustom = Array.isArray(user.customPermissions) && user.customPermissions.length > 0;
+            const effectivePerms = hasCustom ? new Set(user.customPermissions) : roleSet;
+
+            // Badge
+            if (badge) {
+                badge.classList.remove('hidden');
+                badge.innerHTML = hasCustom
+                    ? '<span class="bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-bold">✦ Custom Overrides Active</span>'
+                    : '<span class="bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Using Role Defaults</span>';
+            }
+
+            // PIN info
+            const today = new Date().toISOString().split('T')[0];
+            const expired = user.pinExpiry && user.pinExpiry < today;
+            const expiresIn = user.pinExpiry ? Math.ceil((new Date(user.pinExpiry)-new Date())/86400000) : null;
+            const pinStatus = user.pinHash
+                ? (expired ? '<span class="text-red-600 font-semibold">⚠ Expired</span>' : `<span class="text-green-600">✓ Set</span>${user.pinExpiry ? ` · Expires ${user.pinExpiry} (${expiresIn}d)` : ' · No expiry'}`)
+                : '<span class="text-amber-600">Not set</span>';
+
+            const roles = Object.keys(settings?.rolePermissions || DEFAULT_ROLE_PERMS);
+            const isAdminRole = user.role === 'Admin';
+
+            panel.innerHTML = `
+                <div class="border border-purple-100 rounded-lg overflow-hidden">
+                    <!-- PIN Management strip -->
+                    <div class="bg-purple-50 px-4 py-2.5 flex items-center justify-between flex-wrap gap-2 border-b border-purple-100">
+                        <div class="flex items-center gap-3">
+                            <span class="text-xs font-bold text-purple-800">🔑 PIN:</span>
+                            <span class="text-xs">${pinStatus}</span>
+                            ${user.pinSetBy ? `<span class="text-[10px] text-gray-400">Set by ${user.pinSetBy}${user.pinSetAt ? ' on '+user.pinSetAt.substring(0,10) : ''}</span>` : ''}
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="openSetPINModal('${userID}')" class="px-3 py-1 bg-indigo-600 text-white rounded text-xs font-bold hover:bg-indigo-700">
+                                ${user.pinHash ? '🔑 Change PIN' : '🔑 Set PIN'}
+                            </button>
+                            ${user.pinHash ? `<button onclick="_resetEmployeePIN('${userID}')" class="px-3 py-1 bg-red-100 text-red-700 rounded text-xs hover:bg-red-200">Reset PIN</button>` : ''}
+                        </div>
+                    </div>
+
+                    ${isAdminRole ? `
+                    <div class="px-4 py-4 text-center text-xs text-gray-500">
+                        <span class="text-purple-600 font-semibold">Admin</span> role always has full access to all modules. No per-employee override needed.
+                    </div>` : `
+                    <!-- Module permissions checkboxes -->
+                    <div class="px-4 py-3">
+                        <div class="flex justify-between items-center mb-2">
+                            <p class="text-xs font-semibold text-gray-600">Module Access <span class="text-[10px] text-gray-400">(checked = can access; grey background = differs from role default)</span></p>
+                            <div class="flex gap-2">
+                                <button onclick="_resetEmpToRoleDefaults('${userID}')" class="px-3 py-1 border border-gray-300 text-gray-600 rounded text-xs hover:bg-gray-50" title="Clear custom overrides and revert to role defaults">↺ Use Role Defaults</button>
+                                <button onclick="_saveEmpPermissions('${userID}')" class="px-3 py-1 bg-purple-600 text-white rounded text-xs font-bold hover:bg-purple-700">Save Permissions</button>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1.5" id="empPermGrid">
+                            ${ALL_MODULES.map(m => {
+                                const checked = effectivePerms.has('*') || effectivePerms.has(m.view);
+                                const roleHas = roleSet.has('*') || roleSet.has(m.view);
+                                const differs = checked !== roleHas;
+                                const rows = [`
+                                <label class="flex items-center gap-1.5 px-2 py-1 rounded text-xs cursor-pointer hover:bg-purple-50 ${differs ? 'bg-amber-50 border border-amber-200' : ''}" title="${differs ? 'Differs from role default' : 'Matches role default'}">
+                                    <input type="checkbox" data-emp-view="${m.view}" ${checked?'checked':''} class="w-3.5 h-3.5 accent-purple-600" onchange="_markEmpDirty()"/>
+                                    <span class="text-gray-700">${m.label}</span>
+                                    ${differs ? '<span class="text-amber-500 text-[9px]">✦</span>' : ''}
+                                </label>`];
+                                if (m.subs) {
+                                    m.subs.forEach(sub => {
+                                        const subChecked = effectivePerms.has('*') || effectivePerms.has(sub.view);
+                                        const subRoleHas = roleSet.has('*') || roleSet.has(sub.view);
+                                        const subDiffers = subChecked !== subRoleHas;
+                                        rows.push(`
+                                <label class="flex items-center gap-1.5 px-2 py-1 pl-6 rounded text-[11px] cursor-pointer hover:bg-purple-50 ${subDiffers ? 'bg-amber-50 border border-amber-200' : ''}" title="${subDiffers ? 'Differs from role default' : 'Matches role default'}">
+                                    <input type="checkbox" data-emp-view="${sub.view}" data-emp-parent="${m.view}" ${subChecked?'checked':''} class="w-3 h-3 accent-teal-600" onchange="_markEmpDirty()"/>
+                                    <span class="text-gray-500">↳ ${sub.label}</span>
+                                    ${subDiffers ? '<span class="text-amber-500 text-[9px]">✦</span>' : ''}
+                                </label>`);
+                                    });
+                                }
+                                return rows.join('');
+                            }).join('')}
+                        </div>
+                        ${hasCustom ? `<p class="text-[10px] text-purple-500 mt-2">✦ This employee has custom overrides. Modules marked with ✦ differ from their role's defaults.</p>` : ''}
+                    </div>`}
+                </div>`;
+        }
+
+        function _markEmpDirty() {
+            // Visual feedback that unsaved changes exist
+            const badge = document.getElementById('empAccessBadge');
+            if (badge) badge.innerHTML = '<span class="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold animate-pulse">● Unsaved Changes</span>';
+        }
+
+        async function _saveEmpPermissions(userID) {
+            const user = (appUsers||[]).find(u => u.userID === userID);
+            if (!user) return;
+
+            const checked = Array.from(document.querySelectorAll('#empPermGrid input[data-emp-view]:checked'))
+                .map(cb => cb.dataset.empView);
+
+            // Validation: parent with subs needs at least one sub ticked
+            for (const m of ALL_MODULES) {
+                if (!m.subs) continue;
+                if (checked.includes(m.view) && !m.subs.some(s => checked.includes(s.view))) {
+                    alert(`⚠ "${m.label}" is ticked but none of its sub-tabs are.\n\nTick at least one sub-tab, or untick the module.`);
+                    return;
+                }
+                if (!checked.includes(m.view)) {
+                    m.subs.forEach(s => {
+                        const i = checked.indexOf(s.view);
+                        if (i > -1) checked.splice(i, 1);
+                    });
+                }
+            }
+
+            // Check if this is actually different from role defaults
+            const rolePerms = (settings?.rolePermissions || DEFAULT_ROLE_PERMS)[user.role] || [];
+            const isSameAsRole = checked.length === rolePerms.length && checked.every(v => rolePerms.includes(v)) && rolePerms.every(v => checked.includes(v));
+
+            if (isSameAsRole) {
+                // No override needed — clear custom permissions
+                delete user.customPermissions;
+            } else {
+                user.customPermissions = checked;
+            }
+
+            try {
+                await saveData('appUsers', appUsers);
+                _showToast(`✓ Permissions ${isSameAsRole ? 'reset to role defaults' : 'saved with custom overrides'} for ${user.name}`, '#7c3aed', 3500);
+                _writeAuditLog('UPDATE', 'UserMgmt', userID, `Employee permissions ${isSameAsRole ? 'reset to role defaults' : 'custom overrides set: ['+checked.join(',')+']'} for ${user.name} by ${_bmsSession?.name||'Admin'}`);
+                _renderEmpAccessPanel();
+            } catch(err) { alert('Save failed: ' + err.message); }
+        }
+
+        async function _resetEmpToRoleDefaults(userID) {
+            const user = (appUsers||[]).find(u => u.userID === userID);
+            if (!user) return;
+            if (!user.customPermissions) {
+                _showToast('Already using role defaults', '#6b7280', 2000);
+                return;
+            }
+            if (!confirm(`Reset ${user.name}'s permissions back to the "${user.role}" role defaults?\n\nThis will remove all custom overrides.`)) return;
+            delete user.customPermissions;
+            try {
+                await saveData('appUsers', appUsers);
+                _showToast(`✓ ${user.name} reset to ${user.role} role defaults`, '#7c3aed', 3000);
+                _writeAuditLog('UPDATE', 'UserMgmt', userID, `Employee permissions reset to role defaults for ${user.name} by ${_bmsSession?.name||'Admin'}`);
+                _renderEmpAccessPanel();
+            } catch(err) { alert('Save failed: ' + err.message); }
+        }
+
+        async function _resetEmployeePIN(userID) {
+            const user = (appUsers||[]).find(u => u.userID === userID);
+            if (!user) return;
+            if (!confirm(`Reset PIN for ${user.name}?\n\nThey will not be able to log in until Admin sets a new PIN.`)) return;
+            user.pinHash = '';
+            user.pinExpiry = '';
+            user.failedAttempts = 0;
+            try {
+                await saveData('appUsers', appUsers);
+                _showToast(`✓ PIN cleared for ${user.name}`, '#dc2626', 3000);
+                _writeAuditLog('UPDATE', 'UserMgmt', userID, `PIN reset (cleared) for ${user.name} by ${_bmsSession?.name||'Admin'}`);
+                _renderEmpAccessPanel();
+                renderView();
+            } catch(err) { alert('Save failed: ' + err.message); }
+        }
+
         async function _changeUserRole(userID, newRole) {
             const u = (appUsers||[]).find(x => x.userID === userID);
             if (!u) return;
@@ -28594,9 +28805,13 @@ Automated WFH alert — ${company} Attendance System.`;
             }
             const oldRole = u.role;
             u.role = newRole;
+            // Clear custom permissions on role change — they were based on the old role
+            if (u.customPermissions) {
+                delete u.customPermissions;
+            }
             try {
                 await saveData('appUsers', appUsers);
-                _writeAuditLog('UPDATE', 'UserMgmt', userID, `${u.name} role changed: ${oldRole} → ${newRole}`);
+                _writeAuditLog('UPDATE', 'UserMgmt', userID, `${u.name} role changed: ${oldRole} → ${newRole} (custom permissions cleared)`);
                 _showToast(`✓ ${u.name} role updated to ${newRole}`, '#4f46e5', 3000);
                 renderView();
             } catch(err) {
