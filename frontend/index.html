@@ -2134,7 +2134,16 @@
             if (gross <= threshold) return 0;
             return month === 2 ? 300 : 200;
         }
-        function _calcOfficePF(basic,hra,da,med,cv,gp,bonus,pfPct){const g=basic+hra+da+med+cv+gp+bonus,r=(parseFloat(pfPct)||12)/100;return{pfGross:g,pfAmt:+(g*r).toFixed(2),pfCapped:false};}
+        function _calcOfficePF(basic,hra,da,med,cv,gp,bonus,pfPct,periodMonth,periodYear){
+            const g=basic+hra+da+med+cv+gp+bonus,r=(parseFloat(pfPct)||12)/100;
+            const m=+(periodMonth||new Date().getMonth()+1),y=+(periodYear||new Date().getFullYear());
+            // Before Sep 2026: old cap ₹15,000
+            // Sep 2026: pro-rated cap ₹19,667 (16/30 × 15K + 14/30 × 25K)
+            // Oct 2026 onwards: uncapped (full basis × rate)
+            if(y<2026||(y===2026&&m<9)){const cap=15000;return{pfGross:g,pfAmt:g>cap?+(cap*r).toFixed(2):+(g*r).toFixed(2),pfCapped:g>cap};}
+            if(y===2026&&m===9){const cap=Math.round((16/30*15000)+(14/30*25000));return{pfGross:g,pfAmt:g>cap?+(cap*r).toFixed(2):+(g*r).toFixed(2),pfCapped:g>cap};}
+            return{pfGross:g,pfAmt:+(g*r).toFixed(2),pfCapped:false};
+        }
         // PF for technician: (Basic + Fixed Allowance) × pfPct%
         // Fixed Allowance = HRA(50%basic) + DA(65%basic) + GradePay(30%basic)
         function _calcTechPF(basic,fixedAllowance,pfPct){
@@ -3204,7 +3213,7 @@
             const pfPct=op.pfPct!=null?+op.pfPct:+(st.pfPct??12);
             const esicPct=op.esicPct!=null?+op.esicPct:+(st.esicPct??0.75);
             const tds=op.tdsAmt!=null?+op.tdsAmt:+(st.tdsMonthly||0);
-            const pf=_calcOfficePF(basic,hra,da,med,cv,gp,bonus,pfPct);
+            const pf=_calcOfficePF(basic,hra,da,med,cv,gp,bonus,pfPct,op.periodMonth,op.periodYear);
             // ESIC — same basis for both threshold test AND contribution amount
             // Wages = Basic + HRA + DA + GP + Conv + Medical + Variable (all regular monthly payments)
             // Bonus excluded (annual statutory bonus is not ESIC wages)
