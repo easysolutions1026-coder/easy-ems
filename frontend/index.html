@@ -225,6 +225,7 @@
         console.info('[Cloud Run] Drive write -> Cloud SQL + Drive:', write.collection);
         var token2 = getToken();
         return extractJsonBody(init.body).then(function(payload) {
+          var jsonStr = JSON.stringify(payload);
           // 1. Write to Cloud SQL (primary)
           origFetch('/api/data/' + write.collection, {
             method: 'POST',
@@ -232,10 +233,15 @@
               'Content-Type': 'application/json',
               'Authorization': token2 ? 'Bearer ' + token2 : ''
             },
-            body: JSON.stringify(payload)
+            body: jsonStr
           }).catch(function(e) { console.warn('[Cloud Run] Cloud SQL write failed:', e); });
-          // 2. Also pass through to actual Drive file (so field app stays in sync)
-          return origFetch(input, init);
+          // 2. Rebuild FormData and pass through to actual Drive (body was consumed by extractJsonBody)
+          var driveInit = { method: init.method, headers: init.headers };
+          var fd = new FormData();
+          fd.append('metadata', new Blob(['{}'], { type: 'application/json' }));
+          fd.append('file', new Blob([jsonStr], { type: 'application/json' }));
+          driveInit.body = fd;
+          return origFetch(input, driveInit);
         });
       }
       if (write && write.create && write.metaBlob) {
@@ -2128,7 +2134,7 @@
             if (gross <= threshold) return 0;
             return month === 2 ? 300 : 200;
         }
-        function _calcOfficePF(basic,hra,da,med,cv,gp,bonus,pfPct){const g=basic+hra+da+med+cv+gp+bonus,r=(parseFloat(pfPct)||12)/100;return{pfGross:g,pfAmt:g>15000?+(15000*r).toFixed(2):+(g*r).toFixed(2),pfCapped:g>15000};}
+        function _calcOfficePF(basic,hra,da,med,cv,gp,bonus,pfPct){const g=basic+hra+da+med+cv+gp+bonus,r=(parseFloat(pfPct)||12)/100;return{pfGross:g,pfAmt:+(g*r).toFixed(2),pfCapped:false};}
         // PF for technician: (Basic + Fixed Allowance) × pfPct%
         // Fixed Allowance = HRA(50%basic) + DA(65%basic) + GradePay(30%basic)
         function _calcTechPF(basic,fixedAllowance,pfPct){
@@ -2149,15 +2155,36 @@
         // ── Statutory contribution rates (employer side + admin charges) ──
         // Defaults match current India statutory rates. Can be overridden per-establishment
         // via settings if rates change in future (no current UI exposure — defaults suffice).
-        function _statutoryRates() {
+        function _statutoryRates(month, year) {
+            // EPF wage ceiling: ₹15,000 until 16 Sep 2026; ₹25,000 from 17 Sep 2026
+            // S.O. 5109(E) dated 17 September 2026
+            const m = +(month || new Date().getMonth() + 1);
+            const y = +(year  || new Date().getFullYear());
+            const isBeforeNew = y < 2026 || (y === 2026 && m < 9);
+            const isTransition = y === 2026 && m === 9; // September 2026 — split month
+            const isAfterNew  = y > 2026 || (y === 2026 && m > 9);
+            let pfWageCap, edliWageCap;
+            if (isAfterNew) {
+                pfWageCap  = 25000;
+                edliWageCap = 25000;
+            } else if (isTransition) {
+                // Pro-rate: 16 days old cap + 14 days new cap = weighted average
+                // (16/30 × 15000) + (14/30 × 25000) = 8000 + 11666.67 = 19666.67
+                pfWageCap  = Math.round((16/30 * 15000) + (14/30 * 25000));
+                edliWageCap = Math.round((16/30 * 15000) + (14/30 * 25000));
+            } else {
+                pfWageCap  = 15000;
+                edliWageCap = 15000;
+            }
             return {
-                employerPFPct:   (settings?.employerPFPct  != null) ? +settings.employerPFPct   : 12,    // ER PF
-                epfAdminPct:     (settings?.epfAdminPct    != null) ? +settings.epfAdminPct     : 0.5,   // EPF admin charges
-                edliPct:         (settings?.edliPct        != null) ? +settings.edliPct         : 0.5,   // EDLI insurance
-                employerESICPct: (settings?.employerESICPct!= null) ? +settings.employerESICPct : 3.25,  // ER ESIC
-                epfAdminMin:     500,    // statutory minimum per month for an establishment
-                pfWageCap:       15000,  // monthly wage cap for PF — matches _calcOfficePF
-                edliWageCap:     15000   // EDLI ceiling per employee per month (EPF & MP Act)
+                employerPFPct:   (settings?.employerPFPct  != null) ? +settings.employerPFPct   : 12,
+                epfAdminPct:     (settings?.epfAdminPct    != null) ? +settings.epfAdminPct     : 0.5,
+                edliPct:         (settings?.edliPct        != null) ? +settings.edliPct         : 0.5,
+                employerESICPct: (settings?.employerESICPct!= null) ? +settings.employerESICPct : 3.25,
+                epfAdminMin:     500,
+                pfWageCap,
+                edliWageCap,
+                isTransitionMonth: isTransition
             };
         }
 
@@ -2166,7 +2193,7 @@
         // employer PF (matching), EPF admin, EDLI, and total contribution.
         // Returns: { rows: [{staffID, name, staffType, pfGross, employeePF, employerPF, admin, edli, total, capped}], totals: {...} }
         function _periodPFLiability(month, year) {
-            const rates = _statutoryRates();
+            const rates = _statutoryRates(month, year);
             const rows = [];
             const isOfficeType = t => t === 'Office' || t === 'Admin' || t === 'Office Staff';
             const isTechType   = t => t === 'Technician' || t === 'Tech' || t === 'Field';
@@ -2278,7 +2305,7 @@
         // Same idea for ESIC liability — employer adds 3.25% on top of employee 0.75%
         // ESIC is waived when ESIC wages > ₹21,000 (per-staff check, same as payslip logic).
         function _periodESICLiability(month, year) {
-            const rates = _statutoryRates();
+            const rates = _statutoryRates(month, year);
             const rows = [];
             const isOfficeType = t => t === 'Office' || t === 'Admin' || t === 'Office Staff';
             const isTechType   = t => t === 'Technician' || t === 'Tech' || t === 'Field';
@@ -17464,7 +17491,9 @@
                 return inRows && !s.uanNumber;
             });
 
-            const wageCap = 15000;
+            const ecrRates = _statutoryRates(month, year);
+            const wageCap = ecrRates.pfWageCap;
+            const edliCap = ecrRates.edliWageCap;
             const lines = [], included = [], epsWarnList = [];
 
             rows.forEach(r => {
@@ -17475,24 +17504,13 @@
                 const grossWages = Math.round(r.pfGross);
                 const epfWages   = r.capped ? wageCap : grossWages;
 
-                // EPS exemption: use the manual flag set per staff in Edit Staff → EPS Exempt.
-                // DO NOT auto-derive from DOJ — the DOJ-based rule (joined >= 01-Sep-2014
-                // AND wages > ₹15,000) is unreliable in practice because:
-                //   1. EPFO treats exemption per the wage at the time of joining, not current wage
-                //   2. Some staff have incorrect DOJ data
-                //   3. Transfers and re-joining create edge cases the rule can't handle
-                // The correct approach: check the EPFO portal for each member and set the flag
-                // explicitly. If the flag is not set, warn the admin during export.
                 const epsExempt = !!st.epsExempt;
-
-                // Warn if the flag was never explicitly set (defaults to false = EPS member)
-                // so the admin knows they should verify — but still export with best-effort.
                 if (st.epsExempt === undefined || st.epsExempt === null) {
                     epsWarnList.push(st.name);
                 }
 
                 const epsWages   = epsExempt ? 0 : Math.min(epfWages, wageCap);
-                const edliWages  = Math.min(epfWages, wageCap);
+                const edliWages  = Math.min(epfWages, edliCap);
                 const eeShare    = Math.round(r.employeePF);
                 const epsContrib = epsExempt ? 0 : Math.round(epsWages * 8.33 / 100);
                 // ER Share = EE Share − EPS Contribution (differential remittance).
@@ -27029,6 +27047,7 @@ ${'─'.repeat(50)}
                             <div class="flex gap-1 mt-2">
                                 <button onclick="staffDocsViewFromRecord('${s.staffID}','${d.id}')" class="flex-1 text-xs px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded font-medium">👁 View</button>
                                 <button onclick="staffDocsDownloadFromRecord('${s.staffID}','${d.id}')" class="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded font-medium" title="Download">⬇</button>
+                                <button onclick="staffDocsDeleteFromViewer('${s.staffID}','${d.id}')" class="text-xs px-2 py-1 bg-red-100 hover:bg-red-200 text-red-700 rounded font-medium" title="Delete">🗑</button>
                             </div>
                         </div>
                     </div>`;
@@ -27088,6 +27107,26 @@ ${'─'.repeat(50)}
             const a = document.createElement('a'); a.href = d.dataUrl;
             a.download = d.fileName || ((d.label||'document') + '.bin');
             document.body.appendChild(a); a.click(); a.remove();
+        }
+
+        async function staffDocsDeleteFromViewer(staffID, docID) {
+            const s = staff.find(x => x.staffID === staffID); if (!s) return;
+            const idx = (s.documents||[]).findIndex(x => x.id === docID); if (idx < 0) return;
+            const d = s.documents[idx];
+            if (!confirm('Delete "' + (d.label || d.fileName) + '"?\n\nThis will permanently remove the document.')) return;
+            // Delete from Drive if it has a driveFileId
+            if (d.driveFileId) {
+                try {
+                    await fetch('https://www.googleapis.com/drive/v3/files/' + d.driveFileId, {
+                        method: 'DELETE', headers: { 'Authorization': 'Bearer ' + accessToken }
+                    });
+                } catch (e) { console.warn('Drive delete failed:', e); }
+            }
+            s.documents.splice(idx, 1);
+            await saveData('staff', staff);
+            _showToast('🗑 Document deleted', '#dc2626');
+            // Re-open the viewer to refresh the grid
+            openStaffDocsViewModal(staffID);
         }
 
         function closeStaffModal() {
