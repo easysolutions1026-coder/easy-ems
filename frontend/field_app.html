@@ -7882,7 +7882,8 @@
             const alDeduct = +((counts['ApprovedLeave']||0) * dailyWage * 0.5).toFixed(2);
             const noShowDays = attRaw.filter(a => a.status === 'UnApprovedLeave' && a.noShowPenalty).length;
             const regularULDays = Math.max(0, (counts['UnApprovedLeave']||0) - noShowDays);
-            const ulDeductRegular = +(regularULDays * dailyWage * 2).toFixed(2);
+            const ulMultiplier = settings?.unapprovedAbsenceMultiplier != null ? parseFloat(settings.unapprovedAbsenceMultiplier) : 1;
+            const ulDeductRegular = +(regularULDays * dailyWage * ulMultiplier).toFixed(2);
             const ulDeductNoShow  = +(noShowDays * dailyWage * 2).toFixed(2);
             const ulDeduct = +(ulDeductRegular + ulDeductNoShow).toFixed(2);
 
@@ -7913,7 +7914,7 @@
             if (otAmt > 0)                      earnings.push({ label: 'OT Ex-Gratia (' + totalOTHours.toFixed(1) + 'h \u00d7 \u20b9' + otRate.toFixed(2) + '/hr)', days: null, rate: +otRate.toFixed(2), amt: otAmt });
             if (travelAllow > 0)                earnings.push({ label: 'Travel Allowance (in Gross, subject to TDS)', days: null, rate: travelAllow, amt: travelAllow });
             if ((counts['ApprovedLeave']||0) > 0) earnings.push({ label: 'Approved Leave Deduct (50% \u00d7 ' + counts['ApprovedLeave'] + 'd)', days: counts['ApprovedLeave'], rate: +(dailyWage*0.5).toFixed(2), amt: -alDeduct });
-            if (regularULDays > 0)              earnings.push({ label: 'Unapproved Leave (2\u00d7 DW \u00d7 ' + regularULDays + 'd)', days: regularULDays, rate: +(dailyWage*2).toFixed(2), amt: -ulDeductRegular });
+            if (regularULDays > 0)              earnings.push({ label: 'Unapproved Leave (' + ulMultiplier + '\u00d7 DW \u00d7 ' + regularULDays + 'd)', days: regularULDays, rate: +(dailyWage*ulMultiplier).toFixed(2), amt: -ulDeductRegular });
             if (noShowDays > 0)                 earnings.push({ label: 'No-Show Penalty (2\u00d7 DW \u00d7 ' + noShowDays + 'd)', days: noShowDays, rate: +(dailyWage*2).toFixed(2), amt: -ulDeductNoShow });
 
             const grossBase = wP + outP + ancP + salP + sbyP + nwP + outA + ancA + salA + t15 + t20;

@@ -3559,7 +3559,7 @@
             // Regular UL = configurable multiplier (default 1× = just no pay for that day).
             // No-show = always 2× (daily wage + one full day penalty) — tech marked Ready
             // but didn't report to allocated project.
-            const ulMultiplier = parseFloat(settings?.unapprovedAbsenceMultiplier) || 2;
+            const ulMultiplier = settings?.unapprovedAbsenceMultiplier != null ? parseFloat(settings.unapprovedAbsenceMultiplier) : 1;
             // Count no-show days from attendance entries with noShowPenalty flag
             // within the current pay period (26th prev month → 25th this month).
             const _periodDates = getTechWagePeriodDates(periodYear, periodMonth);
@@ -19414,11 +19414,11 @@
                         <div>
                             <label class="block text-sm font-semibold mb-2">⚠️ Unapproved Absence Deduction Multiplier</label>
                             <select id="settUnapprovedMultiplier" class="w-full px-4 py-2 border rounded-lg">
-                                <option value="1" ${(settings.unapprovedAbsenceMultiplier||2)==1?'selected':''}>1× (no pay, no penalty)</option>
-                                <option value="1.5" ${(settings.unapprovedAbsenceMultiplier||2)==1.5?'selected':''}>1.5× (half-day penalty)</option>
-                                <option value="2" ${(settings.unapprovedAbsenceMultiplier||2)==2?'selected':''}>2× (full day penalty — default)</option>
+                                <option value="1" ${(settings.unapprovedAbsenceMultiplier==null||settings.unapprovedAbsenceMultiplier==1)?'selected':''}>1× (daily wage deducted — default)</option>
+                                <option value="1.5" ${settings.unapprovedAbsenceMultiplier==1.5?'selected':''}>1.5× (half-day penalty)</option>
+                                <option value="2" ${settings.unapprovedAbsenceMultiplier==2?'selected':''}>2× (full day penalty)</option>
                             </select>
-                            <p class="text-xs text-gray-400 mt-1">Deduction per unapproved absence day. 2× = daily wage deducted + one additional day's wage as penalty.</p>
+                            <p class="text-xs text-gray-400 mt-1">Deduction per unapproved absence day. 1× = daily wage deducted (no extra penalty). 2× = daily wage + one additional day's penalty.</p>
                         </div>
                         <div>
                             <label class="block text-sm font-semibold mb-2">🏆 Punctuality Incentive — Perfect (₹) <span class="text-xs text-gray-400 font-normal">0 late days</span></label>
@@ -22737,7 +22737,7 @@
                     saturdayEnd:      document.getElementById('settSatEnd')?.value       || settings.saturdayEnd      || '13:30',
                     lateGraceMins:    parseInt(document.getElementById('settLateGrace')?.value)||10,
                     techMaxPaidSickDays: parseInt(document.getElementById('settMaxPaidSickDays')?.value) || 2,
-                    unapprovedAbsenceMultiplier: parseFloat(document.getElementById('settUnapprovedMultiplier')?.value) || 2,
+                    unapprovedAbsenceMultiplier: parseFloat(document.getElementById('settUnapprovedMultiplier')?.value) || 1,
                     punctualityIncentivePerfect: parseFloat(document.getElementById('settPunctualityPerfect')?.value)||0,
                     punctualityIncentiveGood:    parseFloat(document.getElementById('settPunctualityGood')?.value)||0,
                     wfhBacklogDays:   parseInt(document.getElementById('settWFHBacklog')?.value)||30,
