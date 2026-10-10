@@ -7914,7 +7914,8 @@
             const alDeduct = +((counts['ApprovedLeave']||0) * dailyWage * 0.5).toFixed(2);
             const noShowDays = attRaw.filter(a => a.status === 'UnApprovedLeave' && a.noShowPenalty).length;
             const regularULDays = Math.max(0, (counts['UnApprovedLeave']||0) - noShowDays);
-            const ulMultiplier = settings?.unapprovedAbsenceMultiplier != null ? parseFloat(settings.unapprovedAbsenceMultiplier) : 1;
+            const _appSettings = (typeof settings !== 'undefined') ? settings : (typeof appState !== 'undefined' ? appState.settings : null);
+            const ulMultiplier = _appSettings?.unapprovedAbsenceMultiplier != null ? parseFloat(_appSettings.unapprovedAbsenceMultiplier) : 1;
             const ulDeductRegular = +(regularULDays * dailyWage * ulMultiplier).toFixed(2);
             const ulDeductNoShow  = +(noShowDays * dailyWage * 2).toFixed(2);
             const ulDeduct = +(ulDeductRegular + ulDeductNoShow).toFixed(2);
