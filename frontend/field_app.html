@@ -7802,41 +7802,37 @@
         </div>`;
     }
 
+    /* ── Wage-revision-aware helper: find effective salary for a given pay period ── */
+    function _fieldGetEffectiveWageForPeriod(st, year, month) {
+        const revs = (st.wageRevisions || []).slice()
+            .filter(r => r.effectiveDate)
+            .sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate));
+        if (!revs.length) return null; // no revisions → use current staff record as-is
+        const refDate = `${year}-${String(month).padStart(2,'0')}-01`;
+        const eff = revs.find(r => r.effectiveDate <= refDate);
+        if (!eff) return null; // period is before earliest revision → use current record
+        return {
+            basicSalary: +eff.basicSalary || 0,
+            hraPct: eff.hraPct, daPct: eff.daPct,
+            gradePay: +eff.gradePay || 0,
+            conveyance: +eff.conveyance || 0,
+            medical: +eff.medical || 0,
+            variable: +eff.variable || 0,
+            techHRAPct: eff.techHRAPct, techDAPct: eff.techDAPct,
+            techGPPct: eff.techGPPct,
+            techVariable: +eff.techVariable || 0,
+            techPFPct: eff.techPFPct, techESICPct: eff.techESICPct,
+            pfPct: eff.pfPct, tdsMonthly: +eff.tdsMonthly || 0,
+            techTDS: +eff.techTDS || 0,
+            standbyPct: eff.standbyPct, alPct: eff.alPct,
+            _revEffDate: eff.effectiveDate
+        };
+    }
+
     function _techSSRenderWageSummary(s) {
         const isTech = (s.staffType||'').toLowerCase().includes('tech');
-        const basic = Number(s.basicSalary) || Number(s.techBasic) || 0;
-        if (!basic) return '';
 
-        // ── Read correct field names per staff type ──
-        const hraPct = isTech ? +(s.techHRAPct ?? 50) : (Number(s.hraPct) || 0);
-        const daPct  = isTech ? +(s.techDAPct  ?? 65) : (Number(s.daPct) || 0);
-        const gpPct  = isTech ? +(s.techGPPct  ?? 30) : 0;
-        const gpFixed = !isTech ? (Number(s.gradePay) || 0) : 0;
-        const hra = +(basic * hraPct / 100).toFixed(2);
-        const da  = +(basic * daPct / 100).toFixed(2);
-        const gp  = isTech ? +(basic * gpPct / 100).toFixed(2) : gpFixed;
-        const conveyance = Number(s.conveyance) || 0;
-        const medical = Number(s.medical) || 0;
-        const variable = isTech ? (Number(s.techVariable) || 0) : (Number(s.variable) || 0);
-        const annualBonus = basic > 0 ? Math.round(basic / 10) : 0;
-        const travelAllow = Number(s.travelAllow) || Number(s.techTravelAllow) || (isTech ? 4000 : 0);
-        const gender = (s.gender || '').toLowerCase();
-        const fixedAllow = +(hra + da + gp).toFixed(2);
-        const daysInMonth = 30;
-
-        // Daily/standby wage — use staff record values if available (backend pre-computes these),
-        // fall back to component-based calc when wage revision fields are present
-        const _computedDW = +((basic + fixedAllow + variable) / daysInMonth).toFixed(4);
-        const _computedSW = +((basic + fixedAllow) / daysInMonth).toFixed(4);
-        const dailyWage = (s.techVariable !== undefined && s.techVariable !== null) ? _computedDW : (Number(s.dailyWage) || _computedDW);
-        const standbyWage = (s.techVariable !== undefined && s.techVariable !== null) ? _computedSW : (Number(s.standbyWage) || _computedSW);
-
-        // Allowance percentages
-        const outstPct = (Number(s.outstationPct) || 20) / 100;
-        const sailPct  = (Number(s.sailingPct) || 30) / 100;
-        const ancPct   = (Number(s.anchoragePct) || 30) / 100;
-
-        // Pay period
+        // ── Compute pay period FIRST so we can look up the correct wage ──
         const now = new Date();
         const refDate = new Date(now.getFullYear(), now.getMonth() + _techSSMonthOffset, 15);
         const pYear = refDate.getFullYear(), pMonth = refDate.getMonth();
@@ -7844,6 +7840,42 @@
         const startDate = `${sDate.getFullYear()}-${String(sDate.getMonth()+1).padStart(2,'0')}-26`;
         const endDate = `${pYear}-${String(pMonth+1).padStart(2,'0')}-25`;
         const periodMonth = pMonth + 1;
+        const periodYear = pYear;
+
+        // ── Look up effective wage for this period ──
+        const ew = _fieldGetEffectiveWageForPeriod(s, periodYear, periodMonth);
+        const src = ew || s; // use revision data if found, else current staff record
+
+        const basic = Number(src.basicSalary) || Number(s.techBasic) || 0;
+        if (!basic) return '';
+
+        // ── Read correct field names per staff type ──
+        const hraPct = isTech ? +(src.techHRAPct ?? s.techHRAPct ?? 50) : (Number(src.hraPct ?? s.hraPct) || 0);
+        const daPct  = isTech ? +(src.techDAPct  ?? s.techDAPct  ?? 65) : (Number(src.daPct ?? s.daPct) || 0);
+        const gpPct  = isTech ? +(src.techGPPct  ?? s.techGPPct  ?? 30) : 0;
+        const gpFixed = !isTech ? (Number(src.gradePay ?? s.gradePay) || 0) : 0;
+        const hra = +(basic * hraPct / 100).toFixed(2);
+        const da  = +(basic * daPct / 100).toFixed(2);
+        const gp  = isTech ? +(basic * gpPct / 100).toFixed(2) : gpFixed;
+        const conveyance = Number(src.conveyance ?? s.conveyance) || 0;
+        const medical = Number(src.medical ?? s.medical) || 0;
+        const variable = isTech ? (Number(src.techVariable ?? s.techVariable) || 0) : (Number(src.variable ?? s.variable) || 0);
+        const annualBonus = basic > 0 ? Math.round(basic / 10) : 0;
+        const travelAllow = Number(s.travelAllow) || Number(s.techTravelAllow) || (isTech ? 4000 : 0);
+        const gender = (s.gender || '').toLowerCase();
+        const fixedAllow = +(hra + da + gp).toFixed(2);
+        const daysInMonth = 30;
+
+        // Daily/standby wage — always compute from components when using revision data
+        const _computedDW = +((basic + fixedAllow + variable) / daysInMonth).toFixed(4);
+        const _computedSW = +((basic + fixedAllow) / daysInMonth).toFixed(4);
+        const dailyWage = ew ? _computedDW : ((s.techVariable !== undefined && s.techVariable !== null) ? _computedDW : (Number(s.dailyWage) || _computedDW));
+        const standbyWage = ew ? _computedSW : ((s.techVariable !== undefined && s.techVariable !== null) ? _computedSW : (Number(s.standbyWage) || _computedSW));
+
+        // Allowance percentages
+        const outstPct = (Number(s.outstationPct) || 20) / 100;
+        const sailPct  = (Number(s.sailingPct) || 30) / 100;
+        const ancPct   = (Number(s.anchoragePct) || 30) / 100;
 
         const attRaw = (s.attendance || []).filter(a => a.date >= startDate && a.date <= endDate);
         const periodLabel = new Date(startDate+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short'}) + ' \u2013 ' + new Date(endDate+'T00:00:00').toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
@@ -7945,8 +7977,8 @@
         const grossPay = +totalEarnings.toFixed(2);
 
         // ── DEDUCTIONS ──
-        const pfPct = isTech ? +(s.techPFPct ?? 12) : (Number(s.pfPct) || 12);
-        const esicPct = isTech ? +(s.techESICPct ?? 0.75) : (Number(s.esicPct) || 0.75);
+        const pfPct = isTech ? +(src.techPFPct ?? s.techPFPct ?? 12) : (Number(src.pfPct ?? s.pfPct) || 12);
+        const esicPct = isTech ? +(src.techESICPct ?? s.techESICPct ?? 0.75) : (Number(src.esicPct ?? s.esicPct) || 0.75);
         let pfGross, pfAmt, esicBasis;
         // PF applies unless explicitly marked as no-PF (uanNumber blank AND pfNumber blank/falsy)
         // When backend doesn't return uanNumber at all (undefined), assume PF applies
@@ -7968,7 +8000,7 @@
         const ptBasis = isTech ? pfGross : grossPay;
         const ptThreshold = gender === 'female' ? 25000 : 10000;
         if (ptBasis > ptThreshold) ptAmt = periodMonth === 2 ? 300 : 200;
-        const tdsAmt = isTech ? (Number(s.techTDS) || +(grossPay * 0.01).toFixed(2)) : (Number(s.tdsMonthly) || 0);
+        const tdsAmt = isTech ? (Number(src.techTDS ?? s.techTDS) || +(grossPay * 0.01).toFixed(2)) : (Number(src.tdsMonthly ?? s.tdsMonthly) || 0);
 
         const deductions = [];
         if (isTech) {
@@ -8003,9 +8035,17 @@
         const netPay = +(grossPay - totalDed).toFixed(2);
         const fmt = function(v) { return v ? '\u20b9' + Number(v).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2}) : ''; };
 
+        // Revision info banner
+        const _revBanner = ew
+            ? '<div style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:8px;padding:6px 10px;margin-bottom:8px;font-size:10px;color:#065f46">\ud83d\udcc5 Salary as per revision effective ' + ew._revEffDate + ' \u00b7 Basic \u20b9' + basic.toLocaleString('en-IN') + '</div>'
+            : ((s.wageRevisions||[]).length > 0
+                ? '<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:6px 10px;margin-bottom:8px;font-size:10px;color:#991b1b">\u26a0\ufe0f No baseline revision found for this period. Showing current salary.</div>'
+                : '');
+
         return '<div style="background:#fff;border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.06)">'
             + '<h3 style="font-size:14px;font-weight:800;color:#1e1b4b;margin:0 0 4px">\ud83d\udcb0 ' + (isTech ? 'Wage Summary' : 'Salary Summary') + '</h3>'
             + '<p style="font-size:10px;color:#6b7280;margin:0 0 4px">Period: ' + periodLabel + ' (30-day basis)</p>'
+            + _revBanner
             + '<p style="font-size:9px;color:#9ca3af;margin:0 0 12px">Daily Wage: ' + fmt(dailyWage) + ' | Standby Wage: ' + fmt(standbyWage) + '</p>'
             + '<div style="margin-bottom:12px">'
             + '<div style="background:#1e40af;color:#fff;padding:6px 10px;border-radius:8px 8px 0 0;font-size:11px;font-weight:700">EARNINGS</div>'

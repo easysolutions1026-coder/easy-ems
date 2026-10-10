@@ -3205,14 +3205,83 @@
             };
         }
 
+        // ── Effective wage lookup for a given pay period ──
+        // Returns the wage fields that were in effect for the given month/year.
+        // Pay period runs 26th prev → 25th current, so we use the 1st of the
+        // pay-period month as the reference date. The latest revision whose
+        // effectiveDate ≤ reference date wins. If no revisions exist, falls
+        // back to the current staff record values.
+        function _getEffectiveWageForPeriod(st, year, month) {
+            const revs = (st.wageRevisions || []).slice()
+                .filter(r => r.effectiveDate)
+                .sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate));
+            // Reference: 1st of the payslip month (revision effective 2026-07-01
+            // applies from July payslip onwards; June and earlier use the prior revision)
+            const refDate = `${year}-${String(month).padStart(2,'0')}-01`;
+            const eff = revs.find(r => r.effectiveDate <= refDate);
+            if (eff) {
+                // Return revision fields (office + tech combined; caller picks what it needs)
+                return {
+                    basicSalary: +eff.basicSalary || 0,
+                    hraPct:      eff.hraPct ?? st.hraPct ?? 30,
+                    daPct:       eff.daPct ?? st.daPct ?? 65,
+                    gradePay:    +eff.gradePay || +st.gradePay || 0,
+                    conveyance:  +eff.conveyance || +st.conveyance || 0,
+                    medical:     +eff.medical || +st.medical || 0,
+                    variable:    +eff.variable || +st.variable || 0,
+                    pfPct:       eff.pfPct ?? st.pfPct ?? 12,
+                    tdsMonthly:  +eff.tdsMonthly || +st.tdsMonthly || 0,
+                    // Tech fields
+                    techHRAPct:  eff.techHRAPct ?? st.techHRAPct ?? 50,
+                    techDAPct:   eff.techDAPct ?? st.techDAPct ?? 65,
+                    techGPPct:   eff.techGPPct ?? st.techGPPct ?? 30,
+                    techVariable:+eff.techVariable || +st.techVariable || 0,
+                    techPFPct:   eff.techPFPct ?? st.techPFPct ?? 12,
+                    techESICPct: eff.techESICPct ?? st.techESICPct ?? 0.75,
+                    techTDS:     +eff.techTDS || +st.techTDS || 0,
+                    standbyPct:  eff.standbyPct ?? st.standbyPct ?? 50,
+                    alPct:       eff.alPct ?? st.alPct ?? 50,
+                    _fromRevision: true,
+                    _revEffDate: eff.effectiveDate
+                };
+            }
+            // No revision covers this period — check if the earliest revision is
+            // AFTER the reference date (meaning the current record values are the
+            // post-revision values, not the pre-revision ones). In that case we
+            // have no historical data for the pre-revision salary — fall back to
+            // current staff record (best we can do).
+            return {
+                basicSalary: +st.basicSalary || 0,
+                hraPct:      st.hraPct ?? 30,
+                daPct:       st.daPct ?? 65,
+                gradePay:    +st.gradePay || 0,
+                conveyance:  +st.conveyance || 0,
+                medical:     +st.medical || 0,
+                variable:    +st.variable || 0,
+                pfPct:       st.pfPct ?? 12,
+                tdsMonthly:  +st.tdsMonthly || 0,
+                techHRAPct:  st.techHRAPct ?? 50,
+                techDAPct:   st.techDAPct ?? 65,
+                techGPPct:   st.techGPPct ?? 30,
+                techVariable:+st.techVariable || 0,
+                techPFPct:   st.techPFPct ?? 12,
+                techESICPct: st.techESICPct ?? 0.75,
+                techTDS:     +st.techTDS || 0,
+                standbyPct:  st.standbyPct ?? 50,
+                alPct:       st.alPct ?? 50,
+                _fromRevision: false
+            };
+        }
+
         function computeOfficeSalary(st, op) {
-            const basic=+st.basicSalary||0,hraPct=+(st.hraPct??30),daPct=+(st.daPct??65);
-            const hra=basic*hraPct/100,da=basic*daPct/100,gp=+st.gradePay||0,cv=+st.conveyance||0,med=+st.medical||0,vr=+st.variable||0;
+            const w = _getEffectiveWageForPeriod(st, op.periodYear || new Date().getFullYear(), op.periodMonth || (new Date().getMonth()+1));
+            const basic=w.basicSalary,hraPct=+w.hraPct,daPct=+w.daPct;
+            const hra=basic*hraPct/100,da=basic*daPct/100,gp=+w.gradePay,cv=+w.conveyance,med=+w.medical,vr=+w.variable;
             const bonus=basic/10;
             const addlA=+op.addlAllowance||0,gross=basic+hra+da+gp+cv+med+bonus+vr+addlA;
-            const pfPct=op.pfPct!=null?+op.pfPct:+(st.pfPct??12);
+            const pfPct=op.pfPct!=null?+op.pfPct:+(w.pfPct??12);
             const esicPct=op.esicPct!=null?+op.esicPct:+(st.esicPct??0.75);
-            const tds=op.tdsAmt!=null?+op.tdsAmt:+(st.tdsMonthly||0);
+            const tds=op.tdsAmt!=null?+op.tdsAmt:+(w.tdsMonthly||0);
             const pf=_calcOfficePF(basic,hra,da,med,cv,gp,bonus,pfPct,op.periodMonth,op.periodYear);
             // ESIC — same basis for both threshold test AND contribution amount
             // Wages = Basic + HRA + DA + GP + Conv + Medical + Variable (all regular monthly payments)
@@ -3294,7 +3363,12 @@
             const loanTotal = loanDeductions.reduce((s, ld) => s + (parseFloat(ld.deductionAmount) || 0), 0);
             const totD = otherDed + loanTotal;
             const net = gross - totD;
-            return{basic,hra,hraPct,da,daPct,gradePay:gp,conveyance:cv,medical:med,bonus,variable:vr,addlAllow:addlA,gross,grossWithVar,grossExclVar,pfPct,pfGross:pf.pfGross,pfAmt:pf.pfAmt,pfCapped:pf.pfCapped,esicPct,esicAmt,esicWaived,ptAmt,ptApplies,isFebruary,isMarchFY,gender,tdsAmt:tds,leavePerMonth:lpM,carriedLeave:carried,leaveOpening:leaveResult.opening||0,available,leaveTaken:leaveTakenFinal,lopDays,lopAmt:lopA,leaveBalance:lbal,addlDed:addlD,lateDedAmt,lateSummary,loanDeductions,loanTotal,totalDed:totD,netPay:net,periodDays,periodLabel};
+            // Wage revision info for UI banner
+            const _wageRevInfo = w._fromRevision ? {used:true, effDate:w._revEffDate} : {used:false};
+            const _revs = (st.wageRevisions||[]);
+            const _hasRevsButNoMatch = _revs.length > 0 && !w._fromRevision;
+            const _noBaselineWarning = _hasRevsButNoMatch ? 'No baseline wage revision found for this period. Payslip uses current salary values which may reflect a later revision. Please add a baseline revision (effective from DOJ or app start date) with the original salary.' : '';
+            return{basic,hra,hraPct,da,daPct,gradePay:gp,conveyance:cv,medical:med,bonus,variable:vr,addlAllow:addlA,gross,grossWithVar,grossExclVar,pfPct,pfGross:pf.pfGross,pfAmt:pf.pfAmt,pfCapped:pf.pfCapped,esicPct,esicAmt,esicWaived,ptAmt,ptApplies,isFebruary,isMarchFY,gender,tdsAmt:tds,leavePerMonth:lpM,carriedLeave:carried,leaveOpening:leaveResult.opening||0,available,leaveTaken:leaveTakenFinal,lopDays,lopAmt:lopA,leaveBalance:lbal,addlDed:addlD,lateDedAmt,lateSummary,loanDeductions,loanTotal,totalDed:totD,netPay:net,periodDays,periodLabel,_wageRevInfo,_noBaselineWarning};
         }
 
         function onPaySlipStaffChange(staffID){
@@ -3304,19 +3378,20 @@
             if(!st)return;
             if(st.staffType==='Technician'){
                 techWageState.staffID=staffID;
-                techWageState.basic=+st.basicSalary||0;
-                techWageState.hraPct=+(st.techHRAPct??50);
-                techWageState.daPct=+(st.techDAPct??65);
-                techWageState.gradePay=+(st.techGPPct??30);
-                techWageState.variableAllow=+st.techVariable||0;
+                const tw = _getEffectiveWageForPeriod(st, techWageState.periodYear, techWageState.periodMonth);
+                techWageState.basic=tw.basicSalary;
+                techWageState.hraPct=+tw.techHRAPct;
+                techWageState.daPct=+tw.techDAPct;
+                techWageState.gradePay=+tw.techGPPct;
+                techWageState.variableAllow=+tw.techVariable;
                 techWageState.travelAllow=+(st.techTravelAllow||4000); // default ₹4,000
                 techWageState.pfOverride='auto';
                 techWageState.ptOverride='';
                 techWageState.exgratia=0;techWageState.exgratiaRemark='';
                 techWageState.addlDeduction=0;techWageState.addlDeductionRemark='';
                 techWageState.rates={
-                    standbyPct:+(st.standbyPct??50),
-                    alPct:+(st.alPct??50),
+                    standbyPct:+(tw.standbyPct??50),
+                    alPct:+(tw.alPct??50),
                     ulPct:+(st.ulPct??100),
                     outstationPct:+(st.outstationPct??20),
                     sailingPct:+(st.sailingPct??30),
@@ -3324,8 +3399,8 @@
                     t15extra:+(st.thresh15pct??50),
                     t20extra:+(st.thresh20pct??30)
                 };
-                techWageState.pfPct=+(st.techPFPct??12);
-                techWageState.esicPct=+(st.techESICPct??0.75);
+                techWageState.pfPct=+tw.techPFPct;
+                techWageState.esicPct=+tw.techESICPct;
                 techWageState.tdsAmt = null; // always auto-calculate TDS = Gross×1%; user can override in the TDS field
                 const dates=getTechWagePeriodDates(techWageState.periodYear,techWageState.periodMonth);
                 techWageState.att=dates.map(d=>{const key=_localDateKey(d),rec=(st.attendance||[]).find(a=>a.date===key);return rec&&ATT_ORDER.includes(rec.status)?rec.status:'';});
@@ -3339,7 +3414,8 @@
                 document.getElementById('twSection')?.classList.remove('hidden');renderTechWageCalc();
             } else {
                 officePayState.staffID=staffID;officePayState.leaveTaken=0;officePayState._useManualLeave=false;officePayState.addlAllowance=0;officePayState.addlAllowanceRemark='';officePayState.addlDeduction=0;officePayState.addlDeductionRemark='';
-                officePayState.pfPct=+(st.pfPct??12);officePayState.esicPct=+(st.esicPct??0.75);officePayState.ptBase=+(st.ptBase??200);officePayState.tdsAmt=+(st.tdsMonthly||0);
+                const ow = _getEffectiveWageForPeriod(st, officePayState.periodYear, officePayState.periodMonth);
+                officePayState.pfPct=+(ow.pfPct??12);officePayState.esicPct=+(st.esicPct??0.75);officePayState.ptBase=+(st.ptBase??200);officePayState.tdsAmt=+(ow.tdsMonthly||0);
                 _resetOfficeInputs(st);document.getElementById('opSection')?.classList.remove('hidden');renderOfficePayCalc();
             }
         }
@@ -3384,10 +3460,23 @@
         }
         function onPaySlipPeriodChange(f,v){
             techWageState[f]=+v;officePayState[f]=+v;
-            // When period changes for a technician, reload attendance from saved staff record for the new period
+            // When period changes for a technician, reload attendance AND wage fields for the new period
             if(!document.getElementById('twSection')?.classList.contains('hidden')&&techWageState.staffID){
                 const st=staff.find(x=>x.staffID===techWageState.staffID);
                 if(st){
+                    // Reload wage fields from effective revision for the new period
+                    const tw = _getEffectiveWageForPeriod(st, techWageState.periodYear, techWageState.periodMonth);
+                    techWageState.basic=tw.basicSalary;
+                    techWageState.hraPct=+tw.techHRAPct;
+                    techWageState.daPct=+tw.techDAPct;
+                    techWageState.gradePay=+tw.techGPPct;
+                    techWageState.variableAllow=+tw.techVariable;
+                    techWageState.rates.standbyPct=+(tw.standbyPct??50);
+                    techWageState.rates.alPct=+(tw.alPct??50);
+                    techWageState.pfPct=+tw.techPFPct;
+                    techWageState.esicPct=+tw.techESICPct;
+                    const twBasic=document.getElementById('twBasic');if(twBasic)twBasic.value=techWageState.basic;
+                    const va=document.getElementById('twVariableAllow');if(va)va.value=techWageState.variableAllow;
                     const dates=getTechWagePeriodDates(techWageState.periodYear,techWageState.periodMonth);
                     techWageState.att=dates.map(d=>{
                         const key=_localDateKey(d);
@@ -3397,7 +3486,17 @@
                 }
                 renderTechWageCalc();
             }
-            if(!document.getElementById('opSection')?.classList.contains('hidden'))renderOfficePayCalc();
+            // Office staff: wage fields are picked up by computeOfficeSalary via _getEffectiveWageForPeriod
+            if(!document.getElementById('opSection')?.classList.contains('hidden')){
+                // Reload PF/TDS defaults from the effective revision
+                const ost=staff.find(x=>x.staffID===officePayState.staffID);
+                if(ost){
+                    const ow = _getEffectiveWageForPeriod(ost, officePayState.periodYear, officePayState.periodMonth);
+                    officePayState.pfPct=+(ow.pfPct??12);
+                    officePayState.tdsAmt=+(ow.tdsMonthly||0);
+                }
+                renderOfficePayCalc();
+            }
         }
         function updateOfficePayState(f,v){
             const num=['leaveTaken','addlAllowance','addlDeduction','pfPct','esicPct','ptBase','tdsAmt'];
@@ -3420,6 +3519,12 @@
             const MN=['January','February','March','April','May','June','July','August','September','October','November','December'];
             const monthName=MN[op.periodMonth-1]+' '+op.periodYear;
             const pl=c.periodLabel; // "26-MMM-YYYY – 25-MMM-YYYY"
+            // Wage revision banner
+            const _revBanner = c._noBaselineWarning
+                ? `<div style="background:#fef2f2;border:2px solid #dc2626;border-radius:10px;padding:8px 14px;margin-bottom:10px;font-size:12px;color:#991b1b"><strong>⚠️ Missing Baseline Revision:</strong> ${c._noBaselineWarning}</div>`
+                : (c._wageRevInfo.used
+                    ? `<div style="background:#f0fdf4;border:1px solid #16a34a55;border-radius:8px;padding:6px 12px;margin-bottom:10px;font-size:11px;color:#15803d"><strong>📅 Salary as per revision effective ${c._wageRevInfo.effDate}</strong> · Basic ₹${c.basic.toLocaleString('en-IN')}</div>`
+                    : '');
             const lc=c.leaveBalance<0?'#dc2626':c.leaveBalance===0?'#b45309':'#15803d';
             const lb=c.leaveBalance<0?'#fee2e2':c.leaveBalance===0?'#fef3c7':'#dcfce7';
             const er=[{n:'Basic Salary',a:c.basic,s:true},{n:`HRA (${c.hraPct}%)`,a:c.hra,s:c.hra>0},{n:`DA (${c.daPct}%)`,a:c.da,s:c.da>0},{n:'Grade Pay',a:c.gradePay,s:c.gradePay>0},{n:'Conveyance',a:c.conveyance,s:c.conveyance>0},{n:'Medical',a:c.medical,s:c.medical>0},{n:'Annual Bonus (Basic÷10)',a:c.bonus,s:true},{n:'Variable (excl. PF)',a:c.variable,s:c.variable>0},{n:op.addlAllowanceRemark?'Add: '+op.addlAllowanceRemark:'Add. Allow.',a:c.addlAllow,s:c.addlAllow>0}].filter(r=>r.s);
@@ -3458,6 +3563,7 @@
                 }
             }));
             return `<div style="font-size:12px;color:#374151;margin-bottom:10px;padding:8px 14px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;font-weight:500"><strong>${st.name}</strong> · ${st.designation||'Staff'} · <strong style="color:#1d4ed8">${monthName}</strong> <span style="font-size:11px;color:#6b7280;font-weight:400">(${pl} · ${c.periodDays} days)</span>${c.isFebruary&&c.ptApplies?' <span style="background:#fef3c7;color:#78350f;padding:2px 6px;border-radius:99px;font-size:10px;font-weight:600">Feb PT ₹'+c.ptAmt+'</span>':''}${!c.ptApplies?' <span style="background:#f3f4f6;color:#6b7280;padding:2px 6px;border-radius:99px;font-size:10px">PT NIL</span>':''}</div>
+            ${_revBanner}
             <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:12px">
                 <div style="background:#f0fdf4;border:1px solid #15803d55;border-radius:10px;padding:10px;text-align:center"><div style="font-size:10px;color:#6b7280;font-weight:500;margin-bottom:4px">CARRIED FWD</div><div style="font-size:18px;font-weight:600;color:#15803d">${c.carriedLeave}</div></div>
                 <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:10px;text-align:center"><div style="font-size:10px;color:#6b7280;font-weight:500;margin-bottom:4px">ACCRUED</div><div style="font-size:18px;font-weight:600;color:#374151">${c.leavePerMonth}</div></div>
@@ -30898,6 +31004,30 @@ Automated WFH alert — ${company} Attendance System.`;
                 recordedBy: currentUser?.name||currentUser?.email||'Admin',
                 recordedAt: new Date().toISOString()};
             _stampRecord(revRecord);
+            // Auto-capture baseline: if this is the first revision (not an edit),
+            // save the CURRENT salary as a baseline so pre-revision payslips
+            // can look up the old values. Use DOJ or app start (2026-04-01) as
+            // the baseline effective date.
+            if (!_editWageRevID && staff[idx].wageRevisions.length === 0) {
+                const s = staff[idx];
+                const baselineDate = s.doj || '2026-04-01';
+                const baseline = {
+                    revID: 'REV_BASE_' + Date.now(),
+                    effectiveDate: baselineDate,
+                    reason: 'Baseline — auto-captured before first revision',
+                    basicSalary: +s.basicSalary || 0,
+                    hraPct: s.hraPct, daPct: s.daPct,
+                    gradePay: +s.gradePay || 0, conveyance: +s.conveyance || 0,
+                    medical: +s.medical || 0, variable: +s.variable || 0,
+                    pfPct: s.pfPct, tdsMonthly: +s.tdsMonthly || 0,
+                    techHRAPct: s.techHRAPct, techDAPct: s.techDAPct, techGPPct: s.techGPPct,
+                    techVariable: +s.techVariable || 0, standbyPct: s.standbyPct, alPct: s.alPct,
+                    techPFPct: s.techPFPct, techESICPct: s.techESICPct, techTDS: +s.techTDS || 0,
+                    recordedBy: 'System (baseline)', recordedAt: new Date().toISOString()
+                };
+                _stampRecord(baseline);
+                staff[idx].wageRevisions.push(baseline);
+            }
             if(_editWageRevID){const ri=staff[idx].wageRevisions.findIndex(r=>r.revID===_editWageRevID);if(ri>=0)Object.assign(staff[idx].wageRevisions[ri],revRecord);}else{revRecord.revID='REV'+Date.now();staff[idx].wageRevisions.push(revRecord);}
             const sync=(k,v)=>{if(v!==undefined&&v!==null)staff[idx][k]=v;};
             sync('basicSalary',revRecord.basicSalary||undefined);
