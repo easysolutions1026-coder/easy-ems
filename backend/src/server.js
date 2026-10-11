@@ -217,7 +217,13 @@ techRouter.post('/login', async (req, res) => {
       // Loan deductions — show active loans with EMI for salary summary
       loans: (staff.loans || []).filter(l => l.status === 'Active').map(l => ({
         loanID: l.loanID, remarks: l.remarks || '', emi: l.emi || 0,
-        principal: l.principal || 0, status: l.status
+        principal: l.principal || 0, status: l.status,
+        firstDeductMonth: l.firstDeductMonth, firstDeductYear: l.firstDeductYear,
+        disbursedDate: l.disbursedDate || '', startDate: l.startDate || '',
+        closedDate: l.closedDate || '',
+        pauseUntil: l.pauseUntil || '', pauseReason: l.pauseReason || '',
+        deductionLog: l.deductionLog || [], manualRepayments: l.manualRepayments || [],
+        installments: l.installments || 0
       }))
     };
 
