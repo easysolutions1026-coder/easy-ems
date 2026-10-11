@@ -8029,6 +8029,15 @@
                 if (fyMatch) loanStart = '20' + fyMatch[1] + '-04-01';
             }
             if (loanStart && loanStart > endDate) return;
+            // Check if EMI is paused for this period
+            if (l.pauseUntil) {
+                var _pu = l.pauseUntil.split('-').map(Number);
+                var pauseKey = _pu[0] * 12 + _pu[1];
+                if ((periodYear * 12 + periodMonth) <= pauseKey) {
+                    deductions.push({ label: 'Loan EMI \u2014 ' + (l.remarks || l.loanID) + ' (\u23f8\ufe0f paused until ' + l.pauseUntil + ')', amt: 0 });
+                    return;
+                }
+            }
             deductions.push({ label: 'Loan EMI \u2014 ' + (l.remarks || l.loanID), amt: Number(l.emi) });
         });
 
