@@ -1762,7 +1762,7 @@
                 var _leanCache = staffList.map(function(s) {
                     var o = { staffID: s.staffID, name: s.name };
                     ['techHRAPct','techDAPct','techGPPct','techVariable','techPFPct','techESICPct','techTDS','techTravelAllow','outstationPct','sailingPct','anchoragePct','travelAllow','uanNumber','esicNumber','pfNumber','dailyWage','standbyWage'].forEach(function(f) { if (s[f] !== undefined) o[f] = s[f]; });
-                    if (s.loans) o.loans = s.loans.map(function(l) { return { loanID:l.loanID, remarks:l.remarks, emi:l.emi, principal:l.principal, status:l.status, firstDeductMonth:l.firstDeductMonth, firstDeductYear:l.firstDeductYear, disbursedDate:l.disbursedDate, startDate:l.startDate, closedDate:l.closedDate }; });
+                    if (s.loans) o.loans = s.loans.map(function(l) { return { loanID:l.loanID, remarks:l.remarks, emi:l.emi, principal:l.principal, status:l.status, firstDeductMonth:l.firstDeductMonth, firstDeductYear:l.firstDeductYear, disbursedDate:l.disbursedDate, startDate:l.startDate, closedDate:l.closedDate, pauseUntil:l.pauseUntil||'', pauseReason:l.pauseReason||'' }; });
                     return o;
                 });
                 localStorage.setItem('_staffWageCache', JSON.stringify(_leanCache));
@@ -7348,7 +7348,7 @@
                         var _lc2 = (_techSSFullStaffCache||[]).map(function(s) {
                             var o = { staffID: s.staffID, name: s.name };
                             ['techHRAPct','techDAPct','techGPPct','techVariable','techPFPct','techESICPct','techTDS','techTravelAllow','outstationPct','sailingPct','anchoragePct','travelAllow','uanNumber','esicNumber','pfNumber','dailyWage','standbyWage'].forEach(function(f) { if (s[f] !== undefined) o[f] = s[f]; });
-                            if (s.loans) o.loans = s.loans.map(function(l) { return { loanID:l.loanID, remarks:l.remarks, emi:l.emi, principal:l.principal, status:l.status, firstDeductMonth:l.firstDeductMonth, firstDeductYear:l.firstDeductYear, disbursedDate:l.disbursedDate, startDate:l.startDate, closedDate:l.closedDate }; });
+                            if (s.loans) o.loans = s.loans.map(function(l) { return { loanID:l.loanID, remarks:l.remarks, emi:l.emi, principal:l.principal, status:l.status, firstDeductMonth:l.firstDeductMonth, firstDeductYear:l.firstDeductYear, disbursedDate:l.disbursedDate, startDate:l.startDate, closedDate:l.closedDate, pauseUntil:l.pauseUntil||'', pauseReason:l.pauseReason||'' }; });
                             return o;
                         });
                         localStorage.setItem('_staffWageCache', JSON.stringify(_lc2));
@@ -7378,8 +7378,8 @@
             staffRec.loans.forEach(l => {
                 const fullLoan = full.loans.find(fl => fl.loanID === l.loanID);
                 if (!fullLoan) return;
-                ['firstDeductMonth','firstDeductYear','disbursedDate','startDate','closedDate'].forEach(f => {
-                    if (fullLoan[f] !== undefined && l[f] === undefined) { l[f] = fullLoan[f]; enriched++; }
+                ['firstDeductMonth','firstDeductYear','disbursedDate','startDate','closedDate','pauseUntil','pauseReason'].forEach(f => {
+                    if (fullLoan[f] !== undefined && (l[f] === undefined || l[f] === '')) { l[f] = fullLoan[f]; enriched++; }
                 });
             });
         }
