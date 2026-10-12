@@ -360,13 +360,13 @@ techRouter.post('/readiness', async (req, res) => {
 // GET /api/tech/projects — return project list for work log dropdown (no auth needed)
 techRouter.get('/projects', async (req, res) => {
   try {
-    const rows = await prisma.projectExpenses.findMany({
-      select: { projExpID: true, data: true }
+    const rows = await prisma.projectExpense.findMany({
+      select: { peID: true, data: true }
     });
     const projects = rows.map(r => {
       const d = r.data || {};
       return {
-        projExpID: d.projExpID || r.projExpID,
+        projExpID: d.projExpID || r.peID,
         projectName: d.projectName || '',
         projectRef: d.projectRef || '',
         status: d.status || 'Active'
