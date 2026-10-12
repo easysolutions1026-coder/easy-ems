@@ -1432,6 +1432,11 @@
             ];
             const [pe, wl, sf] = await Promise.all(promises);
             if (Array.isArray(pe)) projectExpenses = pe;
+            // Merge projects from backend (Cloud SQL)
+            try {
+                const _bkR = await fetch(TECH_API + 'projects');
+                if (_bkR.ok) { const _bkP = await _bkR.json(); if (Array.isArray(_bkP)) { const _eIDs = new Set(projectExpenses.map(p=>p.projExpID)); const _eNms = new Set(projectExpenses.map(p=>p.projectName)); _bkP.forEach(bp => { if (!_eIDs.has(bp.projExpID) && !_eNms.has(bp.projectName)) projectExpenses.push(bp); }); } }
+            } catch(e) {}
             if (Array.isArray(wl)) workLogs        = wl;
             if (Array.isArray(sf)) staffList       = sf.filter(s => s.status === 'Active');
             await loadFundData();
@@ -1755,6 +1760,23 @@
                 readFile(SHARED_FILE_IDS.staff)
             ]);
             projectExpenses = Array.isArray(pe) ? pe : [];
+            // Merge projects from backend (Cloud SQL) — catches new projects not yet in Drive
+            try {
+                const _bkResp = await fetch(TECH_API + 'projects');
+                if (_bkResp.ok) {
+                    const _bkProjects = await _bkResp.json();
+                    if (Array.isArray(_bkProjects)) {
+                        const existingIDs = new Set(projectExpenses.map(p => p.projExpID));
+                        const existingNames = new Set(projectExpenses.map(p => p.projectName));
+                        _bkProjects.forEach(bp => {
+                            if (!existingIDs.has(bp.projExpID) && !existingNames.has(bp.projectName)) {
+                                projectExpenses.push(bp);
+                            }
+                        });
+                        console.log('[Projects] Merged from backend: ' + _bkProjects.length + ' total, ' + projectExpenses.length + ' after merge');
+                    }
+                }
+            } catch(e) { console.warn('[Projects] Backend fetch failed (non-critical):', e.message); }
             workLogs        = Array.isArray(wl) ? wl : [];
             staffList       = Array.isArray(sf) ? sf.filter(s=>s.status==='Active') : [];
             // Cache full staff data for tech self-service wage enrichment

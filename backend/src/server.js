@@ -357,6 +357,28 @@ techRouter.post('/readiness', async (req, res) => {
   }
 });
 
+// GET /api/tech/projects — return project list for work log dropdown (no auth needed)
+techRouter.get('/projects', async (req, res) => {
+  try {
+    const rows = await prisma.projectExpenses.findMany({
+      select: { projExpID: true, data: true }
+    });
+    const projects = rows.map(r => {
+      const d = r.data || {};
+      return {
+        projExpID: d.projExpID || r.projExpID,
+        projectName: d.projectName || '',
+        projectRef: d.projectRef || '',
+        status: d.status || 'Active'
+      };
+    }).filter(p => p.projectName);
+    res.json(projects);
+  } catch (err) {
+    console.error('[tech/projects] error:', err);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
 // Tech alert routes — PIN-based, no Google auth
 techRouter.get('/alerts', getTechAlerts);
 techRouter.post('/alerts/respond', respondToAlert);
