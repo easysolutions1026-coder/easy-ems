@@ -2171,26 +2171,10 @@
         // Defaults match current India statutory rates. Can be overridden per-establishment
         // via settings if rates change in future (no current UI exposure — defaults suffice).
         function _statutoryRates(month, year) {
-            // EPF wage ceiling: ₹15,000 until 16 Sep 2026; ₹25,000 from 17 Sep 2026
-            // S.O. 5109(E) dated 17 September 2026
-            const m = +(month || new Date().getMonth() + 1);
-            const y = +(year  || new Date().getFullYear());
-            const isBeforeNew = y < 2026 || (y === 2026 && m < 9);
-            const isTransition = y === 2026 && m === 9; // September 2026 — split month
-            const isAfterNew  = y > 2026 || (y === 2026 && m > 9);
-            let pfWageCap, edliWageCap;
-            if (isAfterNew) {
-                pfWageCap  = 25000;
-                edliWageCap = 25000;
-            } else if (isTransition) {
-                // Pro-rate: 16 days old cap + 14 days new cap = weighted average
-                // (16/30 × 15000) + (14/30 × 25000) = 8000 + 11666.67 = 19666.67
-                pfWageCap  = Math.round((16/30 * 15000) + (14/30 * 25000));
-                edliWageCap = Math.round((16/30 * 15000) + (14/30 * 25000));
-            } else {
-                pfWageCap  = 15000;
-                edliWageCap = 15000;
-            }
+            // EPFO wage ceiling raised ₹15,000 → ₹25,000 w.e.f. 17-Sep-2026
+            // (Gazette S.O. 5109(E)) — applies to EPF/EPS and EDLI.
+            const pfWageCap   = _isPostPFAmendment(month, year) ? 25000 : 15000;
+            const edliWageCap = _isPostPFAmendment(month, year) ? 25000 : 15000;
             return {
                 employerPFPct:   (settings?.employerPFPct  != null) ? +settings.employerPFPct   : 12,
                 epfAdminPct:     (settings?.epfAdminPct    != null) ? +settings.epfAdminPct     : 0.5,
@@ -2198,8 +2182,7 @@
                 employerESICPct: (settings?.employerESICPct!= null) ? +settings.employerESICPct : 3.25,
                 epfAdminMin:     500,
                 pfWageCap,
-                edliWageCap,
-                isTransitionMonth: isTransition
+                edliWageCap
             };
         }
 
@@ -2271,8 +2254,7 @@
                 }
                 if (pfGross <= 0 && employeePF <= 0) continue;   // skip zero-contribution staff
                 // Per EPF & MP Act: employer PF + admin use the same capped basis as
-                // employee PF. EDLI has its own explicit ₹15,000 ceiling per employee
-                // per month — kept separate so a future PF cap change doesn't break EDLI.
+                // employee PF. EDLI uses edliWageCap (₹15K pre-Sep 2026, ₹25K from Sep 2026).
                 const effectiveBasis = capped ? rates.pfWageCap : pfGross;
                 const edliBasis      = Math.min(pfGross, rates.edliWageCap || 15000);
                 // All EPF contributions are rounded to the nearest rupee to match
@@ -16823,7 +16805,7 @@
                                 <td class="px-3 py-2 text-xs text-right">${fmt(r.employeePF)}</td>
                                 <td class="px-3 py-2 text-xs text-right">${fmt(r.employerPF)}</td>
                                 <td class="px-3 py-2 text-xs text-right text-gray-500">${fmt(r.admin)}</td>
-                                <td class="px-3 py-2 text-xs text-right text-gray-500">${fmt(r.edli)}${r.edliBasis && r.edliBasis < r.pfGross?` <span class="text-[9px] text-blue-400">(on ₹15k cap)</span>`:''}</td>
+                                <td class="px-3 py-2 text-xs text-right text-gray-500">${fmt(r.edli)}${r.edliBasis && r.edliBasis < r.pfGross?` <span class="text-[9px] text-blue-400">(on ₹${(r.edliBasis/1000).toFixed(0)}k cap)</span>`:''}</td>
                                 <td class="px-3 py-2 text-xs text-right font-bold text-blue-700">${fmt(r.total)}</td>
                             </tr>`).join('')}
                         </tbody>
@@ -16850,7 +16832,7 @@
                                 ${lib.rows.length} contributing staff · Total payable: <strong class="${hasLiability ? 'text-blue-700' : 'text-green-700'}">${fmt(total)}</strong>
                                 ${hasLiability ? ' · Due by 15 ' + nextMonthLabel.replace(' (15)', '') : ''}
                             </p>
-                            ${(year > 2026 || (year === 2026 && month >= 9)) ? `<p class="text-[10px] text-indigo-600 mt-1 font-medium">📋 PF Amendment w.e.f. Sep 2026: Office Staff PF on (Gross − Variable) × 12%, no cap. Technician PF unchanged (Basic + Fixed Allowances × 12%).</p>` : ''}
+                            ${(year > 2026 || (year === 2026 && month >= 9)) ? `<p class="text-[10px] text-indigo-600 mt-1 font-medium">📋 PF Amendment w.e.f. Sep 2026: Office Staff PF on (Gross − Variable) × 12%, no cap. Technician PF unchanged (Basic + Fixed Allowances × 12%). EPFO wage ceiling (EPS/EDLI) raised ₹15K → ₹25K.</p>` : ''}
                         </div>
                         ${hasLiability && status === 'unrecorded' ? `
                         <button onclick="createPFPaymentBill(${month},${year},${total})"
@@ -31354,12 +31336,10 @@ Automated WFH alert — ${company} Attendance System.`;
             // Statutory (employer side — added to CTC)
             const pfPct = +(g(isTech ? 'techPFPct' : 'pfPct') ?? 12);
             const pfBase = isTech ? (basic + fixedAllow) : (basic + hra + da + medical + conveyance + gp);
-            // PF cap of ₹15,000/month applies to OFFICE staff only (matches
-            // _calcOfficePF at line 1811). TECHNICIAN PF has no cap — the
-            // full base is used (matches _calcTechPF at line 1816). Same
-            // convention as the existing wage code so CTC numbers reconcile
-            // with monthly payslips.
-            const pfCappedBase = isTech ? pfBase : (pfBase > 15000 ? 15000 : pfBase);
+            // PF Amendment w.e.f. Sep 2026: Office PF has NO CAP.
+            // Technician PF has no cap either (full Basic+Fixed base).
+            // CTC uses current rule — no capping for either staff type.
+            const pfCappedBase = pfBase;
             const pfEmployee = +(pfCappedBase * pfPct / 100).toFixed(2);
             // Employer PF = employee's PF% (12% match — 8.33% EPS + 3.67% EPF)
             // + 1% admin/EDLI (0.5% EDLI + 0.5% admin — fixed statutory).
@@ -31608,7 +31588,7 @@ Automated WFH alert — ${company} Attendance System.`;
                 ` : `<div style="margin-top:16px;padding:10px 14px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;color:#64748b;font-size:12px;text-align:center">Edit any input above to simulate a revision. When you're happy with the numbers, click <b>📄 Approval PDF</b> at the top-right to prepare the management document.</div>`}
 
                 <div style="margin-top:12px;font-size:10px;color:#94a3b8;text-align:center">
-                    Notes: (1) Employer PF = employee PF% + 1% admin/EDLI (statutory). PF-base capped at ₹15,000 for OFFICE staff only; technician PF has no cap (matches monthly payslip logic). (2) Bonus accrual = Basic÷10 annual ÷ 12 months. (3) Field-day allowances and OT are per-day rates — actual monthly impact depends on the technician's attendance for that month.
+                    Notes: (1) Employer PF = employee PF% + admin/EDLI (statutory). From Sep 2026: EPFO wage ceiling ₹25K; Office PF no cap; Technician PF unchanged. (2) Bonus accrual = Basic÷10 annual ÷ 12 months. (3) Field-day allowances and OT are per-day rates — actual monthly impact depends on the technician's attendance for that month.
                 </div>
             `;
         }
