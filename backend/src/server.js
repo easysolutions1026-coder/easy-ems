@@ -367,7 +367,7 @@ techRouter.get('/projects', async (req, res) => {
       const d = r.data || {};
       return {
         projExpID: d.projExpID || r.peID,
-        projectName: d.projectName || '',
+        projectName: (d.projectName || '').trim(),
         projectRef: d.projectRef || '',
         status: d.status || 'Active'
       };
