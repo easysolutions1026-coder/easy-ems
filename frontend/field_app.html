@@ -1544,42 +1544,74 @@
     // If IDs are blank, the field app skips fund features gracefully.
     async function loadFundData() {
         try {
-            const reqID  = SHARED_FILE_IDS.fundRequests;
-            const poolID = SHARED_FILE_IDS.fundPools;
-            if (!reqID || reqID.startsWith('PASTE_')) {
-                console.log('💰 Fund tracking not configured (admin: paste fundRequests/fundPools IDs in SHARED_FILE_IDS)');
-                fundRequests = []; fundPools = [];
-                return;
-            }
+            // ── PRIMARY: Load from Cloud SQL backend ──
+            let bkRequests = null, bkPools = null;
             try {
-                const reqData = await readFile(reqID);
-                fundRequests = Array.isArray(reqData) ? reqData : [];
-            } catch(e) {
-                console.warn('Could not read fundRequests.json — has it been shared with imsetechnician@gmail.com?', e.message);
-                fundRequests = [];
+                const [reqResp, poolResp] = await Promise.all([
+                    fetch(TECH_API + 'fund-requests'),
+                    fetch(TECH_API + 'fund-pools')
+                ]);
+                if (reqResp.ok) bkRequests = await reqResp.json();
+                if (poolResp.ok) bkPools = await poolResp.json();
+            } catch(e) { console.warn('[Fund] Backend fetch failed:', e.message); }
+
+            if (Array.isArray(bkRequests)) {
+                fundRequests = bkRequests;
+                console.log('[Fund] Requests loaded from backend:', fundRequests.length);
+            } else {
+                // Fallback: read from Drive
+                const reqID = SHARED_FILE_IDS.fundRequests;
+                if (reqID && !reqID.startsWith('PASTE_')) {
+                    try {
+                        const reqData = await readFile(reqID);
+                        fundRequests = Array.isArray(reqData) ? reqData : [];
+                    } catch(e) { fundRequests = []; }
+                } else { fundRequests = []; }
+                console.log('[Fund] Requests loaded from Drive fallback:', fundRequests.length);
             }
-            if (poolID && !poolID.startsWith('PASTE_')) {
-                try {
-                    const poolData = await readFile(poolID);
-                    fundPools = Array.isArray(poolData) ? poolData : [];
-                } catch(e) {
-                    console.warn('Could not read fundPools.json:', e.message);
-                    fundPools = [];
-                }
+
+            if (Array.isArray(bkPools)) {
+                fundPools = bkPools;
+                console.log('[Fund] Pools loaded from backend:', fundPools.length);
+            } else {
+                // Fallback: read from Drive
+                const poolID = SHARED_FILE_IDS.fundPools;
+                if (poolID && !poolID.startsWith('PASTE_')) {
+                    try {
+                        const poolData = await readFile(poolID);
+                        fundPools = Array.isArray(poolData) ? poolData : [];
+                    } catch(e) { fundPools = []; }
+                } else { fundPools = []; }
+                console.log('[Fund] Pools loaded from Drive fallback:', fundPools.length);
             }
+
             console.log(`💰 Fund data loaded — ${fundRequests.length} requests, ${fundPools.length} pools`);
         } catch(err) {
             console.warn('Fund data load failed:', err.message);
             fundRequests = []; fundPools = [];
         }
     }
-    async function saveFundRequests() {
-        const id = SHARED_FILE_IDS.fundRequests;
-        if (!id || id.startsWith('PASTE_')) {
-            throw new Error('FUND_NOT_CONFIGURED');
+    async function saveFundRequests(lastReq) {
+        // Save to backend (Cloud SQL) — primary
+        if (lastReq && lastReq.requestID) {
+            try {
+                const resp = await fetch(TECH_API + 'fund-requests', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(lastReq)
+                });
+                if (resp.ok) console.log('[Fund] Request saved to backend:', lastReq.requestID);
+                else console.warn('[Fund] Backend save failed:', await resp.text());
+            } catch(e) { console.warn('[Fund] Backend save error:', e.message); }
         }
-        await writeFile(id, fundRequests);
-        try { _concurMarkLocalSave('fundRequests'); } catch(e) {}
+        // Also save to Drive for backward compatibility
+        const id = SHARED_FILE_IDS.fundRequests;
+        if (id && !id.startsWith('PASTE_')) {
+            try {
+                await writeFile(id, fundRequests);
+                try { _concurMarkLocalSave('fundRequests'); } catch(e) {}
+            } catch(e) { console.warn('[Fund] Drive save fallback failed:', e.message); }
+        }
     }
 
     // ── LOAD / SAVE ───────────────────────────────────────────────
@@ -2685,7 +2717,7 @@
             _stampRecord(existing);
 
             try {
-                await saveFundRequests();
+                await saveFundRequests(existing);
                 closeFundReqModal();
                 renderView();
                 showToast('✅ Fund request updated');
@@ -2730,7 +2762,7 @@
         _stampRecord(newReq);
         fundRequests.push(newReq);
         try {
-            await saveFundRequests();
+            await saveFundRequests(newReq);
             closeFundReqModal();
             renderView();
             showToast(_frMode === 'resubmit' ? '🔄 Request resubmitted to office' : '📤 Fund request submitted to office');
@@ -2774,7 +2806,7 @@
         r.updatedAt = new Date().toISOString();
         _stampRecord(r);
         try {
-            await saveFundRequests();
+            await saveFundRequests(r);
             renderView();
             showToast('🗑️ Request cancelled');
         } catch(err) {
@@ -3360,7 +3392,7 @@
         r.updatedAt = new Date().toISOString();
         _stampRecord(r);
         try {
-            await saveFundRequests();
+            await saveFundRequests(r);
             renderView();
             showToast('📨 Correction request sent to office');
         } catch(err) {

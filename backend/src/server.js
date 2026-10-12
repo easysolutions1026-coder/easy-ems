@@ -379,6 +379,77 @@ techRouter.get('/projects', async (req, res) => {
   }
 });
 
+// GET /api/tech/fund-pools — return fund pools from Cloud SQL
+techRouter.get('/fund-pools', async (req, res) => {
+  try {
+    const rows = await prisma.fundPool.findMany({
+      select: { poolID: true, technicianID: true, status: true, data: true }
+    });
+    const pools = rows.map(r => {
+      const d = r.data || {};
+      return { ...d, poolID: d.poolID || r.poolID, status: d.status || r.status || '' };
+    });
+    res.json(pools);
+  } catch (err) {
+    console.error('[tech/fund-pools] error:', err);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
+// GET /api/tech/fund-requests — return fund requests from Cloud SQL
+techRouter.get('/fund-requests', async (req, res) => {
+  try {
+    const rows = await prisma.fundRequest.findMany({
+      select: { frID: true, technicianID: true, status: true, data: true }
+    });
+    const requests = rows.map(r => {
+      const d = r.data || {};
+      return { ...d, requestID: d.requestID || r.frID, status: d.status || r.status || '' };
+    });
+    res.json(requests);
+  } catch (err) {
+    console.error('[tech/fund-requests] error:', err);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
+// POST /api/tech/fund-requests — create or update a fund request from field app
+techRouter.post('/fund-requests', async (req, res) => {
+  try {
+    const reqData = req.body;
+    if (!reqData || !reqData.requestID) {
+      return res.status(400).json({ error: 'MISSING_REQUEST_ID' });
+    }
+    const frID = reqData.requestID;
+    // Upsert: create if new, update if exists
+    await prisma.fundRequest.upsert({
+      where: { frID },
+      create: {
+        frID,
+        frDate: reqData.requestedDate ? new Date(reqData.requestedDate) : new Date(),
+        technicianID: reqData.requestedBy || '',
+        amount: reqData.requestedAmount ? parseFloat(reqData.requestedAmount) : 0,
+        status: reqData.status || 'Pending',
+        poolID: reqData.poolID || '',
+        data: reqData,
+        createdBy: reqData.requestedByName || 'field-app',
+        lastModifiedBy: reqData.requestedByName || 'field-app'
+      },
+      update: {
+        status: reqData.status || 'Pending',
+        amount: reqData.requestedAmount ? parseFloat(reqData.requestedAmount) : 0,
+        poolID: reqData.poolID || '',
+        data: reqData,
+        lastModifiedBy: reqData.requestedByName || 'field-app'
+      }
+    });
+    res.json({ ok: true, frID });
+  } catch (err) {
+    console.error('[tech/fund-requests POST] error:', err);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
 // Tech alert routes — PIN-based, no Google auth
 techRouter.get('/alerts', getTechAlerts);
 techRouter.post('/alerts/respond', respondToAlert);
