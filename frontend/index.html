@@ -31786,6 +31786,7 @@ Automated WFH alert — ${company} Attendance System.`;
                                         ${isTech ? '<th style="padding:8px;text-align:right;color:#0c4a6e;font-size:11px">HRA%</th><th style="padding:8px;text-align:right;color:#0c4a6e;font-size:11px">DA%</th><th style="padding:8px;text-align:right;color:#0c4a6e;font-size:11px">GP%</th><th style="padding:8px;text-align:right;color:#0c4a6e;font-size:11px">Variable</th>' : '<th style="padding:8px;text-align:right;color:#0c4a6e;font-size:11px">HRA%</th><th style="padding:8px;text-align:right;color:#0c4a6e;font-size:11px">DA%</th><th style="padding:8px;text-align:right;color:#0c4a6e;font-size:11px">Grade Pay</th><th style="padding:8px;text-align:right;color:#0c4a6e;font-size:11px">Variable</th>'}
                                         <th style="padding:8px;text-align:left;color:#0c4a6e;font-size:11px">Reason</th>
                                         <th style="padding:8px;text-align:left;color:#0c4a6e;font-size:11px">By</th>
+                                        <th style="padding:8px;text-align:center;color:#0c4a6e;font-size:11px">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -31806,6 +31807,10 @@ Automated WFH alert — ${company} Attendance System.`;
                                             `}
                                             <td style="padding:8px;color:#64748b;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.reason||'').replace(/"/g,'&quot;')}">${(r.reason||'—').substring(0,40)}</td>
                                             <td style="padding:8px;font-size:10px;color:#64748b">${r.recordedBy||'—'}<br/>${(r.recordedAt||'').substring(0,10)}</td>
+                                            <td style="padding:8px;text-align:center;white-space:nowrap">
+                                                <button onclick="document.getElementById('wageTimelineModal').remove();{const _st=staff.find(s=>s.staffID==='${st.staffID}');const _rv=(_st?.wageRevisions||[]).find(r=>r.revID==='${r.revID}');if(_rv)openWageModal('${st.staffID}',_rv);}" style="color:#2563eb;background:none;border:none;cursor:pointer;font-size:11px;text-decoration:underline;margin-right:6px" title="Edit this revision">✏️ Edit</button>
+                                                <button onclick="if(confirm('Delete revision ${r.effectiveDate||''}?')){document.getElementById('wageTimelineModal').remove();deleteWageRevision('${st.staffID}','${r.revID}')}" style="color:#dc2626;background:none;border:none;cursor:pointer;font-size:11px;text-decoration:underline" title="Delete this revision">🗑 Delete</button>
+                                            </td>
                                         </tr>
                                     `).join('')}
                                 </tbody>
