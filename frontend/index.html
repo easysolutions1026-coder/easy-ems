@@ -2134,14 +2134,20 @@
             if (gross <= threshold) return 0;
             return month === 2 ? 300 : 200;
         }
+        // ── PF Amendment constants ──
+        const PF_AMENDMENT_YEAR = 2026, PF_AMENDMENT_MONTH = 9; // Sep 2026
+        // Office Staff: (Gross − Variable) × 12%, no cap from this date
+        // Technician: unchanged — (Basic + Fixed Allowances) × 12%
+        function _isPostPFAmendment(m, y) {
+            return y > PF_AMENDMENT_YEAR || (y === PF_AMENDMENT_YEAR && m >= PF_AMENDMENT_MONTH);
+        }
         function _calcOfficePF(basic,hra,da,med,cv,gp,bonus,pfPct,periodMonth,periodYear){
+            // PF Gross = Gross − Variable (variable excluded from arguments)
             const g=basic+hra+da+med+cv+gp+bonus,r=(parseFloat(pfPct)||12)/100;
             const m=+(periodMonth||new Date().getMonth()+1),y=+(periodYear||new Date().getFullYear());
-            // Before Sep 2026: old cap ₹15,000
-            // Sep 2026: pro-rated cap ₹19,667 (16/30 × 15K + 14/30 × 25K)
-            // Oct 2026 onwards: uncapped (full basis × rate)
-            if(y<2026||(y===2026&&m<9)){const cap=15000;return{pfGross:g,pfAmt:g>cap?+(cap*r).toFixed(2):+(g*r).toFixed(2),pfCapped:g>cap};}
-            if(y===2026&&m===9){const cap=Math.round((16/30*15000)+(14/30*25000));return{pfGross:g,pfAmt:g>cap?+(cap*r).toFixed(2):+(g*r).toFixed(2),pfCapped:g>cap};}
+            // Before Sep 2026: cap ₹15,000
+            // Sep 2026 onwards: (Gross − Variable) × 12%, NO CAP
+            if(!_isPostPFAmendment(m,y)){const cap=15000;return{pfGross:g,pfAmt:g>cap?+(cap*r).toFixed(2):+(g*r).toFixed(2),pfCapped:g>cap};}
             return{pfGross:g,pfAmt:+(g*r).toFixed(2),pfCapped:false};
         }
         // PF for technician: (Basic + Fixed Allowance) × pfPct%
@@ -3528,7 +3534,9 @@
             const lc=c.leaveBalance<0?'#dc2626':c.leaveBalance===0?'#b45309':'#15803d';
             const lb=c.leaveBalance<0?'#fee2e2':c.leaveBalance===0?'#fef3c7':'#dcfce7';
             const er=[{n:'Basic Salary',a:c.basic,s:true},{n:`HRA (${c.hraPct}%)`,a:c.hra,s:c.hra>0},{n:`DA (${c.daPct}%)`,a:c.da,s:c.da>0},{n:'Grade Pay',a:c.gradePay,s:c.gradePay>0},{n:'Conveyance',a:c.conveyance,s:c.conveyance>0},{n:'Medical',a:c.medical,s:c.medical>0},{n:'Annual Bonus (Basic÷10)',a:c.bonus,s:true},{n:'Variable (excl. PF)',a:c.variable,s:c.variable>0},{n:op.addlAllowanceRemark?'Add: '+op.addlAllowanceRemark:'Add. Allow.',a:c.addlAllow,s:c.addlAllow>0}].filter(r=>r.s);
-            const pfLbl=`PF ${c.pfPct}% `+(c.pfCapped?`(PF Gross ₹${Math.round(c.pfGross).toLocaleString('en-IN')} → cap ₹15k)`:`(PF Gross ₹${Math.round(c.pfGross).toLocaleString('en-IN')})`);
+            const _pfAmended = _isPostPFAmendment(op.periodMonth, op.periodYear);
+            const pfLbl=`PF ${c.pfPct}% `+(c.pfCapped?`(PF Gross ₹${Math.round(c.pfGross).toLocaleString('en-IN')} → cap ₹15k)`:`(PF Gross ₹${Math.round(c.pfGross).toLocaleString('en-IN')}${_pfAmended?' · No Cap w.e.f. Sep-2026':''})`);
+
             const esicThresh=21000,esicNote=c.esicWaived?`ESIC – NIL (Wages ₹${Math.round(c.grossWithVar).toLocaleString('en-IN')} > ₹21,000)`:`ESIC – 0.75% of Wages ₹${Math.round(c.grossWithVar).toLocaleString('en-IN')} (≤ ₹21,000)`;
             const ptNote=c.ptApplies?`PT${c.isFebruary?' (Feb ₹300)':''} – ₹${c.ptAmt} (${c.gender}, gross ₹${Math.round(c.gross).toLocaleString('en-IN')} > ${c.gender==='Female'?'₹25,000':'₹10,000'})`:(`PT – NIL (${c.gender}: gross ₹${Math.round(c.gross).toLocaleString('en-IN')} ≤ ${c.gender==='Female'?'₹25,000':'₹10,000'})`);
             // Base deduction rows
@@ -16842,6 +16850,7 @@
                                 ${lib.rows.length} contributing staff · Total payable: <strong class="${hasLiability ? 'text-blue-700' : 'text-green-700'}">${fmt(total)}</strong>
                                 ${hasLiability ? ' · Due by 15 ' + nextMonthLabel.replace(' (15)', '') : ''}
                             </p>
+                            ${(year > 2026 || (year === 2026 && month >= 9)) ? `<p class="text-[10px] text-indigo-600 mt-1 font-medium">📋 PF Amendment w.e.f. Sep 2026: Office Staff PF on (Gross − Variable) × 12%, no cap. Technician PF unchanged (Basic + Fixed Allowances × 12%).</p>` : ''}
                         </div>
                         ${hasLiability && status === 'unrecorded' ? `
                         <button onclick="createPFPaymentBill(${month},${year},${total})"
@@ -30885,7 +30894,8 @@ Automated WFH alert — ${company} Attendance System.`;
             if(c.addlAllow>0)earRows.push([(op.addlAllowanceRemark?'Additional: '+op.addlAllowanceRemark:'Additional Allow.'),INR(c.addlAllow)]);
             earRows.push([{content:'GROSS EARNINGS',styles:{fontStyle:'bold',fillColor:[224,242,254],textColor:[15,23,72]}},{content:INR(c.gross),styles:{fontStyle:'bold',fillColor:[186,230,253],textColor:[15,23,72]}}]);
             const dedRows=[];
-            const pfLbl=c.pfCapped?`PF ${c.pfPct}% (Gross ₹${Math.round(c.pfGross).toLocaleString('en-IN')} cap ₹15k)`:`PF ${c.pfPct}% (Gross ₹${Math.round(c.pfGross).toLocaleString('en-IN')})`;
+            const _pdfPfAmended = _isPostPFAmendment(op.periodMonth, op.periodYear);
+            const pfLbl=c.pfCapped?`PF ${c.pfPct}% (Gross ₹${Math.round(c.pfGross).toLocaleString('en-IN')} cap ₹15k)`:`PF ${c.pfPct}% (Gross−Variable ₹${Math.round(c.pfGross).toLocaleString('en-IN')}${_pdfPfAmended?' · No Cap w.e.f. Sep-2026':''})`;
             if(c.pfAmt>0)dedRows.push([pfLbl,INR(c.pfAmt)]);
             if(c.esicWaived)dedRows.push([`ESIC – NIL (Gross excl. Variable INR ${Math.round(c.grossExclVar).toLocaleString('en-IN')} > INR 20,000)`,'—']);
             else if(c.esicAmt>0)dedRows.push([`ESIC – 0.75% of Gross excl. Variable INR ${Math.round(c.grossExclVar).toLocaleString('en-IN')}`,INR(c.esicAmt)]);
