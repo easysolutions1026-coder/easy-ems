@@ -365,7 +365,10 @@ techRouter.get('/projects', async (req, res) => {
     });
     const projects = rows.map(r => {
       const d = r.data || {};
+      // Return full data object (includes items[] needed for pool balance computation)
+      // but ensure key fields are present and projectName is trimmed
       return {
+        ...d,
         projExpID: d.projExpID || r.peID,
         projectName: (d.projectName || '').trim(),
         projectRef: d.projectRef || '',

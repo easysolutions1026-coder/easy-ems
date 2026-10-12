@@ -1792,20 +1792,26 @@
                 readFile(SHARED_FILE_IDS.staff)
             ]);
             projectExpenses = Array.isArray(pe) ? pe : [];
-            // Merge projects from backend (Cloud SQL) — catches new projects not yet in Drive
+            // Merge projects from backend (Cloud SQL) — backend is source of truth
+            // Backend data overwrites Drive entries (has up-to-date items/expenses)
             try {
                 const _bkResp = await fetch(TECH_API + 'projects');
                 if (_bkResp.ok) {
                     const _bkProjects = await _bkResp.json();
                     if (Array.isArray(_bkProjects)) {
-                        const existingIDs = new Set(projectExpenses.map(p => p.projExpID));
-                        const existingNames = new Set(projectExpenses.map(p => p.projectName));
-                        _bkProjects.forEach(bp => {
-                            if (!existingIDs.has(bp.projExpID) && !existingNames.has(bp.projectName)) {
-                                projectExpenses.push(bp);
-                            }
+                        const bkByID = new Map(_bkProjects.map(bp => [bp.projExpID, bp]));
+                        // Update existing Drive entries with backend data (preserves items[])
+                        projectExpenses = projectExpenses.map(p => {
+                            const bk = bkByID.get(p.projExpID);
+                            if (bk) { bkByID.delete(p.projExpID); return bk; }
+                            return p;
                         });
-                        console.log('[Projects] Merged from backend: ' + _bkProjects.length + ' total, ' + projectExpenses.length + ' after merge');
+                        // Add backend-only projects not in Drive
+                        const existingNames = new Set(projectExpenses.map(p => p.projectName));
+                        bkByID.forEach(bp => {
+                            if (!existingNames.has(bp.projectName)) projectExpenses.push(bp);
+                        });
+                        console.log('[Projects] Merged from backend: ' + _bkProjects.length + ' backend, ' + projectExpenses.length + ' after merge');
                     }
                 }
             } catch(e) { console.warn('[Projects] Backend fetch failed (non-critical):', e.message); }
