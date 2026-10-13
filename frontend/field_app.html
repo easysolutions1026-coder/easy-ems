@@ -71,21 +71,29 @@
             // Extract JSON from the multipart FormData body
             return extractJsonBody(init.body).then(function(payload) {
               var jsonStr = JSON.stringify(payload);
-              // 1. Write to Cloud SQL (primary)
-              origFetch('/api/data/' + wCollection, {
+              // 1. Write to Cloud SQL (primary) — awaited so failures are visible
+              return origFetch('/api/data/' + wCollection, {
                 method: 'POST',
                 headers: {
                   'Content-Type': 'application/json',
                   'Authorization': token2 ? 'Bearer ' + token2 : ''
                 },
                 body: jsonStr
-              }).catch(function(e) { console.warn('[Field Cloud Run] Cloud SQL write failed:', e); });
-              // 2. Pass through to Drive (backup write)
-              var fd = new FormData();
-              fd.append('metadata', new Blob(['{}'], { type: 'application/json' }));
-              fd.append('file', new Blob([jsonStr], { type: 'application/json' }));
-              return origFetch(input, { method: 'PATCH', headers: init.headers, body: fd });
-            });
+              }).then(function(csRes) {
+                if (!csRes.ok) console.error('[Field Cloud Run] Cloud SQL write HTTP ' + csRes.status);
+                // 2. Pass through to Drive (backup write)
+                var fd = new FormData();
+                fd.append('metadata', new Blob(['{}'], { type: 'application/json' }));
+                fd.append('file', new Blob([jsonStr], { type: 'application/json' }));
+                return origFetch(input, { method: 'PATCH', headers: init.headers, body: fd });
+              }).catch(function(e) {
+                console.error('[Field Cloud Run] Cloud SQL write failed:', e, '— still saving to Drive');
+                // Fall back to Drive-only so the user doesn't lose data entirely
+                var fd = new FormData();
+                fd.append('metadata', new Blob(['{}'], { type: 'application/json' }));
+                fd.append('file', new Blob([jsonStr], { type: 'application/json' }));
+                return origFetch(input, { method: 'PATCH', headers: init.headers, body: fd });
+              });
           }
         }
 
