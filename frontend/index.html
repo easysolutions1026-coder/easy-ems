@@ -17804,9 +17804,61 @@
             }
 
             const ws = XLSX.utils.aoa_to_sheet([header, ...dataRows]);
-            ws['!cols'] = [{wch:14},{wch:28},{wch:22},{wch:14},{wch:30},{wch:20}];
+            ws['!cols'] = [{wch:17},{wch:32},{wch:28},{wch:26},{wch:31},{wch:28}];
+            // Header styling: light cyan fill, bold, wrap text
+            const headerStyle = {
+                font: { bold: true, color: { rgb: '000000' } },
+                fill: { fgColor: { rgb: 'CCFFFF' } },
+                alignment: { wrapText: true, vertical: 'center' }
+            };
+            ['A1','B1','C1','D1','E1','F1'].forEach(ref => {
+                if (ws[ref]) ws[ref].s = headerStyle;
+            });
+            ws['!rows'] = [{ hpt: 45 }]; // taller header row for wrapped text
+
+            // ── Instructions & Reason Codes tab (matches ESIC portal template) ──
+            const instrData = [
+                ['','','','','',''],
+                ['Reason','Code','Note','','',''],
+                ['Without Reason','','Leave last working day as blank','','',''],
+                ['On Leave','1','Leave last working day as blank','','',''],
+                ['Left Service','2','Please provide last working day (dd/mm/yyyy). IP will not appear from next wage period','','',''],
+                ['Retired','3','Please provide last working day (dd/mm/yyyy). IP will not appear from next wage period','','',''],
+                ['Out of Coverage','4','Please provide last working day (dd/mm/yyyy). IP will not appear from next contribution period. This option is valid only if Wage Period is April/October. In case any other month then IP will continue to appear in the list','','',''],
+                ['Expired','5','Please provide last working day (dd/mm/yyyy). IP will not appear from next wage period','','',''],
+                ['Non Implemented area','6','Please provide last working day (dd/mm/yyyy). ','','',''],
+                ['Compliance by Immediate Employer','7','Leave last working day as blank','','',''],
+                ['Suspension of work','8','Leave last working day as blank','','',''],
+                ['Strike/Lockout','9','Leave last working day as blank','','',''],
+                ['Retrenchment','10','Please provide last working day (dd/mm/yyyy). IP will not appear from next wage period','','',''],
+                ['No Work','11','Leave last working day as blank','','',''],
+                ['Doesnt Belong To This Employer','12','Leave last working day as blank','','',''],
+                ['Duplicate IP','13','Leave last working day as blank','','',''],
+                ['','','','','',''],
+                ['Click Here to Go back to Data Entry Page','','','','',''],
+                ['','','','','',''],
+                ['Instructions to fill in the excel file: ','','','','',''],
+                ['1. Enter the IP number, IP name, No. of Days, Total Monthly Wages, Reason for 0 wages(If Wages \'0\') & Last Working Day( only if employee \n     has left service, Retired, Out of coverage, Expired, Non-Implemented area or Retrenchment. For other reasons, last working day must be left BLANK).  ','','','','',''],
+                ['2. Number of days must be a whole number. Fractions should be rounded up to next higher whole number/integer','','','','',''],
+                ['3. Excel sheet upload will lead to successful transaction only when all the Employees\' (who are currently mapped in the system) details\n      are entered perfectly in the excel sheet','','','','',''],
+                ['4. Reasons are to be assigned numeric code and date has to be provided as mentioned in the table above','','','','','']
+            ];
+            const ws2 = XLSX.utils.aoa_to_sheet(instrData);
+            ws2['!cols'] = [{wch:35},{wch:10},{wch:80},{wch:10},{wch:10},{wch:10}];
+            // Header row styling for Instructions tab
+            const instrHeaderStyle = {
+                font: { bold: true },
+                fill: { fgColor: { rgb: '99CCFF' } }
+            };
+            ['A2','B2','C2'].forEach(ref => {
+                if (ws2[ref]) ws2[ref].s = instrHeaderStyle;
+            });
+            // Bold the instructions heading
+            if (ws2['A20']) ws2['A20'].s = { font: { bold: true } };
+
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+            XLSX.utils.book_append_sheet(wb, ws2, 'Instructions & Reason Codes');
             const fileName = `ESIC_Contribution_${year}${String(month).padStart(2,'0')}.xlsx`;
             XLSX.writeFile(wb, fileName);
 
