@@ -11,6 +11,14 @@ import { prisma } from './db/prisma.js';
 import { verifyGoogleToken } from './auth/google-oauth.js';
 import dataRoutes from './routes/data.js';
 import alertRoutes, { getTechAlerts, respondToAlert } from './routes/alerts.js';
+import {
+  computeOfficeSalary,
+  calcTechWage,
+  calcTechDeductions,
+  _getEffectiveWageForPeriod,
+  ATT_ORDER,
+  ENGAGED_TYPES,
+} from './payslip-compute.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -456,6 +464,176 @@ techRouter.post('/fund-requests', async (req, res) => {
 // Tech alert routes — PIN-based, no Google auth
 techRouter.get('/alerts', getTechAlerts);
 techRouter.post('/alerts/respond', respondToAlert);
+
+// POST /api/tech/payslip-compute — compute salary breakdown server-side
+// Body: { staffID, pin, periodMonth, periodYear }
+// Returns: full earnings/deductions breakdown (same structure as main app)
+techRouter.post('/payslip-compute', async (req, res) => {
+  try {
+    const { staffID, pin, periodMonth, periodYear } = req.body || {};
+    if (!staffID || !pin || !periodMonth || !periodYear) {
+      return res.status(400).json({ error: 'MISSING_FIELDS', detail: 'staffID, pin, periodMonth, periodYear required' });
+    }
+
+    // Rate limit check (reuse existing PIN rate limiter)
+    const fail = _techPinFailures.get(staffID);
+    if (fail && fail.lockedUntil && Date.now() < fail.lockedUntil) {
+      const minsLeft = Math.ceil((fail.lockedUntil - Date.now()) / 60000);
+      return res.status(429).json({
+        error: 'ACCOUNT_LOCKED',
+        detail: `Too many failed attempts. Try again in ${minsLeft} minute(s).`
+      });
+    }
+
+    // Read full staff record (not the stripped-down login version)
+    const row = await prisma.staff.findUnique({ where: { staffID } });
+    if (!row || row.status !== 'Active') {
+      return res.status(404).json({ error: 'STAFF_NOT_FOUND' });
+    }
+    const st = row.data || {};
+
+    // PIN check
+    const storedPin = String(st.pin || st.techPin || '');
+    if (storedPin !== String(pin)) {
+      const current = _techPinFailures.get(staffID) || { count: 0, lockedUntil: null };
+      current.count++;
+      if (current.count >= TECH_PIN_MAX_ATTEMPTS) {
+        current.lockedUntil = Date.now() + TECH_PIN_LOCK_MINS * 60 * 1000;
+        current.count = 0;
+      }
+      _techPinFailures.set(staffID, current);
+      return res.status(401).json({ error: 'INVALID_PIN' });
+    }
+    _techPinFailures.delete(staffID);
+
+    // Load settings from DB (singleton — first row or empty)
+    let settings = {};
+    try {
+      const settingsRows = await prisma.$queryRaw`SELECT data FROM "settings" LIMIT 1`;
+      if (settingsRows && settingsRows.length > 0 && settingsRows[0].data) {
+        settings = settingsRows[0].data;
+      }
+    } catch (e) {
+      // Settings table may not exist or be empty — use defaults
+      console.warn('[payslip-compute] Could not load settings, using defaults:', e.message);
+    }
+
+    const pMonth = parseInt(periodMonth);
+    const pYear = parseInt(periodYear);
+    const staffType = st.staffType || 'Office';
+
+    if (staffType === 'Technician') {
+      // ── TECHNICIAN WAGE COMPUTATION ──
+      const w = _getEffectiveWageForPeriod(st, pYear, pMonth);
+
+      // Build attendance array for the pay period (26th prev → 25th current)
+      const pm = pMonth === 1 ? 12 : pMonth - 1;
+      const py = pMonth === 1 ? pYear - 1 : pYear;
+      const ppStart = `${py}-${String(pm).padStart(2, '0')}-26`;
+      const ppEnd = `${pYear}-${String(pMonth).padStart(2, '0')}-25`;
+
+      // Filter attendance records within the pay period
+      const periodAttendance = (st.attendance || []).filter(a => {
+        if (!a.date) return false;
+        return a.date >= ppStart && a.date <= ppEnd;
+      }).sort((a, b) => a.date.localeCompare(b.date));
+
+      // Build the att array (one entry per day in period, ordered by date)
+      // and OT hours array matching the same indices
+      const startDate = new Date(py, pm - 1, 26);
+      const endDate = new Date(pYear, pMonth - 1, 25);
+      const att = [];
+      const otHours = [];
+      const attendanceRaw = [];
+      for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+        const dateStr = d.toISOString().split('T')[0];
+        const rec = periodAttendance.find(a => a.date === dateStr);
+        att.push(rec ? (rec.status || '') : '');
+        otHours.push(rec ? (parseFloat(rec.otHours) || 0) : 0);
+        if (rec) attendanceRaw.push(rec);
+      }
+
+      const wageState = {
+        att,
+        otHours,
+        attendanceRaw,
+        basic: w.basicSalary,
+        hraPct: +w.techHRAPct,
+        daPct: +w.techDAPct,
+        gradePay: +w.techGPPct,
+        variableAllow: +w.techVariable,
+        periodYear: pYear,
+        periodMonth: pMonth,
+        rates: {
+          outstationPct: st.outstationPct ?? 20,
+          sailingPct: st.sailingPct ?? 30,
+          anchoragePct: st.anchoragePct ?? 30,
+        },
+        travelAllow: st.travelAllow ?? st.travelAllowance ?? 4000,
+      };
+
+      const wage = calcTechWage(wageState, settings);
+
+      const dedState = {
+        pfPct: +w.techPFPct,
+        esicPct: +w.techESICPct,
+        variableAllow: +w.techVariable,
+        periodMonth: pMonth,
+        periodYear: pYear,
+        staffID,
+        tdsAmt: null, // auto
+        pfOverride: null,
+        ptOverride: null,
+        addlDeduction: 0,
+      };
+
+      const ded = calcTechDeductions(wage.gross, wage.basic, wage.fixedAllow, wage.otAmt, dedState, st);
+      const netPay = +(wage.gross - ded.totalDed).toFixed(2);
+
+      res.json({
+        ok: true,
+        staffType: 'Technician',
+        staffName: st.name,
+        periodMonth: pMonth,
+        periodYear: pYear,
+        wage,
+        deductions: ded,
+        netPay,
+        _wageRevInfo: w._fromRevision ? { used: true, effDate: w._revEffDate } : { used: false },
+      });
+
+    } else {
+      // ── OFFICE STAFF SALARY COMPUTATION ──
+      const op = {
+        periodMonth: pMonth,
+        periodYear: pYear,
+        pfPct: null,       // auto from wage revision
+        esicPct: null,     // auto from staff record
+        ptBase: null,      // auto
+        tdsAmt: null,      // auto from wage revision
+        leaveTaken: 0,     // auto from ledger
+        addlAllowance: 0,
+        addlDeduction: 0,
+        lateDedAmt: null,  // auto from late summary
+        _useManualLeave: false,
+      };
+
+      const result = computeOfficeSalary(st, op, settings);
+
+      res.json({
+        ok: true,
+        staffType: 'Office',
+        staffName: st.name,
+        periodMonth: pMonth,
+        periodYear: pYear,
+        ...result,
+      });
+    }
+  } catch (err) {
+    console.error('[tech/payslip-compute] error:', err);
+    res.status(500).json({ error: 'INTERNAL_ERROR', detail: String(err.message || err) });
+  }
+});
 
 // Mount tech routes — NO requireGoogleAuth on this path
 app.use('/api/tech', techRouter);
