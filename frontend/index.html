@@ -2701,19 +2701,23 @@
                     continue;
                 }
 
-                // ── EMI PAUSE: office can set loan.pauseUntil = '2026-12'
-                // to skip deductions through Dec 2026. The loan extends
-                // accordingly — installments don't get consumed during the
-                // pause. The employee can still make manual repayments
-                // during this period (partial lump-sum payments land in
-                // manualRepayments[] and reduce the balance without consuming
-                // an EMI slot, exactly as before).
-                if (loan.pauseUntil) {
-                    const [pY, pM] = loan.pauseUntil.split('-').map(Number);
+                // ── EMI PAUSE: office sets loan.pauseFrom / loan.pauseUntil
+                // to skip deductions for a specific range of months.
+                // If only pauseUntil is set (legacy), pause runs from
+                // the first deduction month through pauseUntil.
+                // The loan extends accordingly — installments don't get
+                // consumed during the pause. Manual repayments still
+                // reduce balance without consuming an EMI slot.
+                if (loan.pauseUntil || loan.pauseFrom) {
+                    const pauseFromStr = loan.pauseFrom || loan.pauseUntil;
+                    const pauseToStr   = loan.pauseUntil || loan.pauseFrom;
+                    const [fY, fM] = pauseFromStr.split('-').map(Number);
+                    const [pY, pM] = pauseToStr.split('-').map(Number);
+                    const fromKey  = fY * 12 + fM;
                     const pauseKey = pY * 12 + pM;
-                    if (periodKey <= pauseKey) {
+                    if (periodKey >= fromKey && periodKey <= pauseKey) {
                         out.push({ loan, deductionAmount: 0, deferred: false,
-                                   reason: 'EMI paused until ' + loan.pauseUntil +
+                                   reason: 'EMI paused ' + pauseFromStr + ' → ' + pauseToStr +
                                            (loan.pauseReason ? ' — ' + loan.pauseReason : '') });
                         continue;
                     }
@@ -6395,6 +6399,52 @@
                         // _acquireLock has already enqueued the data if user chose to wait
                         return;
                     }
+                }
+
+                // ── MERGE: pick up new records added by the field app ──────
+                // Both apps share the same Drive JSON file. Without merging, a save
+                // from the main app overwrites any new items the field app added
+                // since the main app last loaded. We re-read the file and merge
+                // records that exist in Drive but not in our in-memory array.
+                // This only applies to array-type files with items that carry an ID.
+                const _idKeys = {
+                    projectExpenses: { topKey:'projExpID', itemKey:'itemID' },
+                    workLogs:        { topKey:'logID' },
+                    fundRequests:    { topKey:'requestID' },
+                    fundPools:       { topKey:'poolID' },
+                    expenses:        { topKey:'expID' },
+                    directorExpenses:{ topKey:'dirExpID' }
+                };
+                if (Array.isArray(data) && _idKeys[type]) {
+                    try {
+                        const freshDrive = await loadFileFromDrive(`${type}.json`);
+                        if (Array.isArray(freshDrive)) {
+                            const cfg = _idKeys[type];
+                            const memIDs = new Set(data.map(r => r[cfg.topKey]).filter(Boolean));
+                            let merged = 0;
+                            freshDrive.forEach(driveRec => {
+                                const id = driveRec[cfg.topKey];
+                                if (id && !memIDs.has(id)) {
+                                    data.push(driveRec);
+                                    merged++;
+                                }
+                                // For projectExpenses: also merge nested items added by field app
+                                if (cfg.itemKey && id && memIDs.has(id)) {
+                                    const memRec = data.find(r => r[cfg.topKey] === id);
+                                    if (memRec && Array.isArray(driveRec.items) && Array.isArray(memRec.items)) {
+                                        const memItemIDs = new Set(memRec.items.map(i => i[cfg.itemKey]).filter(Boolean));
+                                        driveRec.items.forEach(dItem => {
+                                            if (dItem[cfg.itemKey] && !memItemIDs.has(dItem[cfg.itemKey])) {
+                                                memRec.items.push(dItem);
+                                                merged++;
+                                            }
+                                        });
+                                    }
+                                }
+                            });
+                            if (merged > 0) console.log(`🔀 Merged ${merged} new record(s) from Drive into ${type} before save`);
+                        }
+                    } catch(e) { console.warn('Pre-save merge failed (non-critical):', e.message); }
                 }
 
                 // ── PERFORMANCE: write the file FIRST, then run backup async ──
@@ -26129,16 +26179,24 @@ ${'─'.repeat(50)}
                              extends automatically since skipped months don't
                              consume installment slots. -->
                         <div>
-                            <label class="block text-[10px] font-semibold text-gray-600 mb-0.5">⏸️ Pause EMI Until <span class="font-normal text-gray-400">(optional)</span></label>
+                            <label class="block text-[10px] font-semibold text-gray-600 mb-0.5">⏸️ Pause EMI <span class="font-normal text-gray-400">(optional)</span></label>
                             <div class="flex gap-1 items-center">
-                                <input type="month" value="${l.pauseUntil || ''}"
-                                    onchange="updateStaffLoanField(${idx},'pauseUntil',this.value)"
-                                    class="flex-1 px-2 py-1 border rounded text-xs"
-                                    placeholder="YYYY-MM" />
-                                ${l.pauseUntil ? `<button onclick="updateStaffLoanField(${idx},'pauseUntil','');updateStaffLoanField(${idx},'pauseReason','')" class="text-[10px] text-red-600 hover:underline px-1" title="Resume EMI deductions">✕ Clear</button>` : ''}
+                                <div class="flex-1">
+                                    <label class="text-[9px] text-gray-500">From</label>
+                                    <input type="month" value="${l.pauseFrom || ''}"
+                                        onchange="updateStaffLoanField(${idx},'pauseFrom',this.value)"
+                                        class="w-full px-2 py-1 border rounded text-xs" />
+                                </div>
+                                <div class="flex-1">
+                                    <label class="text-[9px] text-gray-500">To</label>
+                                    <input type="month" value="${l.pauseUntil || ''}"
+                                        onchange="updateStaffLoanField(${idx},'pauseUntil',this.value)"
+                                        class="w-full px-2 py-1 border rounded text-xs" />
+                                </div>
+                                ${(l.pauseFrom || l.pauseUntil) ? `<button onclick="updateStaffLoanField(${idx},'pauseFrom','');updateStaffLoanField(${idx},'pauseUntil','');updateStaffLoanField(${idx},'pauseReason','')" class="text-[10px] text-red-600 hover:underline px-1 mt-3" title="Resume EMI deductions">✕ Clear</button>` : ''}
                             </div>
-                            ${l.pauseUntil ? `<input type="text" value="${(l.pauseReason||'').replace(/"/g,'&quot;')}" placeholder="Reason for pause (e.g. employee request, partial repayment instead)" onchange="updateStaffLoanField(${idx},'pauseReason',this.value)" class="w-full mt-1 px-2 py-1 border rounded text-xs" />
-                            <p class="text-[9px] text-amber-600 mt-0.5">⏸️ EMI paused — no salary deduction until ${l.pauseUntil}. Manual repayments still reduce balance.</p>` : ''}
+                            ${(l.pauseFrom || l.pauseUntil) ? `<input type="text" value="${(l.pauseReason||'').replace(/"/g,'&quot;')}" placeholder="Reason for pause (e.g. employee request, partial repayment instead)" onchange="updateStaffLoanField(${idx},'pauseReason',this.value)" class="w-full mt-1 px-2 py-1 border rounded text-xs" />
+                            <p class="text-[9px] text-amber-600 mt-0.5">⏸️ EMI paused ${l.pauseFrom || '?'} → ${l.pauseUntil || '?'} — no salary deduction in this range. Manual repayments still reduce balance.</p>` : ''}
                         </div>
                     </div>
                     <div class="grid grid-cols-4 gap-2 text-[11px] mb-2">

@@ -1822,7 +1822,7 @@
                 var _leanCache = staffList.map(function(s) {
                     var o = { staffID: s.staffID, name: s.name };
                     ['techHRAPct','techDAPct','techGPPct','techVariable','techPFPct','techESICPct','techTDS','techTravelAllow','outstationPct','sailingPct','anchoragePct','travelAllow','uanNumber','esicNumber','pfNumber','dailyWage','standbyWage'].forEach(function(f) { if (s[f] !== undefined) o[f] = s[f]; });
-                    if (s.loans) o.loans = s.loans.map(function(l) { return { loanID:l.loanID, remarks:l.remarks, emi:l.emi, principal:l.principal, status:l.status, firstDeductMonth:l.firstDeductMonth, firstDeductYear:l.firstDeductYear, disbursedDate:l.disbursedDate, startDate:l.startDate, closedDate:l.closedDate, pauseUntil:l.pauseUntil||'', pauseReason:l.pauseReason||'' }; });
+                    if (s.loans) o.loans = s.loans.map(function(l) { return { loanID:l.loanID, remarks:l.remarks, emi:l.emi, principal:l.principal, status:l.status, firstDeductMonth:l.firstDeductMonth, firstDeductYear:l.firstDeductYear, disbursedDate:l.disbursedDate, startDate:l.startDate, closedDate:l.closedDate, pauseFrom:l.pauseFrom||'', pauseUntil:l.pauseUntil||'', pauseReason:l.pauseReason||'' }; });
                     return o;
                 });
                 localStorage.setItem('_staffWageCache', JSON.stringify(_leanCache));
@@ -1878,6 +1878,32 @@
         };
         const fileId = idMap[type];
         if (!fileId || fileId.startsWith('PASTE_')) { showToast('⚠️ File ID not configured'); return; }
+        // ── Merge: pick up records added by main app since we last loaded ──
+        // Prevents overwriting items the main app added while the field app was open.
+        if (Array.isArray(data)) {
+            try {
+                const fresh = await readFile(fileId);
+                if (Array.isArray(fresh)) {
+                    const idKey = type === 'projectExpenses' ? 'projExpID' : type === 'workLogs' ? 'logID' : null;
+                    if (idKey) {
+                        const memIDs = new Set(data.map(r => r[idKey]).filter(Boolean));
+                        let merged = 0;
+                        fresh.forEach(dr => {
+                            if (dr[idKey] && !memIDs.has(dr[idKey])) { data.push(dr); merged++; }
+                            // Merge nested items (projectExpenses.items)
+                            if (type === 'projectExpenses' && dr.projExpID && memIDs.has(dr.projExpID)) {
+                                const mr = data.find(r => r.projExpID === dr.projExpID);
+                                if (mr && Array.isArray(dr.items) && Array.isArray(mr.items)) {
+                                    const mIDs = new Set(mr.items.map(i => i.itemID).filter(Boolean));
+                                    dr.items.forEach(di => { if (di.itemID && !mIDs.has(di.itemID)) { mr.items.push(di); merged++; } });
+                                }
+                            }
+                        });
+                        if (merged > 0) console.log(`🔀 Merged ${merged} new record(s) from Drive into ${type} before save`);
+                    }
+                }
+            } catch(e) { console.warn('Pre-save merge (non-critical):', e.message); }
+        }
         await writeFile(fileId, data);
         // Level 2 concurrency: suppress next poll for this file (avoid self-trigger)
         try { _concurMarkLocalSave(type); } catch(e) {}
@@ -7408,7 +7434,7 @@
                         var _lc2 = (_techSSFullStaffCache||[]).map(function(s) {
                             var o = { staffID: s.staffID, name: s.name };
                             ['techHRAPct','techDAPct','techGPPct','techVariable','techPFPct','techESICPct','techTDS','techTravelAllow','outstationPct','sailingPct','anchoragePct','travelAllow','uanNumber','esicNumber','pfNumber','dailyWage','standbyWage'].forEach(function(f) { if (s[f] !== undefined) o[f] = s[f]; });
-                            if (s.loans) o.loans = s.loans.map(function(l) { return { loanID:l.loanID, remarks:l.remarks, emi:l.emi, principal:l.principal, status:l.status, firstDeductMonth:l.firstDeductMonth, firstDeductYear:l.firstDeductYear, disbursedDate:l.disbursedDate, startDate:l.startDate, closedDate:l.closedDate, pauseUntil:l.pauseUntil||'', pauseReason:l.pauseReason||'' }; });
+                            if (s.loans) o.loans = s.loans.map(function(l) { return { loanID:l.loanID, remarks:l.remarks, emi:l.emi, principal:l.principal, status:l.status, firstDeductMonth:l.firstDeductMonth, firstDeductYear:l.firstDeductYear, disbursedDate:l.disbursedDate, startDate:l.startDate, closedDate:l.closedDate, pauseFrom:l.pauseFrom||'', pauseUntil:l.pauseUntil||'', pauseReason:l.pauseReason||'' }; });
                             return o;
                         });
                         localStorage.setItem('_staffWageCache', JSON.stringify(_lc2));
@@ -7438,7 +7464,7 @@
             staffRec.loans.forEach(l => {
                 const fullLoan = full.loans.find(fl => fl.loanID === l.loanID);
                 if (!fullLoan) return;
-                ['firstDeductMonth','firstDeductYear','disbursedDate','startDate','closedDate','pauseUntil','pauseReason'].forEach(f => {
+                ['firstDeductMonth','firstDeductYear','disbursedDate','startDate','closedDate','pauseFrom','pauseUntil','pauseReason'].forEach(f => {
                     if (fullLoan[f] !== undefined && (l[f] === undefined || l[f] === '')) { l[f] = fullLoan[f]; enriched++; }
                 });
             });
@@ -8102,11 +8128,16 @@
             }
             if (loanStart && loanStart > endDate) return;
             // Check if EMI is paused for this period
-            if (l.pauseUntil) {
-                var _pu = l.pauseUntil.split('-').map(Number);
+            if (l.pauseUntil || l.pauseFrom) {
+                var pauseFromStr = l.pauseFrom || l.pauseUntil;
+                var pauseToStr   = l.pauseUntil || l.pauseFrom;
+                var _pf = pauseFromStr.split('-').map(Number);
+                var _pu = pauseToStr.split('-').map(Number);
+                var fromKey  = _pf[0] * 12 + _pf[1];
                 var pauseKey = _pu[0] * 12 + _pu[1];
-                if ((periodYear * 12 + periodMonth) <= pauseKey) {
-                    deductions.push({ label: 'Loan EMI \u2014 ' + (l.remarks || l.loanID) + ' (\u23f8\ufe0f paused until ' + l.pauseUntil + ')', amt: 0 });
+                var curKey   = periodYear * 12 + periodMonth;
+                if (curKey >= fromKey && curKey <= pauseKey) {
+                    deductions.push({ label: 'Loan EMI \u2014 ' + (l.remarks || l.loanID) + ' (\u23f8\ufe0f paused ' + pauseFromStr + ' \u2192 ' + pauseToStr + ')', amt: 0 });
                     return;
                 }
             }
