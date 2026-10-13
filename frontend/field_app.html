@@ -7,6 +7,106 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script src="https://apis.google.com/js/api.js"></script>
+    <!-- FIELD_APP_CLOUD_RUN_GATE_START -->
+    <!-- Intercepts Google Drive read/write calls and routes JSON data to Cloud SQL
+         via /api/data/{collection}. Attachments (photos, PDFs) still go to Drive.
+         Same pattern as main app CLOUD_RUN_GATE but keyed on SHARED_FILE_IDS. -->
+    <script>
+    (function() {
+      window.__FIELD_CLOUD_RUN__ = true;
+
+      // Map Drive file IDs → Cloud SQL collection names
+      // These must match the SHARED_FILE_IDS declared later in the app.
+      var FILEID_TO_COLLECTION = {
+        '1OwJc4CdczowDWeHpCtSmfR0pYqhS49s0': 'projectExpenses',
+        '1P1sZh77q7w33eY2B9P20sYpT92Cb1FuK': 'workLogs',
+        '1JFS8ZZNkCXx8sIx6ssZzCbtbciRUrK3v': 'staff',
+        '1HMZBIrE59L6ZpXBa-94uWPaK2S2GG3N7': 'fundRequests',
+        '1x1NniCFB4hba29FxsO9b5rmKoMHE3J8s': 'fundPools'
+      };
+
+      function getToken() {
+        try {
+          if (window.gapi && gapi.client && gapi.client.getToken) {
+            var t = gapi.client.getToken();
+            if (t && t.access_token) return t.access_token;
+          }
+        } catch (e) {}
+        return window.accessToken || null;
+      }
+
+      function jsonResponse(obj, status) {
+        return new Response(JSON.stringify(obj), {
+          status: status || 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      var origFetch = window.fetch;
+      window.fetch = function(input, init) {
+        var url = typeof input === 'string' ? input : (input && input.url) || '';
+
+        // ── READ: Drive v3 file GET by ID → Cloud SQL ──
+        var readMatch = url.match(/www\.googleapis\.com\/drive\/v3\/files\/([^?/]+)\?alt=media/);
+        if (readMatch) {
+          var fileId = readMatch[1];
+          var collection = FILEID_TO_COLLECTION[fileId];
+          if (collection) {
+            console.info('[Field Cloud Run] READ ' + collection + ' (was Drive ' + fileId + ')');
+            var token = getToken();
+            return origFetch('/api/data/' + collection, {
+              headers: token ? { 'Authorization': 'Bearer ' + token } : {}
+            });
+          }
+        }
+
+        // ── WRITE: Drive v3 PATCH upload by ID → Cloud SQL + Drive passthrough ──
+        var writeMatch = url.match(/upload\/drive\/v3\/files\/([^?]+)\?/);
+        if (writeMatch && init && init.method === 'PATCH') {
+          var wFileId = writeMatch[1];
+          var wCollection = FILEID_TO_COLLECTION[wFileId];
+          if (wCollection) {
+            console.info('[Field Cloud Run] WRITE ' + wCollection + ' (was Drive ' + wFileId + ')');
+            var token2 = getToken();
+            // Extract JSON from the multipart FormData body
+            return extractJsonBody(init.body).then(function(payload) {
+              var jsonStr = JSON.stringify(payload);
+              // 1. Write to Cloud SQL (primary)
+              origFetch('/api/data/' + wCollection, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': token2 ? 'Bearer ' + token2 : ''
+                },
+                body: jsonStr
+              }).catch(function(e) { console.warn('[Field Cloud Run] Cloud SQL write failed:', e); });
+              // 2. Pass through to Drive (backup write)
+              var fd = new FormData();
+              fd.append('metadata', new Blob(['{}'], { type: 'application/json' }));
+              fd.append('file', new Blob([jsonStr], { type: 'application/json' }));
+              return origFetch(input, { method: 'PATCH', headers: init.headers, body: fd });
+            });
+          }
+        }
+
+        // Everything else (OAuth, userinfo, attachment uploads, photos) passes through
+        return origFetch.apply(this, arguments);
+      };
+
+      function extractJsonBody(body) {
+        return Promise.resolve(body).then(function(b) {
+          if (b instanceof FormData) {
+            var file = b.get('file');
+            if (file && file instanceof Blob) return file.text().then(JSON.parse);
+          }
+          if (b instanceof Blob) return b.text().then(JSON.parse);
+          if (typeof b === 'string') return JSON.parse(b);
+          return b;
+        });
+      }
+    })();
+    </script>
+    <!-- FIELD_APP_CLOUD_RUN_GATE_END -->
     <style>
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
 
@@ -7915,6 +8015,68 @@
         };
     }
 
+    // ── Leave helpers (ported from main app for LOP calculation) ──
+    const _LEAVE_STATUSES = ['Leave','Casual Leave','Sick Leave','Earned Leave','Comp Off'];
+    const _HALF_DAY_STATUSES = ['Half Day','Half Day-Afternoon'];
+    function _ssMonthsFromAnchor(aY, aM, y, m) { return (y - aY) * 12 + (m - aM) + 1; }
+    function _ssSumLeaveTaken(st, startMs, endMs) {
+        var total = 0;
+        (st.attendance||[]).forEach(function(a) {
+            if (!a.date) return;
+            var p = a.date.split('-').map(Number);
+            var t = new Date(p[0], p[1]-1, p[2]).getTime();
+            if (t < startMs || t > endMs) return;
+            if (_LEAVE_STATUSES.indexOf(a.status) >= 0) total += 1;
+            if (_HALF_DAY_STATUSES.indexOf(a.status) >= 0) total += 0.5;
+        });
+        return +total.toFixed(1);
+    }
+    function _ssSumEncashments(st, startMs, endMs) {
+        var total = 0;
+        (st.leaveEncashments||[]).forEach(function(e) {
+            if (!e.date) return;
+            var p = e.date.split('-').map(Number);
+            var t = new Date(p[0], p[1]-1, p[2]).getTime();
+            if (t < startMs || t > endMs) return;
+            total += +(e.days || 0);
+        });
+        return +total.toFixed(1);
+    }
+    function _ssCalcOfficeLeave(st, year, month) {
+        var lpM = +(st.leavePerMonth ?? 2);
+        var opening = +(st.leaveOpening || 0);
+        var carried = +(st.carriedLeave || 0);
+        var anchorY = +st.leaveOpeningYear || year;
+        var anchorM = +st.leaveOpeningMonth || month;
+        if ((year < anchorY) || (year === anchorY && month < anchorM)) {
+            return { available: +(opening + carried).toFixed(1), leaveTaken: 0, lopDays: 0, nextBalance: +(opening + carried).toFixed(1) };
+        }
+        var monthsThru = _ssMonthsFromAnchor(anchorY, anchorM, year, month);
+        var runningBalance = opening + carried;
+        var thisAvailable = 0, thisLeaveTaken = 0, thisLopDays = 0;
+        for (var step = 0; step < monthsThru; step++) {
+            var iAbs = (anchorY * 12 + (anchorM - 1)) + step;
+            var iY = Math.floor(iAbs / 12);
+            var iM = (iAbs % 12) + 1;
+            var ppPM = iM === 1 ? 12 : iM - 1;
+            var ppPY = iM === 1 ? iY - 1 : iY;
+            var ppStart = new Date(ppPY, ppPM - 1, 26).getTime();
+            var ppEnd   = new Date(iY, iM - 1, 25, 23, 59, 59).getTime();
+            var takenI   = _ssSumLeaveTaken(st, ppStart, ppEnd);
+            var encashedI = _ssSumEncashments(st, ppStart, ppEnd);
+            var availableI = +(runningBalance + lpM - encashedI).toFixed(1);
+            var lopI = +Math.max(0, takenI - availableI).toFixed(1);
+            var nextI = +Math.max(0, availableI - takenI).toFixed(1);
+            if (step === monthsThru - 1) {
+                thisAvailable = availableI;
+                thisLeaveTaken = takenI;
+                thisLopDays = lopI;
+            }
+            runningBalance = nextI;
+        }
+        return { available: thisAvailable, leaveTaken: thisLeaveTaken, lopDays: thisLopDays, nextBalance: runningBalance };
+    }
+
     function _techSSRenderWageSummary(s) {
         const isTech = (s.staffType||'').toLowerCase().includes('tech');
 
@@ -8112,6 +8274,19 @@
             deductions.push({ label: 'PT \u2013 Basic+Fixed \u20b9' + ptBasis.toLocaleString('en-IN') + ' > \u20b915,000', amt: ptAmt });
         }
         if (tdsAmt > 0) deductions.push({ label: 'TDS ' + (isTech && !Number(s.techTDS) ? '1% (Gross \u20b9' + grossPay.toLocaleString('en-IN') + ' incl. Travel)' : 'Monthly'), amt: tdsAmt });
+        // \u2500\u2500 LOP deduction (office staff only \u2014 uses leave ledger) \u2500\u2500
+        if (!isTech) {
+            var leaveResult = _ssCalcOfficeLeave(s, periodYear, periodMonth);
+            if (leaveResult.lopDays > 0) {
+                var lopBase = basic + hra + da + medical + gp + conveyance + annualBonus;
+                // periodDays = actual days in 26th-25th window
+                var _ppStart = new Date(periodYear, periodMonth - 2, 26);
+                var _ppEnd   = new Date(periodYear, periodMonth - 1, 25);
+                var _periodDays = Math.round((_ppEnd - _ppStart) / 86400000) + 1;
+                var lopAmt = +(leaveResult.lopDays * (lopBase / _periodDays)).toFixed(2);
+                deductions.push({ label: 'LOP (' + leaveResult.lopDays + ' days \u00d7 \u20b9' + (lopBase / _periodDays).toFixed(2) + '/day)', amt: lopAmt });
+            }
+        }
         (s.loans || []).forEach(l => {
             if (l.status !== 'Active' || !l.emi || l.emi <= 0) return;
             // Determine earliest deduction month from available fields
