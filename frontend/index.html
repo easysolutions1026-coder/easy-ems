@@ -17790,34 +17790,41 @@
                 return;
             }
 
-            // The ESIC portal requires a GENUINE Excel file. The previous
-            // implementation exported an HTML table renamed to .xls, which
-            // Excel opens but the portal parser rejects. Generate a real
-            // .xlsx via SheetJS (lazy-loaded, same pattern as jsPDF).
-            if (typeof XLSX === 'undefined') {
+            // Generate .xlsx via ExcelJS (supports styling: fill, bold, wrap).
+            // Lazy-load from CDN; SheetJS community edition ignores cell styles.
+            if (typeof ExcelJS === 'undefined') {
                 try {
-                    await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
+                    await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
                 } catch(e) {
                     alert('Could not load the Excel library (network issue). Please retry.');
                     return;
                 }
             }
 
-            const ws = XLSX.utils.aoa_to_sheet([header, ...dataRows]);
-            ws['!cols'] = [{wch:17},{wch:32},{wch:28},{wch:26},{wch:31},{wch:28}];
-            // Header styling: light cyan fill, bold, wrap text
-            const headerStyle = {
-                font: { bold: true, color: { rgb: '000000' } },
-                fill: { fgColor: { rgb: 'CCFFFF' } },
-                alignment: { wrapText: true, vertical: 'center' }
-            };
-            ['A1','B1','C1','D1','E1','F1'].forEach(ref => {
-                if (ws[ref]) ws[ref].s = headerStyle;
-            });
-            ws['!rows'] = [{ hpt: 45 }]; // taller header row for wrapped text
+            const wb = new ExcelJS.Workbook();
 
-            // ── Instructions & Reason Codes tab (matches ESIC portal template) ──
-            const instrData = [
+            // ── Sheet1: Data ──
+            const ws = wb.addWorksheet('Sheet1');
+            ws.columns = [
+                { width: 17 }, { width: 32 }, { width: 28 },
+                { width: 26 }, { width: 31 }, { width: 28 }
+            ];
+            const hdrRow = ws.addRow(header);
+            hdrRow.height = 45;
+            hdrRow.eachCell(cell => {
+                cell.font = { bold: true, color: { argb: 'FF000000' } };
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFCCFFFF' } };
+                cell.alignment = { wrapText: true, vertical: 'middle' };
+            });
+            dataRows.forEach(r => ws.addRow(r));
+
+            // ── Sheet2: Instructions & Reason Codes ──
+            const ws2 = wb.addWorksheet('Instructions & Reason Codes');
+            ws2.columns = [
+                { width: 35 }, { width: 10 }, { width: 80 },
+                { width: 10 }, { width: 10 }, { width: 10 }
+            ];
+            const instrRows = [
                 ['','','','','',''],
                 ['Reason','Code','Note','','',''],
                 ['Without Reason','','Leave last working day as blank','','',''],
@@ -17843,24 +17850,27 @@
                 ['3. Excel sheet upload will lead to successful transaction only when all the Employees\' (who are currently mapped in the system) details\n      are entered perfectly in the excel sheet','','','','',''],
                 ['4. Reasons are to be assigned numeric code and date has to be provided as mentioned in the table above','','','','','']
             ];
-            const ws2 = XLSX.utils.aoa_to_sheet(instrData);
-            ws2['!cols'] = [{wch:35},{wch:10},{wch:80},{wch:10},{wch:10},{wch:10}];
-            // Header row styling for Instructions tab
-            const instrHeaderStyle = {
-                font: { bold: true },
-                fill: { fgColor: { rgb: '99CCFF' } }
-            };
-            ['A2','B2','C2'].forEach(ref => {
-                if (ws2[ref]) ws2[ref].s = instrHeaderStyle;
+            instrRows.forEach((r, i) => {
+                const row = ws2.addRow(r);
+                if (i === 1) { // "Reason / Code / Note" header row
+                    row.eachCell((cell, colNo) => {
+                        if (colNo <= 3) {
+                            cell.font = { bold: true };
+                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF99CCFF' } };
+                        }
+                    });
+                }
+                if (i === 19) { // "Instructions to fill..." heading
+                    row.getCell(1).font = { bold: true };
+                }
             });
-            // Bold the instructions heading
-            if (ws2['A20']) ws2['A20'].s = { font: { bold: true } };
 
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
-            XLSX.utils.book_append_sheet(wb, ws2, 'Instructions & Reason Codes');
+            // Write to blob and download
+            const buf = await wb.xlsx.writeBuffer();
+            const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
             const fileName = `ESIC_Contribution_${year}${String(month).padStart(2,'0')}.xlsx`;
-            XLSX.writeFile(wb, fileName);
+            const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+            a.download = fileName; a.click(); URL.revokeObjectURL(a.href);
 
             let msg = `ESIC file downloaded: ${fileName}\n\n`;
             msg += `Included: ${dataRows.length} staff | Days: ${calDays} (calendar days, ${monthLabel})\n\n`;
