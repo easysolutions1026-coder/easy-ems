@@ -17812,11 +17812,24 @@
             const hdrRow = ws.addRow(header);
             hdrRow.height = 45;
             hdrRow.eachCell(cell => {
+                cell.numFmt = '@';
                 cell.font = { bold: true, color: { argb: 'FF000000' } };
                 cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFCCFFFF' } };
                 cell.alignment = { wrapText: true, vertical: 'middle' };
             });
-            dataRows.forEach(r => ws.addRow(r));
+            dataRows.forEach(r => {
+                const row = ws.addRow(r);
+                // Force ALL cells to explicit text format (@) so the ESIC portal
+                // reads them as-is — prevents IP numbers losing leading zeros,
+                // empty dates being parsed as invalid date values, and numeric
+                // wages/days being converted to Excel number types.
+                row.eachCell({ includeEmpty: true }, cell => {
+                    cell.numFmt = '@';          // text format
+                });
+            });
+
+            // Also set column-level numFmt so any portal column check sees text
+            ws.columns.forEach(col => { col.numFmt = '@'; });
 
             // ── Sheet2: Instructions & Reason Codes ──
             const ws2 = wb.addWorksheet('Instructions & Reason Codes');
