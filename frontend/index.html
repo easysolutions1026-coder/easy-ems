@@ -17824,45 +17824,69 @@
                 { width: 35 }, { width: 10 }, { width: 80 },
                 { width: 10 }, { width: 10 }, { width: 10 }
             ];
-            const instrRows = [
-                ['','','','','',''],
-                ['Reason','Code','Note','','',''],
-                ['Without Reason','','Leave last working day as blank','','',''],
-                ['On Leave','1','Leave last working day as blank','','',''],
-                ['Left Service','2','Please provide last working day (dd/mm/yyyy). IP will not appear from next wage period','','',''],
-                ['Retired','3','Please provide last working day (dd/mm/yyyy). IP will not appear from next wage period','','',''],
-                ['Out of Coverage','4','Please provide last working day (dd/mm/yyyy). IP will not appear from next contribution period. This option is valid only if Wage Period is April/October. In case any other month then IP will continue to appear in the list','','',''],
-                ['Expired','5','Please provide last working day (dd/mm/yyyy). IP will not appear from next wage period','','',''],
-                ['Non Implemented area','6','Please provide last working day (dd/mm/yyyy). ','','',''],
-                ['Compliance by Immediate Employer','7','Leave last working day as blank','','',''],
-                ['Suspension of work','8','Leave last working day as blank','','',''],
-                ['Strike/Lockout','9','Leave last working day as blank','','',''],
-                ['Retrenchment','10','Please provide last working day (dd/mm/yyyy). IP will not appear from next wage period','','',''],
-                ['No Work','11','Leave last working day as blank','','',''],
-                ['Doesnt Belong To This Employer','12','Leave last working day as blank','','',''],
-                ['Duplicate IP','13','Leave last working day as blank','','',''],
-                ['','','','','',''],
-                ['Click Here to Go back to Data Entry Page','','','','',''],
-                ['','','','','',''],
-                ['Instructions to fill in the excel file: ','','','','',''],
-                ['1. Enter the IP number, IP name, No. of Days, Total Monthly Wages, Reason for 0 wages(If Wages \'0\') & Last Working Day( only if employee \n     has left service, Retired, Out of coverage, Expired, Non-Implemented area or Retrenchment. For other reasons, last working day must be left BLANK).  ','','','','',''],
-                ['2. Number of days must be a whole number. Fractions should be rounded up to next higher whole number/integer','','','','',''],
-                ['3. Excel sheet upload will lead to successful transaction only when all the Employees\' (who are currently mapped in the system) details\n      are entered perfectly in the excel sheet','','','','',''],
-                ['4. Reasons are to be assigned numeric code and date has to be provided as mentioned in the table above','','','','','']
+            // ── Reason Codes table ──
+            const reasonCodes = [
+                ['Reason','Code','Note'],
+                ['Without Reason','','Leave last working day as blank'],
+                ['On Leave','1','Leave last working day as blank'],
+                ['Left Service','2','Please provide last working day (dd/mm/yyyy). IP will not appear from next wage period'],
+                ['Retired','3','Please provide last working day (dd/mm/yyyy). IP will not appear from next wage period'],
+                ['Out of Coverage','4','Please provide last working day (dd/mm/yyyy). IP will not appear from next contribution period. This option is valid only if Wage Period is April/October. In case any other month then IP will continue to appear in the list'],
+                ['Expired','5','Please provide last working day (dd/mm/yyyy). IP will not appear from next wage period'],
+                ['Non Implemented area','6','Please provide last working day (dd/mm/yyyy). '],
+                ['Compliance by Immediate Employer','7','Leave last working day as blank'],
+                ['Suspension of work','8','Leave last working day as blank'],
+                ['Strike/Lockout','9','Leave last working day as blank'],
+                ['Retrenchment','10','Please provide last working day (dd/mm/yyyy). IP will not appear from next wage period'],
+                ['No Work','11','Leave last working day as blank'],
+                ['Doesnt Belong To This Employer','12','Leave last working day as blank'],
+                ['Duplicate IP','13','Leave last working day as blank'],
             ];
-            instrRows.forEach((r, i) => {
-                const row = ws2.addRow(r);
-                if (i === 1) { // "Reason / Code / Note" header row
-                    row.eachCell((cell, colNo) => {
-                        if (colNo <= 3) {
-                            cell.font = { bold: true };
-                            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF99CCFF' } };
-                        }
-                    });
+            const thinBorder = { style: 'thin', color: { argb: 'FF000000' } };
+            const allBorders = { top: thinBorder, left: thinBorder, bottom: thinBorder, right: thinBorder };
+
+            ws2.addRow(['']); // blank row 1
+            reasonCodes.forEach((r, i) => {
+                const row = ws2.addRow([r[0], r[1], r[2], '', '', '']);
+                // borders on first 3 columns for entire table
+                for (let c = 1; c <= 3; c++) {
+                    row.getCell(c).border = allBorders;
+                    row.getCell(c).alignment = { wrapText: true, vertical: 'middle' };
                 }
-                if (i === 19) { // "Instructions to fill..." heading
-                    row.getCell(1).font = { bold: true };
+                if (i === 0) { // header row
+                    for (let c = 1; c <= 3; c++) {
+                        row.getCell(c).font = { bold: true };
+                        row.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF99CCFF' } };
+                    }
                 }
+            });
+
+            // blank rows + link row
+            ws2.addRow(['']);
+            const linkRow = ws2.addRow(['Click Here to Go back to Data Entry Page','','','','','']);
+            linkRow.getCell(1).font = { color: { argb: 'FF0000FF' }, underline: true };
+
+            // ── Instructions (all 11 points) ──
+            ws2.addRow(['']);
+            const instrHeadRow = ws2.addRow(['Instructions to fill in the excel file: ','','','','','']);
+            instrHeadRow.getCell(1).font = { bold: true };
+
+            const instructions = [
+                '1. Enter the IP number, IP name, No. of Days, Total Monthly Wages, Reason for 0 wages(If Wages \'0\') & Last Working Day( only if employee has left service, Retired, Out of coverage, Expired, Non-Implemented area or Retrenchment. For other reasons, last working day must be left BLANK).',
+                '2. Number of days must be a whole number. Fractions should be rounded up to next higher whole number/integer',
+                '3. Excel sheet upload will lead to successful transaction only when all the Employees\' (who are currently mapped in the system) details are entered perfectly in the excel sheet',
+                '4. Reasons are to be assigned numeric code and date has to be provided as mentioned in the table above',
+                '5. Total Monthly Wages should contain the sum of all the wages earned by the Employee from the Employer',
+                '6. If any IP has left the Employer or Expired, the last working day must be filled in the applicable date format (dd/mm/yyyy)',
+                '7. Days for which the employee has worked must include Sundays, Weekly Off Days & Paid Holidays that fall in between the working days',
+                '8. In case the employee has not worked for entire month, enter No. of days as 0 and Total Monthly Wages as 0 and select appropriate reason',
+                '9. If reason is not filled against zero wage employee then system will take it as \"Without Reason\"',
+                '10. If the employee has joined in the middle of the month, No. of days should be from date of joining to the last day of the month (including Sundays, weekly offs and paid holidays)',
+                '11. IP Number must exactly match the IP Number allotted by ESIC and available in the portal. Any mismatch will result in rejection of the record',
+            ];
+            instructions.forEach(text => {
+                const row = ws2.addRow([text,'','','','','']);
+                row.getCell(1).alignment = { wrapText: true, vertical: 'top' };
             });
 
             // Write to blob and download
