@@ -1979,6 +1979,9 @@
         }
     }
 
+    // Track recently deleted IDs so the pre-save merge doesn't resurrect them
+    const _recentlyDeletedItems = new Set();
+
     async function saveData(type, data) {
         if (!accessToken) { showToast('Session expired — please sign in again'); handleSignOut(); return; }
         const idMap = {
@@ -1998,13 +2001,18 @@
                         const memIDs = new Set(data.map(r => r[idKey]).filter(Boolean));
                         let merged = 0;
                         fresh.forEach(dr => {
-                            if (dr[idKey] && !memIDs.has(dr[idKey])) { data.push(dr); merged++; }
+                            if (dr[idKey] && !memIDs.has(dr[idKey]) && !_recentlyDeletedItems.has(dr[idKey])) { data.push(dr); merged++; }
                             // Merge nested items (projectExpenses.items)
                             if (type === 'projectExpenses' && dr.projExpID && memIDs.has(dr.projExpID)) {
                                 const mr = data.find(r => r.projExpID === dr.projExpID);
                                 if (mr && Array.isArray(dr.items) && Array.isArray(mr.items)) {
                                     const mIDs = new Set(mr.items.map(i => i.itemID).filter(Boolean));
-                                    dr.items.forEach(di => { if (di.itemID && !mIDs.has(di.itemID)) { mr.items.push(di); merged++; } });
+                                    dr.items.forEach(di => {
+                                        // Don't resurrect items the user just deleted
+                                        if (di.itemID && !mIDs.has(di.itemID) && !_recentlyDeletedItems.has(di.itemID)) {
+                                            mr.items.push(di); merged++;
+                                        }
+                                    });
                                 }
                             }
                         });
@@ -2013,6 +2021,8 @@
                 }
             } catch(e) { console.warn('Pre-save merge (non-critical):', e.message); }
         }
+        // Clear deleted-items tracker after a successful save cycle
+        _recentlyDeletedItems.clear();
         await writeFile(fileId, data);
         // Level 2 concurrency: suppress next poll for this file (avoid self-trigger)
         try { _concurMarkLocalSave(type); } catch(e) {}
@@ -4242,6 +4252,7 @@
         // Phase C: remember which pool to recompute after delete
         const oldItem = (projectExpenses[idx].items||[]).find(i => i.itemID === itemID);
         const refundPoolID = oldItem?.poolID || '';
+        _recentlyDeletedItems.add(itemID);
         projectExpenses[idx].items = (projectExpenses[idx].items||[]).filter(i=>i.itemID!==itemID);
         // Recompute that pool — may auto-reopen if was Closed
         if (refundPoolID) {
@@ -5807,8 +5818,15 @@
     async function deleteWorkLog(id){
         if(!confirm('Delete this project work log and ALL daily entries? This cannot be undone.'))return;
         if (await _concurBlockIfStale('workLogs', [{ id, idKey: 'wlID' }])) return;
+        _recentlyDeletedItems.add(id);
         workLogs=workLogs.filter(x=>x.wlID!==id);
-        await saveData('workLogs',workLogs);renderView();showToast('🗑️ Work log deleted');
+        try {
+            await saveData('workLogs',workLogs);
+            renderView();
+            showToast('🗑️ Work log deleted');
+        } catch(err) {
+            showToast('⚠ Delete failed: ' + err.message);
+        }
     }
 
     // ── DAILY ENTRY CRUD ─────────────────────────────────────────
