@@ -1,4 +1,4 @@
-# IMSE EASY EMS - Cloud Migration
+# EASY EMS - Cloud Migration
 
 Engineering Management System for IMSE Tech Services Pvt Ltd.
 
