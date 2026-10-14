@@ -3532,6 +3532,10 @@
             if (settings.payslipEditUnlocked) return null; // editing unlocked in Settings
             return (payslips||[]).find(p => p.staffID === staffID && +p.periodMonth === +pMonth && +p.periodYear === +pYear && p.type === 'office' && p.approved);
         }
+        function _isTechPayslipApproved(staffID, pMonth, pYear) {
+            if (settings.payslipEditUnlocked) return null;
+            return (payslips||[]).find(p => p.staffID === staffID && +p.periodMonth === +pMonth && +p.periodYear === +pYear && p.type === 'tech' && p.approved);
+        }
         function buildOfficePayHTML(){
             const op=officePayState,st=staff.find(x=>x.staffID===op.staffID);if(!st)return '';
             const c=computeOfficeSalary(st,op);
@@ -3823,13 +3827,22 @@
         }
         function toggleTechRates(){techWageState.showRates=!techWageState.showRates;document.getElementById('twRatesPanel')?.classList.toggle('hidden',!techWageState.showRates);const b=document.getElementById('twRatesBtn');if(b)b.textContent=techWageState.showRates?'Hide ▲':'Edit rates ▼';}
         function updateTechWageRate(key,val){techWageState.rates[key]=parseFloat(val)||0;renderTechWageCalc();}
-        function renderTechWageCalc(){const el=document.getElementById('twCalcBody');if(el)el.innerHTML=buildTechWageCalcHTML();}
+        function renderTechWageCalc(){
+            const el=document.getElementById('twCalcBody');if(el)el.innerHTML=buildTechWageCalcHTML();
+            // Lock inputs when payslip is already approved for this period
+            const wrap=document.getElementById('twCalcBody');
+            if(wrap){
+                const locked=!!_isTechPayslipApproved(techWageState.staffID, techWageState.periodMonth, techWageState.periodYear);
+                wrap.querySelectorAll('input,select').forEach(inp=>{inp.disabled=locked;if(locked)inp.classList.add('opacity-50','cursor-not-allowed');else{inp.classList.remove('opacity-50','cursor-not-allowed');}});
+            }
+        }
         function buildTechWageCalcHTML(){
             const s=techWageState;
             const cal=calcTechWage(s);
             const exgratiaAmt=+s.exgratia||0;
             const ded=calcTechDeductions(cal.gross,cal.basic,cal.fixedAllow,exgratiaAmt,s);
             const travelAmt=+s.travelAllow||0;
+            const _approvedTechPS = _isTechPayslipApproved(s.staffID, s.periodMonth, s.periodYear);
             // Net = Gross + Exgratia − Deductions + Travel Allowance (travel is outside gross, added to net)
             // gross includes OT + travel; exgratia added on top; deductions subtracted
             const netPay=+(cal.gross+exgratiaAmt-ded.totalDed).toFixed(2);
@@ -4037,8 +4050,9 @@
             <div id="twRatesPanel" class="${s.showRates?'':'hidden'} bg-teal-50 border border-teal-200 rounded-xl p-4 grid grid-cols-2 md:grid-cols-4 gap-3 mb-2">
                 ${rateRows.map(r=>`<div><label class="block text-xs font-semibold text-gray-600 mb-1">${r.label}</label><input type="number" value="${r.val}" min="0" step="0.01" oninput="updateTechWageRate('${r.key}',this.value)" class="w-full px-3 py-2 border rounded-lg text-sm bg-white"/></div>`).join('')}
             </div>
+            ${_approvedTechPS ? `<div class="mb-2 px-4 py-2 bg-green-50 border border-green-300 rounded-xl text-xs text-green-800 font-semibold">✅ Payslip approved for this period. Inputs are locked. To make changes, unlock via Settings → Payslip Edit Unlock.</div>` : ''}
             <div class="flex gap-3 mt-2">
-                <button onclick="openApprovePayslipModal('tech')" class="px-5 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 font-semibold text-sm">✅ Approve &amp; Save Record</button>
+                <button onclick="openApprovePayslipModal('tech')" class="px-5 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 font-semibold text-sm${_approvedTechPS?' opacity-50 cursor-not-allowed':''}" ${_approvedTechPS?'disabled':''}>✅ Approve &amp; Save Record</button>
                 <button onclick="generatePaySlipPDF()" class="px-5 py-2 bg-teal-600 text-white rounded-xl hover:bg-teal-700 font-semibold text-sm">🖨️ Generate PDF</button>
             </div>`;
         }
