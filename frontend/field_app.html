@@ -94,6 +94,7 @@
                 fd.append('file', new Blob([jsonStr], { type: 'application/json' }));
                 return origFetch(input, { method: 'PATCH', headers: init.headers, body: fd });
               });
+            });
           }
         }
 
