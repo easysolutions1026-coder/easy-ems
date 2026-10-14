@@ -234,7 +234,7 @@
               'Authorization': token2 ? 'Bearer ' + token2 : ''
             },
             body: jsonStr
-          }).catch(function(e) { console.warn('[Cloud Run] Cloud SQL write failed:', e); });
+          }).catch(function(e) { console.warn('[Cloud Run] Cloud SQL write failed:', e); _showToast('⚠ Cloud sync issue — data saved to Drive but may be delayed in reports', '#d97706', 5000); });
           // 2. Rebuild FormData and pass through to actual Drive (body was consumed by extractJsonBody)
           var driveInit = { method: init.method, headers: init.headers };
           var fd = new FormData();
@@ -30954,7 +30954,7 @@ Automated WFH alert — ${company} Attendance System.`;
                         if (res.autoClosed.length > 0) {
                             alert(`✅ Payslip generated. ${res.recorded} loan EMI(s) recorded.\n\n🏁 Loan${res.autoClosed.length>1?'s':''} fully repaid: ${res.autoClosed.join(', ')}`);
                         }
-                    }).catch(e => console.error('Failed to save loan deduction log:', e));
+                    }).catch(e => { console.error('Failed to save loan deduction log:', e); alert('⚠ Loan deduction record failed to save — please re-generate this payslip.\n\n' + (e.message||'')); });
                 }
             }
         }
@@ -31066,7 +31066,7 @@ Automated WFH alert — ${company} Attendance System.`;
                         if (res.autoClosed.length > 0) {
                             alert(`✅ Payslip generated. ${res.recorded} loan EMI(s) recorded.\n\n🏁 Loan${res.autoClosed.length>1?'s':''} fully repaid: ${res.autoClosed.join(', ')}`);
                         }
-                    }).catch(e => console.error('Failed to save loan deduction log:', e));
+                    }).catch(e => { console.error('Failed to save loan deduction log:', e); alert('⚠ Loan deduction record failed to save — please re-generate this payslip.\n\n' + (e.message||'')); });
                 }
             }
         }
@@ -44497,7 +44497,7 @@ Automated WFH alert — ${company} Attendance System.`;
             if (!pettyCashOffices[idx]) return;
             pettyCashOffices[idx][field] = value;
             pettyCashOffices[idx].updatedAt = new Date().toISOString();
-            saveData('pettyCashOffices', pettyCashOffices).catch(e => console.warn('Save failed:', e));
+            saveData('pettyCashOffices', pettyCashOffices).catch(e => { console.warn('Save failed:', e); _showToast('⚠ Petty cash update failed to save — try again', '#dc2626', 4000); });
         }
 
         function togglePCOfficeActive(idx) {
