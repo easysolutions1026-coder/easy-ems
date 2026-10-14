@@ -2134,20 +2134,14 @@
             if (gross <= threshold) return 0;
             return month === 2 ? 300 : 200;
         }
-        // ── PF Amendment constants ──
-        const PF_AMENDMENT_YEAR = 2026, PF_AMENDMENT_MONTH = 9; // Sep 2026
-        // Office Staff: (Gross − Variable) × 12%, no cap from this date
-        // Technician: unchanged — (Basic + Fixed Allowances) × 12%
-        function _isPostPFAmendment(m, y) {
-            return y > PF_AMENDMENT_YEAR || (y === PF_AMENDMENT_YEAR && m >= PF_AMENDMENT_MONTH);
-        }
         function _calcOfficePF(basic,hra,da,med,cv,gp,bonus,pfPct,periodMonth,periodYear){
-            // PF Gross = Gross − Variable (variable excluded from arguments)
             const g=basic+hra+da+med+cv+gp+bonus,r=(parseFloat(pfPct)||12)/100;
             const m=+(periodMonth||new Date().getMonth()+1),y=+(periodYear||new Date().getFullYear());
-            // Before Sep 2026: cap ₹15,000
-            // Sep 2026 onwards: (Gross − Variable) × 12%, NO CAP
-            if(!_isPostPFAmendment(m,y)){const cap=15000;return{pfGross:g,pfAmt:g>cap?+(cap*r).toFixed(2):+(g*r).toFixed(2),pfCapped:g>cap};}
+            // Before Sep 2026: old cap ₹15,000
+            // Sep 2026: pro-rated cap ₹19,667 (16/30 × 15K + 14/30 × 25K)
+            // Oct 2026 onwards: uncapped (full basis × rate)
+            if(y<2026||(y===2026&&m<9)){const cap=15000;return{pfGross:g,pfAmt:g>cap?+(cap*r).toFixed(2):+(g*r).toFixed(2),pfCapped:g>cap};}
+            if(y===2026&&m===9){const cap=Math.round((16/30*15000)+(14/30*25000));return{pfGross:g,pfAmt:g>cap?+(cap*r).toFixed(2):+(g*r).toFixed(2),pfCapped:g>cap};}
             return{pfGross:g,pfAmt:+(g*r).toFixed(2),pfCapped:false};
         }
         // PF for technician: (Basic + Fixed Allowance) × pfPct%
@@ -2171,10 +2165,26 @@
         // Defaults match current India statutory rates. Can be overridden per-establishment
         // via settings if rates change in future (no current UI exposure — defaults suffice).
         function _statutoryRates(month, year) {
-            // EPFO wage ceiling raised ₹15,000 → ₹25,000 w.e.f. 17-Sep-2026
-            // (Gazette S.O. 5109(E)) — applies to EPF/EPS and EDLI.
-            const pfWageCap   = _isPostPFAmendment(month, year) ? 25000 : 15000;
-            const edliWageCap = _isPostPFAmendment(month, year) ? 25000 : 15000;
+            // EPF wage ceiling: ₹15,000 until 16 Sep 2026; ₹25,000 from 17 Sep 2026
+            // S.O. 5109(E) dated 17 September 2026
+            const m = +(month || new Date().getMonth() + 1);
+            const y = +(year  || new Date().getFullYear());
+            const isBeforeNew = y < 2026 || (y === 2026 && m < 9);
+            const isTransition = y === 2026 && m === 9; // September 2026 — split month
+            const isAfterNew  = y > 2026 || (y === 2026 && m > 9);
+            let pfWageCap, edliWageCap;
+            if (isAfterNew) {
+                pfWageCap  = 25000;
+                edliWageCap = 25000;
+            } else if (isTransition) {
+                // Pro-rate: 16 days old cap + 14 days new cap = weighted average
+                // (16/30 × 15000) + (14/30 × 25000) = 8000 + 11666.67 = 19666.67
+                pfWageCap  = Math.round((16/30 * 15000) + (14/30 * 25000));
+                edliWageCap = Math.round((16/30 * 15000) + (14/30 * 25000));
+            } else {
+                pfWageCap  = 15000;
+                edliWageCap = 15000;
+            }
             return {
                 employerPFPct:   (settings?.employerPFPct  != null) ? +settings.employerPFPct   : 12,
                 epfAdminPct:     (settings?.epfAdminPct    != null) ? +settings.epfAdminPct     : 0.5,
@@ -2182,7 +2192,8 @@
                 employerESICPct: (settings?.employerESICPct!= null) ? +settings.employerESICPct : 3.25,
                 epfAdminMin:     500,
                 pfWageCap,
-                edliWageCap
+                edliWageCap,
+                isTransitionMonth: isTransition
             };
         }
 
@@ -2254,7 +2265,8 @@
                 }
                 if (pfGross <= 0 && employeePF <= 0) continue;   // skip zero-contribution staff
                 // Per EPF & MP Act: employer PF + admin use the same capped basis as
-                // employee PF. EDLI uses edliWageCap (₹15K pre-Sep 2026, ₹25K from Sep 2026).
+                // employee PF. EDLI has its own explicit ₹15,000 ceiling per employee
+                // per month — kept separate so a future PF cap change doesn't break EDLI.
                 const effectiveBasis = capped ? rates.pfWageCap : pfGross;
                 const edliBasis      = Math.min(pfGross, rates.edliWageCap || 15000);
                 // All EPF contributions are rounded to the nearest rupee to match
@@ -2701,23 +2713,19 @@
                     continue;
                 }
 
-                // ── EMI PAUSE: office sets loan.pauseFrom / loan.pauseUntil
-                // to skip deductions for a specific range of months.
-                // If only pauseUntil is set (legacy), pause runs from
-                // the first deduction month through pauseUntil.
-                // The loan extends accordingly — installments don't get
-                // consumed during the pause. Manual repayments still
-                // reduce balance without consuming an EMI slot.
-                if (loan.pauseUntil || loan.pauseFrom) {
-                    const pauseFromStr = loan.pauseFrom || loan.pauseUntil;
-                    const pauseToStr   = loan.pauseUntil || loan.pauseFrom;
-                    const [fY, fM] = pauseFromStr.split('-').map(Number);
-                    const [pY, pM] = pauseToStr.split('-').map(Number);
-                    const fromKey  = fY * 12 + fM;
+                // ── EMI PAUSE: office can set loan.pauseUntil = '2026-12'
+                // to skip deductions through Dec 2026. The loan extends
+                // accordingly — installments don't get consumed during the
+                // pause. The employee can still make manual repayments
+                // during this period (partial lump-sum payments land in
+                // manualRepayments[] and reduce the balance without consuming
+                // an EMI slot, exactly as before).
+                if (loan.pauseUntil) {
+                    const [pY, pM] = loan.pauseUntil.split('-').map(Number);
                     const pauseKey = pY * 12 + pM;
-                    if (periodKey >= fromKey && periodKey <= pauseKey) {
+                    if (periodKey <= pauseKey) {
                         out.push({ loan, deductionAmount: 0, deferred: false,
-                                   reason: 'EMI paused ' + pauseFromStr + ' → ' + pauseToStr +
+                                   reason: 'EMI paused until ' + loan.pauseUntil +
                                            (loan.pauseReason ? ' — ' + loan.pauseReason : '') });
                         continue;
                     }
@@ -3406,6 +3414,14 @@
                 document.getElementById('twSection')?.classList.remove('hidden');renderTechWageCalc();
             } else {
                 officePayState.staffID=staffID;officePayState.leaveTaken=0;officePayState._useManualLeave=false;officePayState.addlAllowance=0;officePayState.addlAllowanceRemark='';officePayState.addlDeduction=0;officePayState.addlDeductionRemark='';
+                // Restore addlAllowance from saved payslip if one exists for this staff+period
+                const _savedPS = payslips.find(p => p.staffID === staffID && +p.periodMonth === +officePayState.periodMonth && +p.periodYear === +officePayState.periodYear && p.type === 'office');
+                if (_savedPS && _savedPS.snapshot) {
+                    officePayState.addlAllowance = +_savedPS.snapshot.addlAllowance || 0;
+                    officePayState.addlAllowanceRemark = _savedPS.snapshot.addlAllowanceRemark || '';
+                    officePayState.addlDeduction = +_savedPS.snapshot.addlDeduction || 0;
+                    officePayState.addlDeductionRemark = _savedPS.snapshot.addlDeductionRemark || '';
+                }
                 const ow = _getEffectiveWageForPeriod(st, officePayState.periodYear, officePayState.periodMonth);
                 officePayState.pfPct=+(ow.pfPct??12);officePayState.esicPct=+(st.esicPct??0.75);officePayState.ptBase=+(st.ptBase??200);officePayState.tdsAmt=+(ow.tdsMonthly||0);
                 _resetOfficeInputs(st);document.getElementById('opSection')?.classList.remove('hidden');renderOfficePayCalc();
@@ -3502,11 +3518,24 @@
             }
             renderOfficePayCalc();
         }
-        function renderOfficePayCalc(){const el=document.getElementById('opCalcBody');if(el)el.innerHTML=buildOfficePayHTML();}
+        function renderOfficePayCalc(){
+            const el=document.getElementById('opCalcBody');if(el)el.innerHTML=buildOfficePayHTML();
+            // Lock inputs when payslip is already approved for this period
+            const wrap=document.getElementById('opInputsWrap');
+            if(wrap){
+                const locked=!!_isOfficePayslipApproved(officePayState.staffID, officePayState.periodMonth, officePayState.periodYear);
+                wrap.querySelectorAll('input,select').forEach(inp=>{inp.disabled=locked;if(locked)inp.classList.add('opacity-50','cursor-not-allowed');else{inp.classList.remove('opacity-50','cursor-not-allowed');}});
+            }
+        }
 
+        function _isOfficePayslipApproved(staffID, pMonth, pYear) {
+            if (settings.payslipEditUnlocked) return null; // editing unlocked in Settings
+            return (payslips||[]).find(p => p.staffID === staffID && +p.periodMonth === +pMonth && +p.periodYear === +pYear && p.type === 'office' && p.approved);
+        }
         function buildOfficePayHTML(){
             const op=officePayState,st=staff.find(x=>x.staffID===op.staffID);if(!st)return '';
             const c=computeOfficeSalary(st,op);
+            const _approvedPS = _isOfficePayslipApproved(op.staffID, op.periodMonth, op.periodYear);
             const INR=n=>'₹'+Math.max(0,+n||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
             const MN=['January','February','March','April','May','June','July','August','September','October','November','December'];
             const monthName=MN[op.periodMonth-1]+' '+op.periodYear;
@@ -3520,9 +3549,7 @@
             const lc=c.leaveBalance<0?'#dc2626':c.leaveBalance===0?'#b45309':'#15803d';
             const lb=c.leaveBalance<0?'#fee2e2':c.leaveBalance===0?'#fef3c7':'#dcfce7';
             const er=[{n:'Basic Salary',a:c.basic,s:true},{n:`HRA (${c.hraPct}%)`,a:c.hra,s:c.hra>0},{n:`DA (${c.daPct}%)`,a:c.da,s:c.da>0},{n:'Grade Pay',a:c.gradePay,s:c.gradePay>0},{n:'Conveyance',a:c.conveyance,s:c.conveyance>0},{n:'Medical',a:c.medical,s:c.medical>0},{n:'Annual Bonus (Basic÷10)',a:c.bonus,s:true},{n:'Variable (excl. PF)',a:c.variable,s:c.variable>0},{n:op.addlAllowanceRemark?'Add: '+op.addlAllowanceRemark:'Add. Allow.',a:c.addlAllow,s:c.addlAllow>0}].filter(r=>r.s);
-            const _pfAmended = _isPostPFAmendment(op.periodMonth, op.periodYear);
-            const pfLbl=`PF ${c.pfPct}% `+(c.pfCapped?`(PF Gross ₹${Math.round(c.pfGross).toLocaleString('en-IN')} → cap ₹15k)`:`(PF Gross ₹${Math.round(c.pfGross).toLocaleString('en-IN')}${_pfAmended?' · No Cap w.e.f. Sep-2026':''})`);
-
+            const pfLbl=`PF ${c.pfPct}% `+(c.pfCapped?`(PF Gross ₹${Math.round(c.pfGross).toLocaleString('en-IN')} → cap ₹15k)`:`(PF Gross ₹${Math.round(c.pfGross).toLocaleString('en-IN')})`);
             const esicThresh=21000,esicNote=c.esicWaived?`ESIC – NIL (Wages ₹${Math.round(c.grossWithVar).toLocaleString('en-IN')} > ₹21,000)`:`ESIC – 0.75% of Wages ₹${Math.round(c.grossWithVar).toLocaleString('en-IN')} (≤ ₹21,000)`;
             const ptNote=c.ptApplies?`PT${c.isFebruary?' (Feb ₹300)':''} – ₹${c.ptAmt} (${c.gender}, gross ₹${Math.round(c.gross).toLocaleString('en-IN')} > ${c.gender==='Female'?'₹25,000':'₹10,000'})`:(`PT – NIL (${c.gender}: gross ₹${Math.round(c.gross).toLocaleString('en-IN')} ≤ ${c.gender==='Female'?'₹25,000':'₹10,000'})`);
             // Base deduction rows
@@ -3587,8 +3614,9 @@
                 </div>` : ''}
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px"><div class="bg-white border border-gray-200 rounded-xl overflow-hidden"><div style="background:#1d4ed8;padding:8px 14px;font-weight:700;font-size:12px;color:#fff">EARNINGS</div><table style="width:100%;border-collapse:collapse;font-size:12px">${er.map(r=>`<tr style="border-bottom:0.5px solid #f3f4f6"><td style="padding:7px 12px;color:#374151">${r.n}</td><td style="padding:7px 12px;text-align:right;font-weight:500">${INR(r.a)}</td></tr>`).join('')}<tr style="background:#eff6ff"><td style="padding:8px 12px;font-weight:700;color:#1d4ed8">GROSS</td><td style="padding:8px 12px;text-align:right;font-weight:700;color:#1d4ed8">${INR(c.gross)}</td></tr></table></div><div class="bg-white border border-gray-200 rounded-xl overflow-hidden"><div style="background:#dc2626;padding:8px 14px;font-weight:700;font-size:12px;color:#fff">DEDUCTIONS</div><table style="width:100%;border-collapse:collapse;font-size:12px">${dr.map(r=>`<tr style="border-bottom:0.5px solid #f3f4f6;${r.nil?'opacity:0.55':''}"><td style="padding:7px 12px;color:#374151;font-size:11px">${r.n}</td><td style="padding:7px 12px;text-align:right;font-weight:500;color:${r.col}">${r.nil?'NIL':INR(r.a)}</td></tr>`).join('')}<tr style="background:#fef2f2"><td style="padding:8px 12px;font-weight:700;color:#dc2626">TOTAL</td><td style="padding:8px 12px;text-align:right;font-weight:700;color:#dc2626">${INR(c.totalDed)}</td></tr></table></div></div>
             <div style="background:linear-gradient(135deg,#0f766e,#0891b2);border-radius:12px;padding:14px 20px;display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div><div style="color:#ccfbf1;font-size:12px;font-weight:500">${st.name} · ${monthName}</div><div style="color:#99f6e4;font-size:11px;margin-top:3px">Gross ${INR(c.gross)} − ${INR(c.totalDed)}</div></div><div><span style="color:#99f6e4;font-size:11px;margin-right:6px">NET PAY</span><span style="color:#f0fdfa;font-size:22px;font-weight:700">${INR(c.netPay)}</span></div></div>
+            ${_approvedPS ? `<div class="mb-2 px-4 py-2 bg-green-50 border border-green-300 rounded-xl text-xs text-green-800 font-semibold">✅ Payslip approved for this period. Inputs are locked. To make changes, unlock via Settings → Payslip Edit Unlock.</div>` : ''}
             <div class="flex gap-3">
-                <button onclick="openApprovePayslipModal('office')" class="px-5 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 font-semibold text-sm">✅ Approve & Save Record</button>
+                <button onclick="openApprovePayslipModal('office')" class="px-5 py-2 bg-green-600 text-white rounded-xl hover:bg-green-700 font-semibold text-sm${_approvedPS?' opacity-50 cursor-not-allowed':''}" ${_approvedPS?'disabled':''}>✅ Approve & Save Record</button>
                 <button onclick="generatePaySlipPDF()" class="px-5 py-2 bg-teal-600 text-white rounded-xl hover:bg-teal-700 font-semibold text-sm">🖨️ Generate PDF</button>
             </div>`;
         }
@@ -6399,52 +6427,6 @@
                         // _acquireLock has already enqueued the data if user chose to wait
                         return;
                     }
-                }
-
-                // ── MERGE: pick up new records added by the field app ──────
-                // Both apps share the same Drive JSON file. Without merging, a save
-                // from the main app overwrites any new items the field app added
-                // since the main app last loaded. We re-read the file and merge
-                // records that exist in Drive but not in our in-memory array.
-                // This only applies to array-type files with items that carry an ID.
-                const _idKeys = {
-                    projectExpenses: { topKey:'projExpID', itemKey:'itemID' },
-                    workLogs:        { topKey:'logID' },
-                    fundRequests:    { topKey:'requestID' },
-                    fundPools:       { topKey:'poolID' },
-                    expenses:        { topKey:'expID' },
-                    directorExpenses:{ topKey:'dirExpID' }
-                };
-                if (Array.isArray(data) && _idKeys[type]) {
-                    try {
-                        const freshDrive = await loadFileFromDrive(`${type}.json`);
-                        if (Array.isArray(freshDrive)) {
-                            const cfg = _idKeys[type];
-                            const memIDs = new Set(data.map(r => r[cfg.topKey]).filter(Boolean));
-                            let merged = 0;
-                            freshDrive.forEach(driveRec => {
-                                const id = driveRec[cfg.topKey];
-                                if (id && !memIDs.has(id)) {
-                                    data.push(driveRec);
-                                    merged++;
-                                }
-                                // For projectExpenses: also merge nested items added by field app
-                                if (cfg.itemKey && id && memIDs.has(id)) {
-                                    const memRec = data.find(r => r[cfg.topKey] === id);
-                                    if (memRec && Array.isArray(driveRec.items) && Array.isArray(memRec.items)) {
-                                        const memItemIDs = new Set(memRec.items.map(i => i[cfg.itemKey]).filter(Boolean));
-                                        driveRec.items.forEach(dItem => {
-                                            if (dItem[cfg.itemKey] && !memItemIDs.has(dItem[cfg.itemKey])) {
-                                                memRec.items.push(dItem);
-                                                merged++;
-                                            }
-                                        });
-                                    }
-                                }
-                            });
-                            if (merged > 0) console.log(`🔀 Merged ${merged} new record(s) from Drive into ${type} before save`);
-                        }
-                    } catch(e) { console.warn('Pre-save merge failed (non-critical):', e.message); }
                 }
 
                 // ── PERFORMANCE: write the file FIRST, then run backup async ──
@@ -16855,7 +16837,7 @@
                                 <td class="px-3 py-2 text-xs text-right">${fmt(r.employeePF)}</td>
                                 <td class="px-3 py-2 text-xs text-right">${fmt(r.employerPF)}</td>
                                 <td class="px-3 py-2 text-xs text-right text-gray-500">${fmt(r.admin)}</td>
-                                <td class="px-3 py-2 text-xs text-right text-gray-500">${fmt(r.edli)}${r.edliBasis && r.edliBasis < r.pfGross?` <span class="text-[9px] text-blue-400">(on ₹${(r.edliBasis/1000).toFixed(0)}k cap)</span>`:''}</td>
+                                <td class="px-3 py-2 text-xs text-right text-gray-500">${fmt(r.edli)}${r.edliBasis && r.edliBasis < r.pfGross?` <span class="text-[9px] text-blue-400">(on ₹15k cap)</span>`:''}</td>
                                 <td class="px-3 py-2 text-xs text-right font-bold text-blue-700">${fmt(r.total)}</td>
                             </tr>`).join('')}
                         </tbody>
@@ -16882,7 +16864,6 @@
                                 ${lib.rows.length} contributing staff · Total payable: <strong class="${hasLiability ? 'text-blue-700' : 'text-green-700'}">${fmt(total)}</strong>
                                 ${hasLiability ? ' · Due by 15 ' + nextMonthLabel.replace(' (15)', '') : ''}
                             </p>
-                            ${(year > 2026 || (year === 2026 && month >= 9)) ? `<p class="text-[10px] text-indigo-600 mt-1 font-medium">📋 PF Amendment w.e.f. Sep 2026: Office Staff PF on (Gross − Variable) × 12%, no cap. Technician PF unchanged (Basic + Fixed Allowances × 12%). EPFO wage ceiling (EPS/EDLI) raised ₹15K → ₹25K.</p>` : ''}
                         </div>
                         ${hasLiability && status === 'unrecorded' ? `
                         <button onclick="createPFPaymentBill(${month},${year},${total})"
@@ -17790,124 +17771,25 @@
                 return;
             }
 
-            // Generate .xlsx via ExcelJS (supports styling: fill, bold, wrap).
-            // Lazy-load from CDN; SheetJS community edition ignores cell styles.
-            if (typeof ExcelJS === 'undefined') {
+            // The ESIC portal requires a GENUINE Excel file. The previous
+            // implementation exported an HTML table renamed to .xls, which
+            // Excel opens but the portal parser rejects. Generate a real
+            // .xlsx via SheetJS (lazy-loaded, same pattern as jsPDF).
+            if (typeof XLSX === 'undefined') {
                 try {
-                    await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
+                    await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
                 } catch(e) {
                     alert('Could not load the Excel library (network issue). Please retry.');
                     return;
                 }
             }
 
-            const wb = new ExcelJS.Workbook();
-
-            // ── Sheet1: Data ──
-            const ws = wb.addWorksheet('Sheet1');
-            ws.columns = [
-                { width: 17 }, { width: 32 }, { width: 28 },
-                { width: 26 }, { width: 31 }, { width: 28 }
-            ];
-            const hdrRow = ws.addRow(header);
-            hdrRow.height = 45;
-            hdrRow.eachCell(cell => {
-                cell.numFmt = '@';
-                cell.font = { bold: true, color: { argb: 'FF000000' } };
-                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFCCFFFF' } };
-                cell.alignment = { wrapText: true, vertical: 'middle' };
-            });
-            dataRows.forEach(r => {
-                const row = ws.addRow(r);
-                // Force ALL cells to explicit text format (@) so the ESIC portal
-                // reads them as-is — prevents IP numbers losing leading zeros,
-                // empty dates being parsed as invalid date values, and numeric
-                // wages/days being converted to Excel number types.
-                row.eachCell({ includeEmpty: true }, cell => {
-                    cell.numFmt = '@';          // text format
-                });
-            });
-
-            // Also set column-level numFmt so any portal column check sees text
-            ws.columns.forEach(col => { col.numFmt = '@'; });
-
-            // ── Sheet2: Instructions & Reason Codes ──
-            const ws2 = wb.addWorksheet('Instructions & Reason Codes');
-            ws2.columns = [
-                { width: 35 }, { width: 10 }, { width: 80 },
-                { width: 10 }, { width: 10 }, { width: 10 }
-            ];
-            // ── Reason Codes table ──
-            const reasonCodes = [
-                ['Reason','Code','Note'],
-                ['Without Reason','','Leave last working day as blank'],
-                ['On Leave','1','Leave last working day as blank'],
-                ['Left Service','2','Please provide last working day (dd/mm/yyyy). IP will not appear from next wage period'],
-                ['Retired','3','Please provide last working day (dd/mm/yyyy). IP will not appear from next wage period'],
-                ['Out of Coverage','4','Please provide last working day (dd/mm/yyyy). IP will not appear from next contribution period. This option is valid only if Wage Period is April/October. In case any other month then IP will continue to appear in the list'],
-                ['Expired','5','Please provide last working day (dd/mm/yyyy). IP will not appear from next wage period'],
-                ['Non Implemented area','6','Please provide last working day (dd/mm/yyyy). '],
-                ['Compliance by Immediate Employer','7','Leave last working day as blank'],
-                ['Suspension of work','8','Leave last working day as blank'],
-                ['Strike/Lockout','9','Leave last working day as blank'],
-                ['Retrenchment','10','Please provide last working day (dd/mm/yyyy). IP will not appear from next wage period'],
-                ['No Work','11','Leave last working day as blank'],
-                ['Doesnt Belong To This Employer','12','Leave last working day as blank'],
-                ['Duplicate IP','13','Leave last working day as blank'],
-            ];
-            const thinBorder = { style: 'thin', color: { argb: 'FF000000' } };
-            const allBorders = { top: thinBorder, left: thinBorder, bottom: thinBorder, right: thinBorder };
-
-            ws2.addRow(['']); // blank row 1
-            reasonCodes.forEach((r, i) => {
-                const row = ws2.addRow([r[0], r[1], r[2], '', '', '']);
-                // borders on first 3 columns for entire table
-                for (let c = 1; c <= 3; c++) {
-                    row.getCell(c).border = allBorders;
-                    row.getCell(c).alignment = { wrapText: true, vertical: 'middle' };
-                }
-                if (i === 0) { // header row
-                    for (let c = 1; c <= 3; c++) {
-                        row.getCell(c).font = { bold: true };
-                        row.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF99CCFF' } };
-                    }
-                }
-            });
-
-            // blank rows + link row
-            ws2.addRow(['']);
-            const linkRow = ws2.addRow(['Click Here to Go back to Data Entry Page','','','','','']);
-            linkRow.getCell(1).font = { color: { argb: 'FF0000FF' }, underline: true };
-
-            // ── Instructions (all 11 points) ──
-            ws2.addRow(['']);
-            const instrHeadRow = ws2.addRow(['Instructions to fill in the excel file: ','','','','','']);
-            instrHeadRow.getCell(1).font = { bold: true };
-
-            const instructions = [
-                '1. Enter the IP number, IP name, No. of Days, Total Monthly Wages, Reason for 0 wages(If Wages \'0\') & Last Working Day( only if employee has left service, Retired, Out of coverage, Expired, Non-Implemented area or Retrenchment. For other reasons, last working day must be left BLANK).',
-                '2. Number of days must be a whole number. Fractions should be rounded up to next higher whole number/integer',
-                '3. Excel sheet upload will lead to successful transaction only when all the Employees\' (who are currently mapped in the system) details are entered perfectly in the excel sheet',
-                '4. Reasons are to be assigned numeric code and date has to be provided as mentioned in the table above',
-                '5. Total Monthly Wages should contain the sum of all the wages earned by the Employee from the Employer',
-                '6. If any IP has left the Employer or Expired, the last working day must be filled in the applicable date format (dd/mm/yyyy)',
-                '7. Days for which the employee has worked must include Sundays, Weekly Off Days & Paid Holidays that fall in between the working days',
-                '8. In case the employee has not worked for entire month, enter No. of days as 0 and Total Monthly Wages as 0 and select appropriate reason',
-                '9. If reason is not filled against zero wage employee then system will take it as \"Without Reason\"',
-                '10. If the employee has joined in the middle of the month, No. of days should be from date of joining to the last day of the month (including Sundays, weekly offs and paid holidays)',
-                '11. IP Number must exactly match the IP Number allotted by ESIC and available in the portal. Any mismatch will result in rejection of the record',
-            ];
-            instructions.forEach(text => {
-                const row = ws2.addRow([text,'','','','','']);
-                row.getCell(1).alignment = { wrapText: true, vertical: 'top' };
-            });
-
-            // Write to blob and download
-            const buf = await wb.xlsx.writeBuffer();
-            const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            const ws = XLSX.utils.aoa_to_sheet([header, ...dataRows]);
+            ws['!cols'] = [{wch:14},{wch:28},{wch:22},{wch:14},{wch:30},{wch:20}];
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
             const fileName = `ESIC_Contribution_${year}${String(month).padStart(2,'0')}.xlsx`;
-            const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-            a.download = fileName; a.click(); URL.revokeObjectURL(a.href);
+            XLSX.writeFile(wb, fileName);
 
             let msg = `ESIC file downloaded: ${fileName}\n\n`;
             msg += `Included: ${dataRows.length} staff | Days: ${calDays} (calendar days, ${monthLabel})\n\n`;
@@ -24110,11 +23992,14 @@
 
             const rows = rated.map(r => {
                 const fmtAmt = n => '₹' + (+n).toLocaleString('en-IN', {minimumFractionDigits:0});
+                const _psApproved = !settings.payslipEditUnlocked && (payslips||[]).find(p => p.staffID === r.st.staffID && +p.periodMonth === +month && +p.periodYear === +year && (p.type === (r.st.staffType==='Technician'?'tech':'office')) && p.approved);
                 const applyBtn = r.incentiveAmt > 0
-                    ? `<button onclick="applyPunctualityIncentive('${r.st.staffID}','${r.st.name}',${r.incentiveAmt},${month},${year})"
+                    ? (_psApproved
+                        ? `<span class="px-3 py-1 text-xs font-semibold rounded-lg bg-gray-200 text-gray-500 whitespace-nowrap inline-block" title="Payslip already approved for this period">✅ Applied</span>`
+                        : `<button onclick="applyPunctualityIncentive('${r.st.staffID}','${r.st.name}',${r.incentiveAmt},${month},${year})"
                         class="px-3 py-1 text-xs font-semibold rounded-lg bg-green-600 text-white hover:bg-green-700 whitespace-nowrap"
                         title="Pre-fills this amount in the payslip generation modal — you confirm before saving">
-                        ✓ Apply ${fmtAmt(r.incentiveAmt)} to Payslip</button>`
+                        ✓ Apply ${fmtAmt(r.incentiveAmt)} to Payslip</button>`)
                     : `<span class="text-xs text-gray-400 italic">—</span>`;
                 return `<tr class="border-b hover:bg-amber-50">
                     <td class="px-3 py-2 text-sm font-medium">${r.st.name}</td>
@@ -26278,24 +26163,16 @@ ${'─'.repeat(50)}
                              extends automatically since skipped months don't
                              consume installment slots. -->
                         <div>
-                            <label class="block text-[10px] font-semibold text-gray-600 mb-0.5">⏸️ Pause EMI <span class="font-normal text-gray-400">(optional)</span></label>
+                            <label class="block text-[10px] font-semibold text-gray-600 mb-0.5">⏸️ Pause EMI Until <span class="font-normal text-gray-400">(optional)</span></label>
                             <div class="flex gap-1 items-center">
-                                <div class="flex-1">
-                                    <label class="text-[9px] text-gray-500">From</label>
-                                    <input type="month" value="${l.pauseFrom || ''}"
-                                        onchange="updateStaffLoanField(${idx},'pauseFrom',this.value)"
-                                        class="w-full px-2 py-1 border rounded text-xs" />
-                                </div>
-                                <div class="flex-1">
-                                    <label class="text-[9px] text-gray-500">To</label>
-                                    <input type="month" value="${l.pauseUntil || ''}"
-                                        onchange="updateStaffLoanField(${idx},'pauseUntil',this.value)"
-                                        class="w-full px-2 py-1 border rounded text-xs" />
-                                </div>
-                                ${(l.pauseFrom || l.pauseUntil) ? `<button onclick="updateStaffLoanField(${idx},'pauseFrom','');updateStaffLoanField(${idx},'pauseUntil','');updateStaffLoanField(${idx},'pauseReason','')" class="text-[10px] text-red-600 hover:underline px-1 mt-3" title="Resume EMI deductions">✕ Clear</button>` : ''}
+                                <input type="month" value="${l.pauseUntil || ''}"
+                                    onchange="updateStaffLoanField(${idx},'pauseUntil',this.value)"
+                                    class="flex-1 px-2 py-1 border rounded text-xs"
+                                    placeholder="YYYY-MM" />
+                                ${l.pauseUntil ? `<button onclick="updateStaffLoanField(${idx},'pauseUntil','');updateStaffLoanField(${idx},'pauseReason','')" class="text-[10px] text-red-600 hover:underline px-1" title="Resume EMI deductions">✕ Clear</button>` : ''}
                             </div>
-                            ${(l.pauseFrom || l.pauseUntil) ? `<input type="text" value="${(l.pauseReason||'').replace(/"/g,'&quot;')}" placeholder="Reason for pause (e.g. employee request, partial repayment instead)" onchange="updateStaffLoanField(${idx},'pauseReason',this.value)" class="w-full mt-1 px-2 py-1 border rounded text-xs" />
-                            <p class="text-[9px] text-amber-600 mt-0.5">⏸️ EMI paused ${l.pauseFrom || '?'} → ${l.pauseUntil || '?'} — no salary deduction in this range. Manual repayments still reduce balance.</p>` : ''}
+                            ${l.pauseUntil ? `<input type="text" value="${(l.pauseReason||'').replace(/"/g,'&quot;')}" placeholder="Reason for pause (e.g. employee request, partial repayment instead)" onchange="updateStaffLoanField(${idx},'pauseReason',this.value)" class="w-full mt-1 px-2 py-1 border rounded text-xs" />
+                            <p class="text-[9px] text-amber-600 mt-0.5">⏸️ EMI paused — no salary deduction until ${l.pauseUntil}. Manual repayments still reduce balance.</p>` : ''}
                         </div>
                     </div>
                     <div class="grid grid-cols-4 gap-2 text-[11px] mb-2">
@@ -31033,8 +30910,7 @@ Automated WFH alert — ${company} Attendance System.`;
             if(c.addlAllow>0)earRows.push([(op.addlAllowanceRemark?'Additional: '+op.addlAllowanceRemark:'Additional Allow.'),INR(c.addlAllow)]);
             earRows.push([{content:'GROSS EARNINGS',styles:{fontStyle:'bold',fillColor:[224,242,254],textColor:[15,23,72]}},{content:INR(c.gross),styles:{fontStyle:'bold',fillColor:[186,230,253],textColor:[15,23,72]}}]);
             const dedRows=[];
-            const _pdfPfAmended = _isPostPFAmendment(op.periodMonth, op.periodYear);
-            const pfLbl=c.pfCapped?`PF ${c.pfPct}% (Gross ₹${Math.round(c.pfGross).toLocaleString('en-IN')} cap ₹15k)`:`PF ${c.pfPct}% (Gross−Variable ₹${Math.round(c.pfGross).toLocaleString('en-IN')}${_pdfPfAmended?' · No Cap w.e.f. Sep-2026':''})`;
+            const pfLbl=c.pfCapped?`PF ${c.pfPct}% (Gross ₹${Math.round(c.pfGross).toLocaleString('en-IN')} cap ₹15k)`:`PF ${c.pfPct}% (Gross ₹${Math.round(c.pfGross).toLocaleString('en-IN')})`;
             if(c.pfAmt>0)dedRows.push([pfLbl,INR(c.pfAmt)]);
             if(c.esicWaived)dedRows.push([`ESIC – NIL (Gross excl. Variable INR ${Math.round(c.grossExclVar).toLocaleString('en-IN')} > INR 20,000)`,'—']);
             else if(c.esicAmt>0)dedRows.push([`ESIC – 0.75% of Gross excl. Variable INR ${Math.round(c.grossExclVar).toLocaleString('en-IN')}`,INR(c.esicAmt)]);
@@ -31493,10 +31369,12 @@ Automated WFH alert — ${company} Attendance System.`;
             // Statutory (employer side — added to CTC)
             const pfPct = +(g(isTech ? 'techPFPct' : 'pfPct') ?? 12);
             const pfBase = isTech ? (basic + fixedAllow) : (basic + hra + da + medical + conveyance + gp);
-            // PF Amendment w.e.f. Sep 2026: Office PF has NO CAP.
-            // Technician PF has no cap either (full Basic+Fixed base).
-            // CTC uses current rule — no capping for either staff type.
-            const pfCappedBase = pfBase;
+            // PF cap of ₹15,000/month applies to OFFICE staff only (matches
+            // _calcOfficePF at line 1811). TECHNICIAN PF has no cap — the
+            // full base is used (matches _calcTechPF at line 1816). Same
+            // convention as the existing wage code so CTC numbers reconcile
+            // with monthly payslips.
+            const pfCappedBase = isTech ? pfBase : (pfBase > 15000 ? 15000 : pfBase);
             const pfEmployee = +(pfCappedBase * pfPct / 100).toFixed(2);
             // Employer PF = employee's PF% (12% match — 8.33% EPS + 3.67% EPF)
             // + 1% admin/EDLI (0.5% EDLI + 0.5% admin — fixed statutory).
@@ -31745,7 +31623,7 @@ Automated WFH alert — ${company} Attendance System.`;
                 ` : `<div style="margin-top:16px;padding:10px 14px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;color:#64748b;font-size:12px;text-align:center">Edit any input above to simulate a revision. When you're happy with the numbers, click <b>📄 Approval PDF</b> at the top-right to prepare the management document.</div>`}
 
                 <div style="margin-top:12px;font-size:10px;color:#94a3b8;text-align:center">
-                    Notes: (1) Employer PF = employee PF% + admin/EDLI (statutory). From Sep 2026: EPFO wage ceiling ₹25K; Office PF no cap; Technician PF unchanged. (2) Bonus accrual = Basic÷10 annual ÷ 12 months. (3) Field-day allowances and OT are per-day rates — actual monthly impact depends on the technician's attendance for that month.
+                    Notes: (1) Employer PF = employee PF% + 1% admin/EDLI (statutory). PF-base capped at ₹15,000 for OFFICE staff only; technician PF has no cap (matches monthly payslip logic). (2) Bonus accrual = Basic÷10 annual ÷ 12 months. (3) Field-day allowances and OT are per-day rates — actual monthly impact depends on the technician's attendance for that month.
                 </div>
             `;
         }
@@ -31943,7 +31821,6 @@ Automated WFH alert — ${company} Attendance System.`;
                                         ${isTech ? '<th style="padding:8px;text-align:right;color:#0c4a6e;font-size:11px">HRA%</th><th style="padding:8px;text-align:right;color:#0c4a6e;font-size:11px">DA%</th><th style="padding:8px;text-align:right;color:#0c4a6e;font-size:11px">GP%</th><th style="padding:8px;text-align:right;color:#0c4a6e;font-size:11px">Variable</th>' : '<th style="padding:8px;text-align:right;color:#0c4a6e;font-size:11px">HRA%</th><th style="padding:8px;text-align:right;color:#0c4a6e;font-size:11px">DA%</th><th style="padding:8px;text-align:right;color:#0c4a6e;font-size:11px">Grade Pay</th><th style="padding:8px;text-align:right;color:#0c4a6e;font-size:11px">Variable</th>'}
                                         <th style="padding:8px;text-align:left;color:#0c4a6e;font-size:11px">Reason</th>
                                         <th style="padding:8px;text-align:left;color:#0c4a6e;font-size:11px">By</th>
-                                        <th style="padding:8px;text-align:center;color:#0c4a6e;font-size:11px">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -31964,10 +31841,6 @@ Automated WFH alert — ${company} Attendance System.`;
                                             `}
                                             <td style="padding:8px;color:#64748b;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.reason||'').replace(/"/g,'&quot;')}">${(r.reason||'—').substring(0,40)}</td>
                                             <td style="padding:8px;font-size:10px;color:#64748b">${r.recordedBy||'—'}<br/>${(r.recordedAt||'').substring(0,10)}</td>
-                                            <td style="padding:8px;text-align:center;white-space:nowrap">
-                                                <button onclick="document.getElementById('wageTimelineModal').remove();{const _st=staff.find(s=>s.staffID==='${st.staffID}');const _rv=(_st?.wageRevisions||[]).find(r=>r.revID==='${r.revID}');if(_rv)openWageModal('${st.staffID}',_rv);}" style="color:#2563eb;background:none;border:none;cursor:pointer;font-size:11px;text-decoration:underline;margin-right:6px" title="Edit this revision">✏️ Edit</button>
-                                                <button onclick="if(confirm('Delete revision ${r.effectiveDate||''}?')){document.getElementById('wageTimelineModal').remove();deleteWageRevision('${st.staffID}','${r.revID}')}" style="color:#dc2626;background:none;border:none;cursor:pointer;font-size:11px;text-decoration:underline" title="Delete this revision">🗑 Delete</button>
-                                            </td>
                                         </tr>
                                     `).join('')}
                                 </tbody>
