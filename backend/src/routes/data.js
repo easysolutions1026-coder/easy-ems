@@ -612,27 +612,33 @@ router.post('/:collection', async (req, res) => {
       }
 
       // Delete rows removed by client
-      const existing = await delegate.findMany({ select: { [idField]: true } });
-      const toDelete = existing.map(r => r[idField]).filter(id => !seenIds.has(String(id)));
+      // Skip delete phase for append-heavy collections where the client may
+      // hold only a partial dataset (e.g. field app loads one project's expenses).
+      // Without this guard, a partial save wipes rows the client never loaded.
+      const UPSERT_ONLY = ['projectExpenses', 'workLogs'];
+      if (!UPSERT_ONLY.includes(name)) {
+        const existing = await delegate.findMany({ select: { [idField]: true } });
+        const toDelete = existing.map(r => r[idField]).filter(id => !seenIds.has(String(id)));
 
-      if (toDelete.length) {
-        // SAFETY GUARD 2: refuse bulk deletes above 50% threshold unless confirmed.
-        // Prevents accidental wipes when the client sends a partial dataset.
-        const existingCount = existing.length;
-        const deleteRatio = toDelete.length / existingCount;
-        if (deleteRatio > 0.5 && req.query.confirmBulkDelete !== 'true') {
-          throw new Error(
-            `REFUSED_BULK_DELETE: Would delete ${toDelete.length}/${existingCount} rows ` +
-            `(${(deleteRatio * 100).toFixed(0)}%). Add ?confirmBulkDelete=true to proceed.`
-          );
-        }
-        await delegate.deleteMany({ where: { [idField]: { in: toDelete } } });
-        for (const id of toDelete) {
-          try {
-            await tx.changeEvent.create({
-              data: { collection: name, recordId: String(id), operation: 'DELETE', userEmail },
-            });
-          } catch (e) {}
+        if (toDelete.length) {
+          // SAFETY GUARD 2: refuse bulk deletes above 50% threshold unless confirmed.
+          // Prevents accidental wipes when the client sends a partial dataset.
+          const existingCount = existing.length;
+          const deleteRatio = toDelete.length / existingCount;
+          if (deleteRatio > 0.5 && req.query.confirmBulkDelete !== 'true') {
+            throw new Error(
+              `REFUSED_BULK_DELETE: Would delete ${toDelete.length}/${existingCount} rows ` +
+              `(${(deleteRatio * 100).toFixed(0)}%). Add ?confirmBulkDelete=true to proceed.`
+            );
+          }
+          await delegate.deleteMany({ where: { [idField]: { in: toDelete } } });
+          for (const id of toDelete) {
+            try {
+              await tx.changeEvent.create({
+                data: { collection: name, recordId: String(id), operation: 'DELETE', userEmail },
+              });
+            } catch (e) {}
+          }
         }
       }
     }, { timeout: 30000 });
