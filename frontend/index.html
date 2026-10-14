@@ -17784,10 +17784,74 @@
                 }
             }
 
+            // ── Sheet1: Data ──
             const ws = XLSX.utils.aoa_to_sheet([header, ...dataRows]);
-            ws['!cols'] = [{wch:14},{wch:28},{wch:22},{wch:14},{wch:30},{wch:20}];
+            // Match portal template column widths
+            ws['!cols'] = [{wch:17},{wch:32},{wch:28},{wch:26},{wch:31},{wch:28}];
+            // Force ALL cells to Text format (@) — portal requires this
+            const range = XLSX.utils.decode_range(ws['!ref']);
+            for (let R = range.s.r; R <= range.e.r; R++) {
+                for (let C = range.s.c; C <= range.e.c; C++) {
+                    const addr = XLSX.utils.encode_cell({r:R,c:C});
+                    if (!ws[addr]) continue;
+                    ws[addr].t = 's'; // string type
+                    ws[addr].z = '@'; // text number format
+                }
+            }
+            // Header row bold
+            for (let C = range.s.c; C <= range.e.c; C++) {
+                const addr = XLSX.utils.encode_cell({r:0,c:C});
+                if (ws[addr]) ws[addr].s = { font: { bold: true } };
+            }
+
+            // ── Sheet2: Instructions & Reason Codes (portal template) ──
+            const instrData = [
+                [],
+                ['Reason', 'Code', 'Note'],
+                ['Without Reason', 0, 'Leave last working day as blank'],
+                ['On Leave', 1, 'Leave last working day as blank'],
+                ['Left Service', 2, 'Please provide last working day (dd/mm/yyyy). IP will not appear from next wage period'],
+                ['Retired', 3, 'Please provide last working day (dd/mm/yyyy). IP will not appear from next wage period'],
+                ['Out of Coverage', 4, 'Please provide last working day (dd/mm/yyyy). IP will not appear from next contribution period. This option is valid only if Wage Period is April/October. In case any other month then IP will continue to appear in the list'],
+                ['Expired', 5, 'Please provide last working day (dd/mm/yyyy). IP will not appear from next wage period'],
+                ['Non Implemented area', 6, 'Please provide last working day (dd/mm/yyyy). '],
+                ['Compliance by Immediate Employer', 7, 'Leave last working day as blank'],
+                ['Suspension of work', 8, 'Leave last working day as blank'],
+                ['Strike/Lockout', 9, 'Leave last working day as blank'],
+                ['Retrenchment', 10, 'Please provide last working day (dd/mm/yyyy). IP will not appear from next wage period'],
+                ['No Work', 11, 'Leave last working day as blank'],
+                ['Doesnt Belong To This Employer', 12, 'Leave last working day as blank'],
+                ['Duplicate IP', 13, 'Leave last working day as blank'],
+                [],
+                ['Click Here to Go back to Data Entry Page'],
+                [],
+                ['Instructions to fill in the excel file: '],
+                ['1. Enter the IP number,  IP name, No. of Days, Total Monthly Wages, Reason for 0 wages(If Wages \'0\') & Last Working Day( only if employee \n     has left service, Retired, Out of coverage, Expired, Non-Implemented area or Retrenchment. For other reasons,  last working day  must be left  BLANK).  '],
+                ['2. Number of days must me a whole number.  Fractions should be rounded up to next higher whole number/integer'],
+                ['3. Excel sheet upload will lead to successful transaction only when all the Employees\' (who are currently mapped in the system) details\n      are entered perfectly in the excel sheet'],
+                ['4. Reasons are to be assigned numeric code  and date has to be provided as mentioned in the table above'],
+                ['5. Once  0 wages given and last working day is mentioned as in reason codes (2,3,4,5,10)  IP will be removed from the employer\'s record. Subsequent months will not have this IP listed under the employer. Last working day should be mentioned only if \'Number of days wages paid/payable\' is \'0\'.'],
+                ['6. In case IP has worked for part of the month(i.e. atleast 1 day wage is paid/payable) and left in between of the month, then last working day shouldn\'t be mentioned.'],
+                ['7. Calculations – IP Contribution and Employer contribution calculation will be automatically done by the system'],
+                ['8. Date  column format is  dd/mm/yyyy or dd-mm-yyyy.  Pad single digit dates with 0.  Eg:- 2/5/2010  or  2-May-2010 is NOT acceptable.  Correct format  is 02/05/2010  \n    or 02-05-2010'],
+                ['9. Excel file should be saved in .xls format (Excel 97-2003)'],
+                ['10. Note that all the column including date column should be in \'Text\' format'],
+                ['10a. To convert  all columns to text,'],
+                ['      a.  Select column A; Click Data in Menu Bar on top;  Select Text to Columns ; Click Next (keep default selection of Delimited);  Click \n           Next (keep default selection of Tab); Select  TEXT;  Click FINISH.  Excel 97 – 2003 as well have TEXT to COLUMN  conversion\n            facility'],
+                ['      b.  Repeat the above step for each of the 6 columns. (Columns A – F )'],
+                ['10b.   Another method that can be used to text conversion is – copy the column with data and paste it in NOTEPAD.  Select the column (in \n        excel) and convert to text. Copy the data back from notepad to excel'],
+                ['11.   If problem continues while upload,  download a fresh template by clicking \'Sample MC Excel Template\'. Then copy the data area from \n       Step 8a.a – eg:  copy Cell A2 to F8 (if there is data in 8 rows); Paste it in cell A2 in the fresh template. Upload it '],
+                [],
+                ['Note :   Kindly turn  OFF   \'POP UP BLOCKER\'  if it is ON in your  browser.  Follow the steps given to turn off  pop up blocker . \n                 This  is required to  upload Monthly contribution,  view or print  Challan /  TIC after uploading the excel   '],
+                ['              1.Mozilla Firefox  3.5.11 :  From Menu Bar, select   Tools à Options à Content à Uncheck (remove tick mark)\n                       \'Block Popup Windows\'.   Click OK'],
+                ['              2.  IE 7.0  :     From Menu Bar, select  Tools à Pop up Blocker à Turn Off Pop up Blocker ']
+            ];
+            const ws2 = XLSX.utils.aoa_to_sheet(instrData);
+            ws2['!cols'] = [{wch:40},{wch:10},{wch:80}];
+
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+            XLSX.utils.book_append_sheet(wb, ws2, 'Instructions & Reason Codes');
             const fileName = `ESIC_Contribution_${year}${String(month).padStart(2,'0')}.xlsx`;
             XLSX.writeFile(wb, fileName);
 
