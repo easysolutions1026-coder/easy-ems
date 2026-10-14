@@ -242,6 +242,7 @@
             white-space: nowrap;
         }
         #toast.show { opacity: 1; }
+        #toast.error { background: #dc2626; font-weight: 600; white-space: normal; max-width: 90vw; text-align: center; }
 
         /* ── BOTTOM NAV ─────────────────────────────────────────── */
         #bottomNav {
@@ -1325,10 +1326,21 @@
         const form = new FormData();
         form.append('metadata', new Blob([JSON.stringify({})], { type: 'application/json' }));
         form.append('file', blob);
-        const r = await fetch(
-            `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart&supportsAllDrives=true`,
-            { method: 'PATCH', headers: { Authorization: `Bearer ${accessToken}` }, body: form }
-        );
+        // 15-second timeout — unstable connections should fail fast, not hang silently
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000);
+        let r;
+        try {
+            r = await fetch(
+                `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart&supportsAllDrives=true`,
+                { method: 'PATCH', headers: { Authorization: `Bearer ${accessToken}` }, body: form, signal: controller.signal }
+            );
+        } catch(e) {
+            clearTimeout(timeout);
+            if (e.name === 'AbortError') throw new Error('Connection unstable — save timed out. Please try again.');
+            throw new Error('Connection failed — please check your network and try again.');
+        }
+        clearTimeout(timeout);
         if (!r.ok) {
             // Drive sometimes returns a non-OK response while the write HAS committed
             // (especially under poll contention or transient 5xx). Before throwing,
@@ -1701,6 +1713,7 @@
         }
     }
     async function saveFundRequests(lastReq) {
+        let backendOk = false, driveOk = false;
         // Save to backend (Cloud SQL) — primary
         if (lastReq && lastReq.requestID) {
             try {
@@ -1709,7 +1722,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(lastReq)
                 });
-                if (resp.ok) console.log('[Fund] Request saved to backend:', lastReq.requestID);
+                if (resp.ok) { console.log('[Fund] Request saved to backend:', lastReq.requestID); backendOk = true; }
                 else console.warn('[Fund] Backend save failed:', await resp.text());
             } catch(e) { console.warn('[Fund] Backend save error:', e.message); }
         }
@@ -1719,7 +1732,11 @@
             try {
                 await writeFile(id, fundRequests);
                 try { _concurMarkLocalSave('fundRequests'); } catch(e) {}
+                driveOk = true;
             } catch(e) { console.warn('[Fund] Drive save fallback failed:', e.message); }
+        }
+        if (!backendOk && !driveOk) {
+            showToast('⚠️ Fund request not saved — connection unstable, please try again', 4000);
         }
     }
 
@@ -1984,6 +2001,11 @@
 
     async function saveData(type, data) {
         if (!accessToken) { showToast('Session expired — please sign in again'); handleSignOut(); return; }
+        // ── Network connectivity pre-check ──
+        if (!navigator.onLine) {
+            showToast('⚠️ No internet connection — please check your network and try again', 4000);
+            throw new Error('No internet connection');
+        }
         const idMap = {
             projectExpenses: SHARED_FILE_IDS.projectExpenses,
             workLogs:        SHARED_FILE_IDS.workLogs
@@ -2031,8 +2053,11 @@
     // ── TOAST ─────────────────────────────────────────────────────
     function showToast(msg, duration = 2500) {
         const t = document.getElementById('toast');
-        t.textContent = msg; t.classList.add('show');
-        setTimeout(() => t.classList.remove('show'), duration);
+        t.textContent = msg;
+        // Red background for warnings/errors so they stand out
+        if (msg.startsWith('⚠')) { t.classList.add('error'); } else { t.classList.remove('error'); }
+        t.classList.add('show');
+        setTimeout(() => { t.classList.remove('show'); t.classList.remove('error'); }, duration);
     }
 
     // ── Double-submit guard ───────────────────────────────────────
@@ -3817,10 +3842,14 @@
             remarks
         });
 
-        await saveData('projectExpenses', projectExpenses);
-        closeTransferModal();
-        renderView();
-        showToast(`✅ ₹${amount.toLocaleString('en-IN',{minimumFractionDigits:2})} transferred from ${fromName} to ${toName}`);
+        try {
+            await saveData('projectExpenses', projectExpenses);
+            closeTransferModal();
+            renderView();
+            showToast(`✅ ₹${amount.toLocaleString('en-IN',{minimumFractionDigits:2})} transferred from ${fromName} to ${toName}`);
+        } catch(err) {
+            showToast('⚠️ Transfer failed — ' + (err.message || 'please check your connection and try again'), 4000);
+        }
     }
 
     // ── EXPENSE ITEM CRUD ─────────────────────────────────────────
@@ -5324,11 +5353,15 @@
         }
         // Bubble lastModified up to parent dailyEntry — the calibration is part of it
         _stampRecord(workLogs[wlIdx].dailyEntries[ei]);
-        await saveData('workLogs', workLogs);
-        _concurEndEdit();
-        closeCalibModal();
-        renderView();
-        showToast('✅ Calibration record saved');
+        try {
+            await saveData('workLogs', workLogs);
+            _concurEndEdit();
+            closeCalibModal();
+            renderView();
+            showToast('✅ Calibration record saved');
+        } catch(err) {
+            showToast('⚠️ Save failed — ' + (err.message || 'please check your connection and try again'), 4000);
+        }
     }
 
     // ── Copy Calibration Table to Another Daily Entry ─────────────────
@@ -5810,9 +5843,13 @@
         _stampRecord(obj);
         if(_editWlID){const i=workLogs.findIndex(x=>x.wlID===_editWlID);if(i>=0)workLogs[i]=obj;else workLogs.push(obj);}
         else workLogs.push(obj);
-        await saveData('workLogs',workLogs);
-        _concurEndEdit();
-        closeWlModal();renderView();showToast('✅ Work log saved');
+        try {
+            await saveData('workLogs',workLogs);
+            _concurEndEdit();
+            closeWlModal();renderView();showToast('✅ Work log saved');
+        } catch(err) {
+            showToast('⚠️ Save failed — ' + (err.message || 'please check your connection and try again'), 4000);
+        }
     }
 
     async function deleteWorkLog(id){
@@ -6546,8 +6583,14 @@
                 body: JSON.stringify(workLogs)
             });
             if (res.ok) console.log('[CloudSQL] workLogs synced (attachment update)');
-            else console.warn('[CloudSQL] workLogs sync failed:', res.status, await res.text().catch(()=>''));
-        } catch (e) { console.warn('[CloudSQL] workLogs sync error:', e.message); }
+            else {
+                console.warn('[CloudSQL] workLogs sync failed:', res.status);
+                showToast('⚠️ Cloud sync failed — data saved to Drive but may not appear in main app immediately', 4000);
+            }
+        } catch (e) {
+            console.warn('[CloudSQL] workLogs sync error:', e.message);
+            showToast('⚠️ Cloud sync failed — data saved to Drive but may not appear in main app immediately', 4000);
+        }
     }
 
     async function saveKickOff(ev) {
@@ -6572,11 +6615,15 @@
         koData.updatedAt = new Date().toISOString();
         koData.updatedBy = currentUser?.name || currentUser?.email || 'Field App';
         workLogs[wi].kickOffRecord = koData;
-        await saveData('workLogs', workLogs);
-        _syncWorkLogToCloudSQL(wlID);
-        closeKickOffModal();
-        renderView();
-        showToast('✅ Kick-Off Record saved');
+        try {
+            await saveData('workLogs', workLogs);
+            _syncWorkLogToCloudSQL(wlID);
+            closeKickOffModal();
+            renderView();
+            showToast('✅ Kick-Off Record saved');
+        } catch(err) {
+            showToast('⚠️ Save failed — ' + (err.message || 'please check your connection and try again'), 4000);
+        }
     }
 
     async function printKickOffFromForm() {
@@ -6692,11 +6739,15 @@
         gwData.updatedAt = new Date().toISOString();
         gwData.updatedBy = currentUser?.name || currentUser?.email || 'Field App';
         workLogs[wi].growthOfWorkReport = gwData;
-        await saveData('workLogs', workLogs);
-        _syncWorkLogToCloudSQL(wlID);
-        closeGrowthRWModal();
-        renderView();
-        showToast('✅ Growth of Work Report saved');
+        try {
+            await saveData('workLogs', workLogs);
+            _syncWorkLogToCloudSQL(wlID);
+            closeGrowthRWModal();
+            renderView();
+            showToast('✅ Growth of Work Report saved');
+        } catch(err) {
+            showToast('⚠️ Save failed — ' + (err.message || 'please check your connection and try again'), 4000);
+        }
     }
 
     async function printGrowthRWFromForm() {
