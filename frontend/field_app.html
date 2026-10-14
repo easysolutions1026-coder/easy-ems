@@ -8154,7 +8154,7 @@
         if (data.medical) earnings.push({ label: 'Medical', amt: data.medical });
         earnings.push({ label: 'Bonus (Basic/10)', amt: data.bonus });
         if (data.variable) earnings.push({ label: 'Variable', amt: data.variable });
-        if (data.addlAllow) earnings.push({ label: 'Additional Allowance', amt: data.addlAllow });
+        if (data.addlAllow) earnings.push({ label: data.addlAllowRemark || 'Additional Allowance', amt: data.addlAllow });
 
         const earningsHTML = earnings.map(function(e) {
             return '<div style="display:flex;justify-content:space-between;padding:6px 10px;border-top:1px solid #f3f4f6;font-size:11px">'

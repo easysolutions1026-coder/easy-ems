@@ -604,6 +604,25 @@ techRouter.post('/payslip-compute', async (req, res) => {
 
     } else {
       // ── OFFICE STAFF SALARY COMPUTATION ──
+
+      // ── Look up saved/approved payslip for addlAllowance (e.g. Punctuality Incentive) ──
+      let savedAddlAllowance = 0;
+      let savedAddlAllowanceRemark = '';
+      try {
+        const savedPayslip = await prisma.payslip.findFirst({
+          where: { staffID, periodMonth: pMonth, periodYear: pYear },
+        });
+        if (savedPayslip && savedPayslip.data) {
+          const d = savedPayslip.data;
+          // The snapshot stores the computed payslip state from the main app
+          const snap = d.snapshot || d;
+          if (snap.addlAllowance)       savedAddlAllowance       = +snap.addlAllowance || 0;
+          if (snap.addlAllowanceRemark) savedAddlAllowanceRemark = snap.addlAllowanceRemark;
+        }
+      } catch (e) {
+        console.error('[payslip-compute] payslip lookup error:', e.message);
+      }
+
       const op = {
         periodMonth: pMonth,
         periodYear: pYear,
@@ -612,13 +631,19 @@ techRouter.post('/payslip-compute', async (req, res) => {
         ptBase: null,      // auto
         tdsAmt: null,      // auto from wage revision
         leaveTaken: 0,     // auto from ledger
-        addlAllowance: 0,
+        addlAllowance: savedAddlAllowance,
+        addlAllowanceRemark: savedAddlAllowanceRemark,
         addlDeduction: 0,
         lateDedAmt: null,  // auto from late summary
         _useManualLeave: false,
       };
 
       const result = computeOfficeSalary(st, op, settings);
+
+      // Include the addl allowance remark so field app can show it
+      if (savedAddlAllowanceRemark && result.addlAllow > 0) {
+        result.addlAllowRemark = savedAddlAllowanceRemark;
+      }
 
       res.json({
         ok: true,
